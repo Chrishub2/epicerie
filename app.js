@@ -11,7 +11,9 @@ import { vueRecettes } from './recettes.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
-import { lirePrixPhoto } from './ocr.js';
+import { lirePrixPhoto, brancherIA } from './ocr.js';
+import * as Sync from './sync.js';
+import { ouvrirListeManuscrite, photoEnMagasin } from './manuscrit.js';
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 
 let onglet = 'liste';
@@ -21,18 +23,40 @@ let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répa
 // Démarrage
 // ---------------------------------------------------------------------
 S.charger();
-const e0 = S.get();
 const choix = $('#choixMembre');
-choix.innerHTML = e0.membres.map((m) => `<option ${m === e0.utilisateur ? 'selected' : ''}>${esc(m)}</option>`).join('');
 choix.onchange = () => S.maj((e) => { e.utilisateur = choix.value; });
+
+/** En-tête : membre actif (connecté : son prénom, sans choix) et bandeau d'état. */
+function majEntete() {
+  const e = S.get();
+  const st = Sync.etatSync();
+  if (st.foyer) {
+    choix.innerHTML = `<option>${esc(e.utilisateur)}</option>`; choix.disabled = true;
+  } else {
+    choix.disabled = false;
+    choix.innerHTML = e.membres.map((m) => `<option ${m === e.utilisateur ? 'selected' : ''}>${esc(m)}</option>`).join('');
+  }
+  const b = $('#bandeauDemo');
+  if (st.foyer) {
+    b.classList.add('ok');
+    b.textContent = `👪 Partagé avec « ${st.foyer.nom} » · ${st.enLigne ? 'synchronisé' : '📵 hors ligne : envoi au retour du réseau'}`;
+  } else {
+    b.classList.remove('ok');
+    b.textContent = st.connecte ? 'Connecté : crée ou joins ton foyer dans Plus → Mon foyer.'
+      : 'Données gardées sur ce téléphone seulement. Plus → Mon foyer pour partager la liste et activer l\'IA.';
+  }
+}
 
 $$('#onglets button').forEach((b) => b.onclick = () => { onglet = b.dataset.onglet; rendre(); });
 S.abonner(() => rendre());
+Sync.surChangement(() => rendre());
 queueMicrotask(rendre); // après l'évaluation complète du module
 setTimeout(async () => {
+  await Sync.initialiser().catch(() => {});   // connexion + partage (si déjà connecté)
+  brancherIA(Sync.lireAvecIA);                // l'IA lit les photos quand le foyer est connecté
   await traiterFile().catch(() => {});        // photos prises hors ligne
   await actualiserTout().catch(() => {});     // vrais prix des produits liés (max 1 fois / 12 h)
-}, 1500);
+}, 300);
 
 // ---------------------------------------------------------------------
 // Tirer l'écran vers le bas (en haut de page) = tout mettre à jour
@@ -70,6 +94,7 @@ setTimeout(async () => {
 })();
 
 export function rendre() {
+  majEntete();
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
   const v = $('#vue');
   if (onglet === 'liste') vueListe(v);
@@ -218,6 +243,7 @@ function htmlItem(l, a) {
       <div class="info">${meilleur}</div>
       <div class="info">${esc(formatLisible(a.format) || '')}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
     </div>
+    ${!m && !a.liens?.length && !l.coche ? `<button class="icone photo-mag" data-photomag="${a.id}" title="Photographier ce produit en magasin" aria-label="Photo en magasin">📷</button>` : ''}
     <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
   </div>`;
 }
@@ -301,7 +327,13 @@ function vueListe(v) {
   saisie.oninput = () => suggerer(saisie.value);
   $('#btnEntree').onclick = valider;
   $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); });
-  $('#btnPhoto').onclick = () => photoProduit();
+  $('#btnPhoto').onclick = () => ouvrirModale('Prendre une photo', `
+    <button class="btn" id="chListe" style="width:100%;margin-bottom:8px">📝 Une liste écrite à la main</button>
+    <button class="btn sec" id="chProduit" style="width:100%">📦 Un produit</button>
+    <p class="doux" style="margin-top:8px">Liste écrite : je la lis, j'ajoute ce que je reconnais dans ton historique, et je te propose les prix des bannières pour le reste.</p>`, (c) => {
+    $('#chListe', c).onclick = () => { fermerModale(); ouvrirListeManuscrite(); };
+    $('#chProduit', c).onclick = () => { fermerModale(); photoProduit(); };
+  });
   $('#choixMagasin')?.addEventListener('change', (ev) => S.maj((x) => { x.magasinCourant = ev.target.value; }));
   $('#btnReorg').onclick = () => ouvrirReorg(magFiltre?.id);
   $$('[data-action]', v).forEach((al) => {
@@ -329,6 +361,7 @@ function vueListe(v) {
       if (l.quantite === 0) x.liste = x.liste.filter((i) => i.id !== id);
     }));
     el.querySelectorAll('[data-fiche]').forEach((f) => f.onclick = () => ficheArticle(f.dataset.fiche, id));
+    el.querySelector('[data-photomag]')?.addEventListener('click', (ev) => { ev.stopPropagation(); photoEnMagasin(ev.currentTarget.dataset.photomag, id); });
   });
 }
 

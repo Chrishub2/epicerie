@@ -9,6 +9,7 @@ import { photographierRecu } from './camera.js';
 import { prendrePhoto } from './ocr.js';
 import { analyserOffre, analyserFormat } from './normalise.js';
 import { ajouterTache } from './attente.js';
+import * as Sync from './sync.js';
 
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
@@ -24,8 +25,11 @@ export function vuePlus(v) {
   if (section === 'recus') return vueRecus(v);
   if (section === 'releve') return vueReleve(v);
   if (section === 'apparence') return vueApparence(v);
+  if (section === 'foyer') return vueFoyer(v);
   const e = S.get();
+  const st = Sync.etatSync();
   const menu = [
+    ['foyer', '👪', 'Mon foyer et partage', st.foyer ? `Partagé · ${st.membres.length} membre(s)` : st.connecte ? 'Connecté — crée ou joins ton foyer' : 'Connecte-toi pour partager la liste et activer l\'IA'],
     ['releve', '🏷️', 'Relevé de prix en magasin', 'Photographie des étiquettes pour ton inventaire de prix, sans rien acheter'],
     ['recus', '🧾', 'Mes reçus', `${(e.recus || []).length} reçu(s) · prends-les en photo après l'épicerie`],
     ['cartes', '💳', 'Cartes fidélité & points', `${e.cartes.length} carte(s)`],
@@ -167,6 +171,83 @@ function vuePhotos(v) {
     const a = e.articles.find((x) => x.id === p.articleId);
     afficherPhoto({ ...p, note: a ? `${a.nom}${p.note ? ' · ' + p.note : ''}` : p.note }, g);
   });
+}
+
+// --- Mon foyer et partage ----------------------------------------------
+let courrielEnCours = '';
+function vueFoyer(v) {
+  const st = Sync.etatSync();
+  const e = S.get();
+  let html = retour();
+  if (!Sync.client()) {
+    html += `<div class="carte"><h2>Mon foyer</h2><p class="doux">📵 Pas de réseau : la connexion sera possible au retour du réseau.</p></div>`;
+  } else if (!st.connecte) {
+    html += `<div class="carte"><h2>Se connecter</h2>
+      <p class="doux">Ta liste sera partagée avec l'autre membre du foyer, en temps réel, et l'IA lira tes photos. Je t'envoie un <b>code à 6 chiffres</b> par courriel (pas de mot de passe).</p>
+      <div class="champ"><label>Ton courriel</label><input id="fCourriel" type="email" autocomplete="email" value="${esc(courrielEnCours)}" placeholder="toi@exemple.com"></div>
+      <button class="btn" id="fEnvoyer" style="width:100%">Recevoir mon code</button>
+      <div id="fCodeZone" class="${courrielEnCours ? '' : 'cache'}" style="margin-top:10px">
+        <div class="champ"><label>Code reçu par courriel</label><input id="fCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456"></div>
+        <button class="btn" id="fValider" style="width:100%">Me connecter</button>
+        <p class="doux">Pas de code dans le courriel, seulement un lien ? Ouvre le lien sur ce téléphone, puis reviens dans l'app.</p></div></div>`;
+  } else if (!st.foyer) {
+    html += `<div class="carte"><h2>Créer mon foyer</h2>
+      <p class="doux">Connecté : ${esc(st.courriel)}</p>
+      <div class="champ"><label>Ton prénom (affiché à l'autre membre)</label><input id="fPrenom" value="${esc(e.utilisateur || '')}"></div>
+      <div class="champ"><label>Nom du foyer</label><input id="fNomFoyer" value="Maison"></div>
+      <label class="item" style="cursor:pointer"><input type="checkbox" id="fGarder" checked><div class="grandir"><div class="nom">Garder les données de ce téléphone</div>
+        <div class="info">Décoche pour partir d'une liste vide, sans les données de démonstration (tes magasins et réglages sont gardés).</div></div></label>
+      <button class="btn" id="fCreer" style="width:100%;margin-top:8px">Créer mon foyer</button></div>
+      <div class="carte"><h2>Ou joindre un foyer</h2>
+      <p class="doux">L'autre membre trouve le code dans Plus → Mon foyer. Les données du foyer remplacent celles de ce téléphone.</p>
+      <div class="rang"><input id="fCodeFoyer" class="grandir" placeholder="Code d'invitation"><button class="btn" id="fJoindre">Joindre</button></div></div>
+      <button class="btn sec" id="fDeco" style="width:100%">Se déconnecter</button>`;
+  } else {
+    const derniere = st.dernier ? new Date(st.dernier).toLocaleString('fr-CA', { dateStyle: 'short', timeStyle: 'short' }) : 'jamais';
+    const enLigne = (e.photos || []).filter((p) => p.enLigne).length;
+    html += `<div class="carte"><h2>👪 ${esc(st.foyer.nom)}</h2>
+      <div class="doux">Membres : ${st.membres.map((m) => `<b>${esc(m.nom_affiche)}</b>`).join(', ')}</div>
+      <div class="doux">Dernière synchronisation : ${esc(derniere)} ${st.enLigne ? '' : '· 📵 hors ligne'}</div>
+      <h3 style="margin-top:12px">Inviter l'autre membre</h3>
+      <div class="rang"><code style="font-size:22px;letter-spacing:2px" class="grandir">${esc(st.foyer.code_invitation)}</code><button class="btn sec" id="fPartager">Partager</button></div>
+      <p class="doux">L'autre personne ouvre l'app, se connecte avec son courriel, puis entre ce code.</p>
+      <button class="btn" id="fSync" style="width:100%;margin-top:6px">🔄 Synchroniser maintenant</button></div>
+      <div class="carte"><h2>Photos</h2>
+      <p class="doux">${enLigne} photo(s) sauvegardée(s) dans la base. Tu peux les retirer du téléphone pour libérer de l'espace : elles se rechargent au besoin (avec réseau).</p>
+      <button class="btn sec" id="fLiberer" style="width:100%">🧹 Libérer l'espace sur ce téléphone</button></div>
+      <p class="doux">Connecté : ${esc(st.courriel)}</p>
+      <button class="btn sec" id="fDeco" style="width:100%">Se déconnecter</button>`;
+  }
+  v.innerHTML = html;
+  brancherRetour(v);
+  const erreur = (err) => toast(err?.message?.includes('Token has expired') ? 'Code expiré ou invalide : redemande un code' : `Erreur : ${err?.message || err}`);
+  $('#fEnvoyer', v)?.addEventListener('click', async () => {
+    courrielEnCours = $('#fCourriel', v).value.trim();
+    if (!/\S+@\S+\.\S+/.test(courrielEnCours)) { toast('Courriel invalide'); return; }
+    try { await Sync.envoyerCode(courrielEnCours); toast('Courriel envoyé : regarde ta boîte (et les indésirables)'); vueFoyer(v); } catch (err) { erreur(err); }
+  });
+  $('#fValider', v)?.addEventListener('click', async () => {
+    try { await Sync.validerCode(courrielEnCours, $('#fCode', v).value); courrielEnCours = ''; toast('Connecté ✓'); setTimeout(() => vueFoyer(v), 600); } catch (err) { erreur(err); }
+  });
+  $('#fCreer', v)?.addEventListener('click', async () => {
+    const prenom = $('#fPrenom', v).value.trim(); if (!prenom) { toast('Indique ton prénom'); return; }
+    try { await Sync.creerFoyer($('#fNomFoyer', v).value.trim() || 'Maison', prenom, $('#fGarder', v).checked); toast('Foyer créé ✓'); vueFoyer(v); } catch (err) { erreur(err); }
+  });
+  $('#fJoindre', v)?.addEventListener('click', async () => {
+    const prenom = prompt('Ton prénom (affiché à l\'autre membre) :', e.utilisateur || ''); if (!prenom) return;
+    if (!confirm('Les données du foyer vont remplacer celles de ce téléphone. Continuer ?')) return;
+    try { await Sync.joindreFoyer($('#fCodeFoyer', v).value, prenom); toast('Foyer joint ✓'); vueFoyer(v); } catch (err) { erreur(err); }
+  });
+  $('#fPartager', v)?.addEventListener('click', async () => {
+    const txt = `Rejoins notre liste d'épicerie : https://chrishub2.github.io/epicerie/ — Plus → Mon foyer → code ${st.foyer.code_invitation}`;
+    try { if (navigator.share) await navigator.share({ text: txt }); else { await navigator.clipboard.writeText(txt); toast('Invitation copiée'); } } catch { /* annulé */ }
+  });
+  $('#fSync', v)?.addEventListener('click', async () => { toast('Synchronisation…'); await Sync.synchroniserMaintenant(); vueFoyer(v); toast('À jour ✓'); });
+  $('#fLiberer', v)?.addEventListener('click', async () => {
+    if (!confirm('Retirer de ce téléphone les photos déjà sauvegardées en ligne ? Elles restent dans la base.')) return;
+    const n = await Sync.libererEspacePhotos(); toast(`${n} photo(s) retirée(s) du téléphone`);
+  });
+  $('#fDeco', v)?.addEventListener('click', async () => { if (confirm('Se déconnecter ? Les données restent sur ce téléphone.')) { await Sync.deconnecter(); vueFoyer(v); } });
 }
 
 // --- Apparence --------------------------------------------------------

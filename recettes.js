@@ -5,7 +5,7 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, meilleureOffre, toast } from './ui.js';
-import { prendrePhoto, lireTexte } from './ocr.js';
+import { prendrePhoto, lireTexte, lireRecetteIA } from './ocr.js';
 import { trouverArticle, assurerArticle, ajouterALaListe, sansAccents } from './app.js';
 import { afficherPhoto } from './plus.js';
 
@@ -152,6 +152,15 @@ function editeur(existante = null) {
     $('#rPhotoIngr', c).onclick = async () => {
       const blob = await prendrePhoto(); if (!blob) return;
       r.photoId = await S.enregistrerPhoto(blob);
+      // ① l'IA (Claude) si le foyer est connecté : comprend les pages en 2 colonnes
+      const ia = navigator.onLine ? await lireRecetteIA(blob, (m) => { $('#rEtat', c).textContent = m; }) : null;
+      if (ia) {
+        $('#rIng', c).value = ia.lignes.join('\n');
+        if (ia.titre && !$('#rTitre', c).value) $('#rTitre', c).value = ia.titre;
+        $('#rEtat', c).textContent = `✓ ${ia.lignes.length} ingrédient(s) lu(s) par l'IA${ia.portions ? ` · ${ia.portions} portions` : ''}. Vérifie au besoin.`;
+        return;
+      }
+      // ② sinon, lecture sur le téléphone
       const texte = await lirePhotoTexte(blob, $('#rEtat', c));
       if (!texte) return;
       const lignes = texte.split('\n').map((l) => l.trim()).filter(Boolean);

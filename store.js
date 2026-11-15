@@ -85,11 +85,45 @@ export async function enregistrerPhoto(blob) {
   return id;
 }
 
-export async function lirePhoto(id) {
+async function lirePhotoLocale(id) {
   const db = await ouvrirDB();
   return new Promise((ok, ko) => {
     const r = db.transaction('photos').objectStore('photos').get(id);
     r.onsuccess = () => ok(r.result || null); r.onerror = () => ko(r.error);
+  });
+}
+
+// Photo absente du téléphone (retirée pour libérer l'espace, ou prise par l'autre
+// membre du foyer) : on la redemande à la base partagée, puis on la garde en cache.
+let telechargeur = null;
+export function brancherTelechargement(fn) { telechargeur = fn; }
+
+export async function lirePhoto(id) {
+  const locale = await lirePhotoLocale(id);
+  if (locale || !telechargeur) return locale;
+  const blob = await telechargeur(id).catch(() => null);
+  if (blob) await enregistrerPhotoSous(id, blob);
+  return blob;
+}
+
+export async function photoLocaleExiste(id) { return !!(await lirePhotoLocale(id)); }
+
+export async function enregistrerPhotoSous(id, blob) {
+  const db = await ouvrirDB();
+  await new Promise((ok, ko) => {
+    const tx = db.transaction('photos', 'readwrite');
+    tx.objectStore('photos').put(blob, id);
+    tx.oncomplete = ok; tx.onerror = () => ko(tx.error);
+  });
+}
+
+/** Retire une photo du téléphone seulement (elle reste dans la base partagée). */
+export async function supprimerPhotoLocale(id) {
+  const db = await ouvrirDB();
+  await new Promise((ok, ko) => {
+    const tx = db.transaction('photos', 'readwrite');
+    tx.objectStore('photos').delete(id);
+    tx.oncomplete = ok; tx.onerror = () => ko(tx.error);
   });
 }
 

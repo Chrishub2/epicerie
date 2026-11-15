@@ -1,0 +1,292 @@
+// =====================================================================
+// Partage entre les téléphones du foyer (Supabase)
+// - Connexion par courriel : code à 6 chiffres (fiable dans l'app installée) ou lien.
+// - Foyer : créer, ou joindre avec un code d'invitation.
+// - Synchronisation élément par élément (articles, liste, prix…) dans la table
+//   `objets`, en temps réel. Le plus récent gagne, élément par élément.
+// - Photos sauvegardées dans le stockage privé du foyer ; possibilité de les retirer
+//   du téléphone (elles sont retéléchargées au besoin).
+// Sans connexion ou sans réseau, l'app fonctionne comme avant ; tout est envoyé au retour.
+// =====================================================================
+import * as S from './store.js';
+import { toast } from './ui.js';
+import { SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, SUPABASE_JS } from './config.js';
+
+// type d'objet en base → collection de l'état local
+const COLLECTIONS = {
+  article: 'articles', liste: 'liste', prix: 'prix', magasin: 'magasins', rayon: 'rayons',
+  recette: 'recettes', livre: 'livres', carte: 'cartes', point: 'points', rabais: 'rabaisPerso',
+  photo: 'photos', recu: 'recus', releve: 'releves', cp: 'codesPostaux',
+};
+const cleDe = (type, o) => (type === 'cp' ? o.code : o.id);
+// Réglages partagés du foyer (un seul objet)
+const REGLAGES = ['ordreRayons', 'rayonsJoints', 'optim'];
+const META = 'epicerie-sync'; // { foyerId, empreintes: { 'type:id': json } }
+
+let sb = null;          // client Supabase
+let session = null;
+let foyer = null;       // { id, nom, code_invitation }
+let membres = [];
+let canal = null;
+let minuterie = null;
+let enEnvoi = false;
+let meta = lireMeta();
+const ecouteurs = new Set();
+
+function lireMeta() { try { return JSON.parse(localStorage.getItem(META)) || { empreintes: {} }; } catch { return { empreintes: {} }; } }
+function ecrireMeta() { try { localStorage.setItem(META, JSON.stringify(meta)); } catch { /* plein */ } }
+function signaler() { ecouteurs.forEach((f) => f(etatSync())); }
+
+export function surChangement(fn) { ecouteurs.add(fn); return () => ecouteurs.delete(fn); }
+export function etatSync() {
+  return { connecte: !!session, courriel: session?.user?.email || null, foyer, membres, dernier: meta.dernier || null, enLigne: navigator.onLine };
+}
+export function client() { return sb; }
+export function estPret() { return !!(sb && session && foyer); }
+
+// ---------------------------------------------------------------------
+// Démarrage
+// ---------------------------------------------------------------------
+export async function initialiser() {
+  try {
+    const { createClient } = await import(SUPABASE_JS);
+    sb = createClient(SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  } catch {
+    return; // hors ligne au premier lancement : on réessaiera plus tard
+  }
+  S.brancherTelechargement(telechargerPhoto);
+  const { data } = await sb.auth.getSession();
+  session = data.session;
+  sb.auth.onAuthStateChange((_e, s) => {
+    const avant = session?.user?.id;
+    session = s;
+    if (s?.user?.id !== avant) demarrer();
+    signaler();
+  });
+  await demarrer();
+  window.addEventListener('online', () => { if (estPret()) { tirer().then(pousser); } signaler(); });
+  window.addEventListener('offline', signaler);
+}
+
+async function demarrer() {
+  if (canal) { sb.removeChannel(canal); canal = null; }
+  foyer = null; membres = [];
+  if (!session) { signaler(); return; }
+  const { data: m } = await sb.from('membres').select('foyer_id, nom_affiche, foyers(id, nom, code_invitation)').eq('user_id', session.user.id).limit(1);
+  if (!m?.length) { signaler(); return; }
+  foyer = m[0].foyers;
+  if (meta.foyerId !== foyer.id) { meta = { foyerId: foyer.id, empreintes: {} }; ecrireMeta(); }
+  await chargerMembres();
+  S.maj((e) => { e.utilisateur = m[0].nom_affiche; e.demo = false; });
+  await tirer();
+  await pousser();
+  ecouterTempsReel();
+  if (!abonne) { S.abonner(() => planifierEnvoi()); abonne = true; }
+  signaler();
+}
+let abonne = false;
+
+async function chargerMembres() {
+  const { data } = await sb.from('membres').select('nom_affiche, user_id').eq('foyer_id', foyer.id);
+  membres = data || [];
+  S.maj((e) => { e.membres = membres.map((x) => x.nom_affiche); });
+}
+
+// ---------------------------------------------------------------------
+// Connexion
+// ---------------------------------------------------------------------
+export async function envoyerCode(courriel) {
+  if (!sb) throw new Error('Pas de réseau');
+  const { error } = await sb.auth.signInWithOtp({ email: courriel, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
+  if (error) throw error;
+}
+
+export async function validerCode(courriel, code) {
+  const { error } = await sb.auth.verifyOtp({ email: courriel, token: code.trim(), type: 'email' });
+  if (error) throw error;
+}
+
+export async function deconnecter() {
+  await sb.auth.signOut();
+  meta = { empreintes: {} }; ecrireMeta();
+}
+
+// ---------------------------------------------------------------------
+// Foyer
+// ---------------------------------------------------------------------
+/** Crée le foyer. garderDonnees=false : on part d'un état vide (sans la démo). */
+export async function creerFoyer(nomFoyer, prenom, garderDonnees) {
+  if (!garderDonnees) {
+    S.maj((e) => {
+      for (const c of ['articles', 'liste', 'prix', 'recettes', 'livres', 'cartes', 'points', 'photos', 'recus', 'releves']) e[c] = [];
+      e.fileAttente = [];
+    });
+  }
+  const { error } = await sb.rpc('creer_foyer', { p_nom: nomFoyer, p_nom_affiche: prenom });
+  if (error) throw error;
+  meta = { empreintes: {} }; ecrireMeta();
+  await demarrer();
+}
+
+/** Joint un foyer existant : les données du foyer remplacent celles de ce téléphone. */
+export async function joindreFoyer(code, prenom) {
+  const { error } = await sb.rpc('joindre_foyer', { p_code: code, p_nom_affiche: prenom });
+  if (error) throw error;
+  S.maj((e) => { for (const c of Object.values(COLLECTIONS)) e[c] = []; });
+  meta = { empreintes: {} }; ecrireMeta();
+  await demarrer();
+}
+
+// ---------------------------------------------------------------------
+// Synchronisation
+// ---------------------------------------------------------------------
+/** Tout l'état partageable, en lignes { type, id, data }. Donne un id à ce qui n'en a pas. */
+function objetsLocaux() {
+  const e = S.get();
+  const out = [];
+  for (const [type, coll] of Object.entries(COLLECTIONS)) {
+    for (const o of e[coll] || []) {
+      if (type !== 'cp' && !o.id) o.id = S.uid(type.slice(0, 2));
+      out.push({ type, id: String(cleDe(type, o)), data: o });
+    }
+  }
+  out.push({ type: 'reglages', id: 'foyer', data: Object.fromEntries(REGLAGES.map((k) => [k, e[k] ?? null])) });
+  return out;
+}
+
+function planifierEnvoi() {
+  if (!estPret()) return;
+  clearTimeout(minuterie);
+  minuterie = setTimeout(() => pousser().catch(() => {}), 900);
+}
+
+/** Envoie ce qui a changé sur ce téléphone depuis le dernier envoi. */
+export async function pousser() {
+  if (!estPret() || !navigator.onLine || enEnvoi) return;
+  enEnvoi = true;
+  try {
+    const locaux = objetsLocaux();
+    const vus = new Set();
+    const lignes = [];
+    for (const o of locaux) {
+      const k = `${o.type}:${o.id}`; vus.add(k);
+      const json = JSON.stringify(o.data);
+      if (meta.empreintes[k] !== json) lignes.push({ foyer_id: foyer.id, type: o.type, id: o.id, data: o.data, supprime: false, _k: k, _json: json });
+    }
+    // Éléments supprimés sur ce téléphone → suppression douce (sauf l'historique des prix)
+    for (const k of Object.keys(meta.empreintes)) {
+      if (vus.has(k)) continue;
+      const [type, ...r] = k.split(':'); const id = r.join(':');
+      if (type === 'prix') { delete meta.empreintes[k]; continue; }
+      lignes.push({ foyer_id: foyer.id, type, id, data: JSON.parse(meta.empreintes[k]), supprime: true, _k: k, _json: null });
+    }
+    for (let i = 0; i < lignes.length; i += 200) {
+      const lot = lignes.slice(i, i + 200);
+      const { error } = await sb.from('objets').upsert(lot.map(({ _k, _json, ...l }) => l), { onConflict: 'foyer_id,type,id' });
+      if (error) throw error;
+      lot.forEach((l) => { if (l._json == null) delete meta.empreintes[l._k]; else meta.empreintes[l._k] = l._json; });
+      ecrireMeta();
+    }
+    await envoyerPhotos();
+    meta.dernier = new Date().toISOString(); ecrireMeta(); signaler();
+  } catch (err) {
+    console.warn('Synchronisation : envoi reporté', err);
+  } finally { enEnvoi = false; }
+}
+
+/** Récupère ce que l'autre téléphone a changé. */
+export async function tirer() {
+  if (!estPret() || !navigator.onLine) return;
+  let q = sb.from('objets').select('type,id,data,supprime,maj').eq('foyer_id', foyer.id).order('maj', { ascending: true }).limit(5000);
+  if (meta.dernierTire) q = q.gt('maj', meta.dernierTire);
+  const { data, error } = await q;
+  if (error) { console.warn(error); return; }
+  if (data.length) {
+    appliquer(data);
+    meta.dernierTire = data[data.length - 1].maj; ecrireMeta();
+  }
+}
+
+function appliquer(lignes) {
+  S.maj((e) => {
+    for (const l of lignes) {
+      const k = `${l.type}:${l.id}`;
+      if (l.type === 'reglages') { for (const c of REGLAGES) if (l.data[c] != null) e[c] = l.data[c]; meta.empreintes[k] = JSON.stringify(l.data); continue; }
+      const coll = COLLECTIONS[l.type];
+      if (!coll) continue;
+      e[coll] ||= [];
+      const i = e[coll].findIndex((o) => String(cleDe(l.type, o)) === l.id);
+      if (l.supprime) { if (i >= 0) e[coll].splice(i, 1); delete meta.empreintes[k]; continue; }
+      if (i >= 0) e[coll][i] = l.data; else e[coll].push(l.data);
+      meta.empreintes[k] = JSON.stringify(l.data);
+    }
+  });
+  ecrireMeta();
+}
+
+function ecouterTempsReel() {
+  canal = sb.channel(`foyer-${foyer.id}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'objets', filter: `foyer_id=eq.${foyer.id}` }, (p) => {
+      if (!p.new?.type) return;
+      appliquer([p.new]);
+      if (p.new.maj > (meta.dernierTire || '')) { meta.dernierTire = p.new.maj; ecrireMeta(); }
+    })
+    .subscribe();
+}
+
+// ---------------------------------------------------------------------
+// Photos
+// ---------------------------------------------------------------------
+const cheminPhoto = (id) => `${foyer.id}/${id}.jpg`;
+
+async function envoyerPhotos() {
+  const aEnvoyer = (S.get().photos || []).filter((p) => !p.enLigne);
+  for (const p of aEnvoyer) {
+    const blob = await S.lirePhoto(p.id);
+    if (!blob) continue;
+    const { error } = await sb.storage.from('photos').upload(cheminPhoto(p.id), blob, { contentType: 'image/jpeg', upsert: true });
+    if (error) { console.warn('Photo non envoyée', error); continue; }
+    S.maj((e) => { const x = e.photos.find((y) => y.id === p.id); if (x) x.enLigne = true; });
+  }
+}
+
+async function telechargerPhoto(id) {
+  if (!estPret() || !navigator.onLine) return null;
+  const { data, error } = await sb.storage.from('photos').download(cheminPhoto(id));
+  return error ? null : data;
+}
+
+/** Retire du téléphone les photos déjà sauvegardées en ligne. Retourne le nombre retiré. */
+export async function libererEspacePhotos() {
+  let n = 0;
+  for (const p of (S.get().photos || []).filter((x) => x.enLigne)) {
+    if (await S.photoLocaleExiste(p.id)) { await S.supprimerPhotoLocale(p.id); n++; }
+  }
+  return n;
+}
+
+// ---------------------------------------------------------------------
+// IA : lecture d'une photo par Claude (fonction « lire-photo »)
+// ---------------------------------------------------------------------
+const enBase64 = (blob) => new Promise((ok, ko) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(',')[1]);
+  r.onerror = () => ko(r.error);
+  r.readAsDataURL(blob);
+});
+
+/** Retourne les données lues, ou null (pas connecté, hors ligne, fonction absente, erreur). */
+export async function lireAvecIA(type, blobs) {
+  if (!sb || !session || !navigator.onLine) return null;
+  try {
+    const images = await Promise.all(blobs.map(async (b) => ({ data: await enBase64(b), media_type: 'image/jpeg' })));
+    const { data, error } = await sb.functions.invoke('lire-photo', { body: { type, images } });
+    if (error || !data?.ok) { console.warn('IA indisponible', error || data?.erreur); return null; }
+    return data.data;
+  } catch (err) {
+    console.warn('IA indisponible', err);
+    return null;
+  }
+}
+
+export function synchroniserMaintenant() { return tirer().then(pousser); }

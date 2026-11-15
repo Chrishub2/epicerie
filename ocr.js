@@ -39,6 +39,62 @@ export function prendrePhoto() {
   });
 }
 
+// ---------------------------------------------------------------------
+// Lecture « intelligente » : l'IA (Claude) d'abord si le foyer est connecté,
+// sinon la lecture sur le téléphone (Tesseract). Même résultat pour l'appelant.
+// ---------------------------------------------------------------------
+let lecteurIA = null;
+/** Branché par sync.js une fois connecté : fn(type, blobs) → données ou null. */
+export function brancherIA(fn) { lecteurIA = fn; }
+
+async function essayerIA(type, blobs, etat) {
+  if (!lecteurIA) return null;
+  etat?.('Lecture par l\'IA…');
+  return lecteurIA(type, blobs).catch(() => null);
+}
+
+/** Étiquette de prix → { offre, format, rabais, nom, source }. */
+export async function lireEtiquette(blob, etat) {
+  const r = await essayerIA('etiquette', [blob], etat);
+  if (r) return { offre: r.prix_affiche || null, format: r.format ? formatLisible(r.format) : null, rabais: !!r.en_rabais,
+    nom: [r.marque, r.produit].filter(Boolean).join(' ') || null, source: 'ia' };
+  const texte = await lireTexte(blob, etat);
+  return { ...analyserEtiquette(texte), nom: null, texte, source: 'ocr' };
+}
+
+/** Reçu (1 ou plusieurs photos) → { banniere, date, total, lignes:[{libelle, prix}], … }. */
+export async function lireRecu(blobs, etat) {
+  const r = await essayerIA('recu', blobs, etat);
+  if (r) return { banniere: r.banniere === 'autre' ? null : r.banniere, magasin: r.magasin, date: r.date, total: r.total, tps: r.tps, tvq: r.tvq,
+    pointsGagnes: r.points_gagnes, soldePoints: r.solde_points, source: 'ia',
+    lignes: (r.lignes || []).map((l) => ({ libelle: l.libelle, prix: l.prix_total, quantite: l.quantite, rabais: l.rabais })) };
+  let texte = '';
+  for (const b of blobs) texte += (await lireTexte(b, etat)) + '\n';
+  return { ...analyserRecu(texte), texte, source: 'ocr' };
+}
+
+/** Liste écrite à la main → [{ quantite, nom, certain }] ou null si l'IA n'est pas disponible. */
+export async function lireListeIA(blob, etat) {
+  const r = await essayerIA('liste', [blob], etat);
+  return r ? r.articles.map((a) => ({ quantite: a.quantite || 1, nom: a.nom, certain: a.certain })) : null;
+}
+
+/** Recette → { titre, portions, lignes:[texte] } ou null si l'IA n'est pas disponible. */
+export async function lireRecetteIA(blob, etat) {
+  const r = await essayerIA('recette', [blob], etat);
+  return r ? { titre: r.titre, portions: r.portions, lignes: r.ingredients.map((i) => i.texte) } : null;
+}
+
+/** Petite image (data URL, ~160 px) à afficher comme photo d'un produit. */
+export async function miniature(blob, taille = 160) {
+  const img = await createImageBitmap(blob);
+  const k = taille / Math.max(img.width, img.height);
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.7);
+}
+
 const PRIX = /(\d{1,3})[,.](\d{2})\s*\$?/g;
 
 /**
@@ -78,8 +134,7 @@ export async function lirePrixPhoto(cb, zoneEtat) {
   const photoId = await S.enregistrerPhoto(blob);
   const etat = (m) => { if (zoneEtat) zoneEtat.textContent = m; };
   try {
-    const texte = await lireTexte(blob, etat);
-    cb({ photoId, texte, ...analyserEtiquette(texte) });
+    cb({ photoId, ...(await lireEtiquette(blob, etat)) });
   } catch (e) {
     etat(''); toast(e.message || 'Lecture impossible'); cb({ photoId, texte: '' });
   }

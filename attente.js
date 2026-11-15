@@ -6,7 +6,7 @@
 // =====================================================================
 import * as S from './store.js';
 import { toast } from './ui.js';
-import { lireTexte, analyserEtiquette, analyserRecu } from './ocr.js';
+import { lireEtiquette, lireRecu } from './ocr.js';
 
 let enCours = false;
 
@@ -39,23 +39,19 @@ export async function traiterFile() {
   return faits;
 }
 
-async function texteDesPhotos(ids) {
-  let texte = '';
-  for (const id of ids) {
-    const blob = await S.lirePhoto(id);
-    if (blob) texte += (await lireTexte(blob)) + '\n';
-  }
-  return texte;
+async function photos(ids) {
+  const out = [];
+  for (const id of ids) { const b = await S.lirePhoto(id); if (b) out.push(b); }
+  if (!out.length) throw new Error('Photo introuvable');
+  return out;
 }
 
 async function executer(t) {
   if (t.type === 'recu') {
-    const texte = await texteDesPhotos(t.photoIds);
-    const r = analyserRecu(texte);
-    S.maj((e) => { const rc = (e.recus || []).find((y) => y.id === t.recuId); if (rc) Object.assign(rc, r, { texte, statut: 'lu' }); });
+    const r = await lireRecu(await photos(t.photoIds));
+    S.maj((e) => { const rc = (e.recus || []).find((y) => y.id === t.recuId); if (rc) Object.assign(rc, r, { statut: 'lu' }); });
   } else if (t.type === 'prix') {
-    const texte = await texteDesPhotos([t.photoId]);
-    const lu = analyserEtiquette(texte);
+    const lu = await lireEtiquette((await photos([t.photoId]))[0]);
     S.maj((e) => {
       const p = e.prix.find((y) => y.id === t.prixId);
       if (!p) return;
@@ -65,11 +61,11 @@ async function executer(t) {
       p.aVerifier = true; p.enAttente = false;
     });
   } else if (t.type === 'releve') {
-    const texte = await texteDesPhotos([t.photoId]);
-    const lu = analyserEtiquette(texte);
+    const lu = await lireEtiquette((await photos([t.photoId]))[0]);
     S.maj((e) => {
       const r = (e.releves || []).find((y) => y.id === t.releveId);
-      if (r) Object.assign(r, { offre: r.offre || lu.offre, format: r.format || lu.format, rabais: lu.rabais, nomLu: devinerNom(texte), texte, statut: 'lu' });
+      if (r) Object.assign(r, { offre: r.offre || lu.offre, format: r.format || lu.format, rabais: lu.rabais,
+        nomLu: lu.nom || devinerNom(lu.texte || ''), texte: lu.texte || '', statut: 'lu', luParIA: lu.source === 'ia' });
     });
   }
 }
