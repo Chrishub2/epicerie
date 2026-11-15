@@ -139,7 +139,7 @@ export function vueComparaison(v, rendre) {
     ? [...new Set(lignesListe().map((x) => x.a.id))].map((id) => e.articles.find((a) => a.id === id))
     : [...e.articles].sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
 
-  let html = `<div class="rang envelopper" style="margin-bottom:10px">
+  let html = `<div class="rang envelopper barre-collante">
       <button class="btn ${portee === 'liste' ? '' : 'sec'}" data-portee="liste">Ma liste</button>
       <button class="btn ${portee === 'tout' ? '' : 'sec'}" data-portee="tout">Tout le catalogue</button>
       <span class="grandir"></span>
@@ -162,7 +162,8 @@ export function vueComparaison(v, rendre) {
           ${eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
           ${r.manquants ? `<div class="doux" style="color:var(--ambre)">${r.manquants} article(s) sans prix dans ces magasins</div>` : ''}
           ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:6px">${puce(banniereDeCle(k))}<b>${esc(nomCle(k))}</b> — ${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}
-            <div class="doux">${xs.map((x) => `${esc(x.a.nom)} (${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '')) : ''})`).join(' · ')}</div></div>`).join('')}
+            <ul class="liste-arret">${xs.map((x) => `<li><span>${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
+              <span class="doux">${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
           <button class="btn" data-appliquer="${r.arrets}" style="margin-top:8px">Utiliser cette répartition</button></div>`;
       }).join('')}
       ${opt.sansPrix.length ? `<p class="doux">Sans prix connu : ${opt.sansPrix.map((o) => esc(o.a.nom)).join(', ')}. Touche l'article pour ajouter un prix vu.</p>` : ''}
