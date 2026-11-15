@@ -39,8 +39,9 @@ function signaler() { ecouteurs.forEach((f) => f(etatSync())); }
 
 export function surChangement(fn) { ecouteurs.add(fn); return () => ecouteurs.delete(fn); }
 export function etatSync() {
-  return { connecte: !!session, courriel: session?.user?.email || null, foyer, membres, dernier: meta.dernier || null, enLigne: navigator.onLine };
+  return { connecte: !!session, courriel: session?.user?.email || null, foyer, membres, dernier: meta.dernier || null, enLigne: navigator.onLine, recuperation };
 }
+export function finRecuperation() { recuperation = false; signaler(); }
 export function client() { return sb; }
 export function estPret() { return !!(sb && session && foyer); }
 
@@ -57,9 +58,10 @@ export async function initialiser() {
   S.brancherTelechargement(telechargerPhoto);
   const { data } = await sb.auth.getSession();
   session = data.session;
-  sb.auth.onAuthStateChange((_e, s) => {
+  sb.auth.onAuthStateChange((evenement, s) => {
     const avant = session?.user?.id;
     session = s;
+    if (evenement === 'PASSWORD_RECOVERY') recuperation = true;
     if (s?.user?.id !== avant) demarrer();
     signaler();
   });
@@ -95,16 +97,37 @@ async function chargerMembres() {
 // ---------------------------------------------------------------------
 // Connexion
 // ---------------------------------------------------------------------
-export async function envoyerCode(courriel) {
+// Connexion par courriel + mot de passe (fonctionne dans l'app installée sur iPhone ;
+// le forfait gratuit de Supabase ne permet pas d'ajouter un code dans le courriel).
+const retourApp = () => location.origin + location.pathname;
+
+/** Crée le compte. Retourne true si un courriel de confirmation a été envoyé. */
+export async function creerCompte(courriel, motDePasse) {
   if (!sb) throw new Error('Pas de réseau');
-  const { error } = await sb.auth.signInWithOtp({ email: courriel, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
+  const { data, error } = await sb.auth.signUp({ email: courriel, password: motDePasse, options: { emailRedirectTo: retourApp() } });
+  if (error) throw error;
+  return !data.session; // pas de session = confirmation par courriel requise
+}
+
+export async function connecter(courriel, motDePasse) {
+  if (!sb) throw new Error('Pas de réseau');
+  const { error } = await sb.auth.signInWithPassword({ email: courriel, password: motDePasse });
   if (error) throw error;
 }
 
-export async function validerCode(courriel, code) {
-  const { error } = await sb.auth.verifyOtp({ email: courriel, token: code.trim(), type: 'email' });
+export async function motDePasseOublie(courriel) {
+  if (!sb) throw new Error('Pas de réseau');
+  const { error } = await sb.auth.resetPasswordForEmail(courriel, { redirectTo: retourApp() });
   if (error) throw error;
 }
+
+export async function changerMotDePasse(motDePasse) {
+  const { error } = await sb.auth.updateUser({ password: motDePasse });
+  if (error) throw error;
+}
+
+/** Vrai quand on arrive par le lien « mot de passe oublié » : l'app demande le nouveau mot de passe. */
+export let recuperation = false;
 
 export async function deconnecter() {
   await sb.auth.signOut();

@@ -49,7 +49,11 @@ function majEntete() {
 
 $$('#onglets button').forEach((b) => b.onclick = () => { onglet = b.dataset.onglet; rendre(); });
 S.abonner(() => rendre());
-Sync.surChangement(() => rendre());
+Sync.surChangement((st) => {
+  // Arrivée par le lien « mot de passe oublié » : on ouvre directement l'écran du nouveau mot de passe
+  if (st.recuperation && onglet !== 'plus') { allerOnglet('plus', { section: 'foyer' }); return; }
+  rendre();
+});
 queueMicrotask(rendre); // après l'évaluation complète du module
 setTimeout(async () => {
   await Sync.initialiser().catch(() => {});   // connexion + partage (si déjà connecté)

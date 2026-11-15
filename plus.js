@@ -181,15 +181,18 @@ function vueFoyer(v) {
   let html = retour();
   if (!Sync.client()) {
     html += `<div class="carte"><h2>Mon foyer</h2><p class="doux">📵 Pas de réseau : la connexion sera possible au retour du réseau.</p></div>`;
+  } else if (st.recuperation) {
+    html += `<div class="carte"><h2>Nouveau mot de passe</h2>
+      <div class="champ"><label>Nouveau mot de passe (8 caractères ou plus)</label><input id="fNouveauMdp" type="password" autocomplete="new-password"></div>
+      <button class="btn" id="fChangerMdp" style="width:100%">Enregistrer</button></div>`;
   } else if (!st.connecte) {
     html += `<div class="carte"><h2>Se connecter</h2>
-      <p class="doux">Ta liste sera partagée avec l'autre membre du foyer, en temps réel, et l'IA lira tes photos. Je t'envoie un <b>code à 6 chiffres</b> par courriel (pas de mot de passe).</p>
+      <p class="doux">Ta liste sera partagée avec l'autre membre du foyer, en temps réel, et l'IA lira tes photos.</p>
       <div class="champ"><label>Ton courriel</label><input id="fCourriel" type="email" autocomplete="email" value="${esc(courrielEnCours)}" placeholder="toi@exemple.com"></div>
-      <button class="btn" id="fEnvoyer" style="width:100%">Recevoir mon code</button>
-      <div id="fCodeZone" class="${courrielEnCours ? '' : 'cache'}" style="margin-top:10px">
-        <div class="champ"><label>Code reçu par courriel</label><input id="fCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456"></div>
-        <button class="btn" id="fValider" style="width:100%">Me connecter</button>
-        <p class="doux">Pas de code dans le courriel, seulement un lien ? Ouvre le lien sur ce téléphone, puis reviens dans l'app.</p></div></div>`;
+      <div class="champ"><label>Mot de passe</label><input id="fMdp" type="password" autocomplete="current-password" placeholder="8 caractères ou plus"></div>
+      <button class="btn" id="fConnecter" style="width:100%">Me connecter</button>
+      <div class="rang" style="margin-top:8px"><button class="btn sec grandir" id="fCreerCompte">Créer mon compte</button><button class="btn sec grandir" id="fOubli">Mot de passe oublié</button></div>
+      <p class="doux" style="margin-top:8px"><b>Première fois :</b> entre ton courriel, choisis un mot de passe, puis « Créer mon compte ». Clique le lien de confirmation reçu par courriel (il peut s'ouvrir dans Safari, c'est normal), puis reviens ici et touche « Me connecter ».</p></div>`;
   } else if (!st.foyer) {
     html += `<div class="carte"><h2>Créer mon foyer</h2>
       <p class="doux">Connecté : ${esc(st.courriel)}</p>
@@ -210,7 +213,7 @@ function vueFoyer(v) {
       <div class="doux">Dernière synchronisation : ${esc(derniere)} ${st.enLigne ? '' : '· 📵 hors ligne'}</div>
       <h3 style="margin-top:12px">Inviter l'autre membre</h3>
       <div class="rang"><code style="font-size:22px;letter-spacing:2px" class="grandir">${esc(st.foyer.code_invitation)}</code><button class="btn sec" id="fPartager">Partager</button></div>
-      <p class="doux">L'autre personne ouvre l'app, se connecte avec son courriel, puis entre ce code.</p>
+      <p class="doux">L'autre personne ouvre l'app, crée son compte (courriel + mot de passe), puis entre ce code.</p>
       <button class="btn" id="fSync" style="width:100%;margin-top:6px">🔄 Synchroniser maintenant</button></div>
       <div class="carte"><h2>Photos</h2>
       <p class="doux">${enLigne} photo(s) sauvegardée(s) dans la base. Tu peux les retirer du téléphone pour libérer de l'espace : elles se rechargent au besoin (avec réseau).</p>
@@ -220,14 +223,45 @@ function vueFoyer(v) {
   }
   v.innerHTML = html;
   brancherRetour(v);
-  const erreur = (err) => toast(err?.message?.includes('Token has expired') ? 'Code expiré ou invalide : redemande un code' : `Erreur : ${err?.message || err}`);
-  $('#fEnvoyer', v)?.addEventListener('click', async () => {
+  // Messages d'erreur de Supabase traduits
+  const erreur = (err) => {
+    const m = err?.message || String(err);
+    const fr = /Invalid login credentials/i.test(m) ? 'Courriel ou mot de passe incorrect'
+      : /Email not confirmed/i.test(m) ? 'Confirme d\'abord ton courriel : clique le lien reçu, puis reconnecte-toi'
+      : /already registered|already exists/i.test(m) ? 'Ce courriel a déjà un compte : touche « Me connecter »'
+      : /Password should be|weak/i.test(m) ? 'Mot de passe trop court ou trop simple (8 caractères ou plus)'
+      : /rate limit|too many/i.test(m) ? 'Trop de courriels envoyés : réessaie dans une heure'
+      : m;
+    toast(fr);
+  };
+  const lireIdentifiants = () => {
     courrielEnCours = $('#fCourriel', v).value.trim();
-    if (!/\S+@\S+\.\S+/.test(courrielEnCours)) { toast('Courriel invalide'); return; }
-    try { await Sync.envoyerCode(courrielEnCours); toast('Courriel envoyé : regarde ta boîte (et les indésirables)'); vueFoyer(v); } catch (err) { erreur(err); }
+    const mdp = $('#fMdp', v).value;
+    if (!/\S+@\S+\.\S+/.test(courrielEnCours)) { toast('Courriel invalide'); return null; }
+    return mdp;
+  };
+  $('#fConnecter', v)?.addEventListener('click', async () => {
+    const mdp = lireIdentifiants(); if (mdp == null) return;
+    if (!mdp) { toast('Entre ton mot de passe'); return; }
+    try { await Sync.connecter(courrielEnCours, mdp); courrielEnCours = ''; toast('Connecté ✓'); setTimeout(() => vueFoyer(v), 600); } catch (err) { erreur(err); }
   });
-  $('#fValider', v)?.addEventListener('click', async () => {
-    try { await Sync.validerCode(courrielEnCours, $('#fCode', v).value); courrielEnCours = ''; toast('Connecté ✓'); setTimeout(() => vueFoyer(v), 600); } catch (err) { erreur(err); }
+  $('#fCreerCompte', v)?.addEventListener('click', async () => {
+    const mdp = lireIdentifiants(); if (mdp == null) return;
+    if (mdp.length < 8) { toast('Choisis un mot de passe de 8 caractères ou plus'); return; }
+    try {
+      const aConfirmer = await Sync.creerCompte(courrielEnCours, mdp);
+      toast(aConfirmer ? 'Compte créé : clique le lien reçu par courriel, puis reviens te connecter' : 'Compte créé et connecté ✓');
+      vueFoyer(v);
+    } catch (err) { erreur(err); }
+  });
+  $('#fOubli', v)?.addEventListener('click', async () => {
+    const mdp = lireIdentifiants(); if (mdp == null) return;
+    try { await Sync.motDePasseOublie(courrielEnCours); toast('Courriel envoyé : ouvre le lien pour choisir un nouveau mot de passe'); } catch (err) { erreur(err); }
+  });
+  $('#fChangerMdp', v)?.addEventListener('click', async () => {
+    const mdp = $('#fNouveauMdp', v).value;
+    if (mdp.length < 8) { toast('8 caractères ou plus'); return; }
+    try { await Sync.changerMotDePasse(mdp); Sync.finRecuperation(); toast('Mot de passe changé ✓'); vueFoyer(v); } catch (err) { erreur(err); }
   });
   $('#fCreer', v)?.addEventListener('click', async () => {
     const prenom = $('#fPrenom', v).value.trim(); if (!prenom) { toast('Indique ton prénom'); return; }
