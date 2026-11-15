@@ -3,15 +3,16 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
-  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin } from './ui.js';
+  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin } from './ui.js';
 import { BANNIERES } from './demo-data.js';
 import { analyserOffre, formatLisible } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
-import { vuePlus, afficherPhoto, allerASection, nouveauRecu } from './plus.js';
-import { vueComparaison, tableauOffres, nomCle } from './comparer.js';
+import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve } from './plus.js';
+import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 import { lirePrixPhoto } from './ocr.js';
+import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -28,7 +29,45 @@ choix.onchange = () => S.maj((e) => { e.utilisateur = choix.value; });
 $$('#onglets button').forEach((b) => b.onclick = () => { onglet = b.dataset.onglet; rendre(); });
 S.abonner(() => rendre());
 queueMicrotask(rendre); // après l'évaluation complète du module
-setTimeout(() => actualiserTout().catch(() => {}), 1500); // vrais prix des produits liés (max 1 fois / 12 h)
+setTimeout(async () => {
+  await traiterFile().catch(() => {});        // photos prises hors ligne
+  await actualiserTout().catch(() => {});     // vrais prix des produits liés (max 1 fois / 12 h)
+}, 1500);
+
+// ---------------------------------------------------------------------
+// Tirer l'écran vers le bas (en haut de page) = tout mettre à jour
+// ---------------------------------------------------------------------
+(() => {
+  const ind = document.createElement('div');
+  ind.id = 'tirer'; document.body.appendChild(ind);
+  let y0 = null, dy = 0, occupe = false;
+  const SEUIL = 80;
+  window.addEventListener('touchstart', (ev) => {
+    if (occupe || window.scrollY > 0 || document.querySelector('#modale').open || document.querySelector('.camera-recu')) { y0 = null; return; }
+    y0 = ev.touches[0].clientY; dy = 0;
+  }, { passive: true });
+  window.addEventListener('touchmove', (ev) => {
+    if (y0 == null) return;
+    dy = ev.touches[0].clientY - y0;
+    if (dy <= 0) { ind.style.transform = 'translate(-50%, -60px)'; return; }
+    ind.textContent = dy > SEUIL ? '↻ Relâche pour mettre à jour' : '↓ Tire pour mettre à jour';
+    ind.style.transform = `translate(-50%, ${Math.min(dy, SEUIL + 30) - 40}px)`;
+  }, { passive: true });
+  window.addEventListener('touchend', async () => {
+    if (y0 == null) return;
+    y0 = null;
+    if (dy <= SEUIL) { ind.style.transform = 'translate(-50%, -60px)'; return; }
+    occupe = true; ind.textContent = '↻ Mise à jour…';
+    try {
+      await traiterFile();
+      const ids = S.get().articles.filter((a) => a.liens?.length).map((a) => a.id);
+      for (const id of ids) await actualiserArticle(id, { force: true });
+      toast(navigator.onLine ? 'À jour' : 'Pas de réseau : ce sera fait au retour du réseau');
+    } finally {
+      occupe = false; ind.style.transform = 'translate(-50%, -60px)'; rendre();
+    }
+  });
+})();
 
 export function rendre() {
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
@@ -121,6 +160,8 @@ function alertesListe() {
     else if (j < 0) out.push({ cle: `rpexp:${r.id}:${r.expiration}`, classe: 'rouge', action, html: `Le rabais ${esc(mag?.nom || '')} est expiré.` });
     else if (j <= 7) out.push({ cle: `rp7:${r.id}:${r.expiration}`, classe: 'ambre', action, html: `📅 Rabais ${esc(mag?.nom || '')} (${esc(r.description)}) : expire dans ${j} j.` });
   }
+  const attente = nbEnAttente();
+  if (attente) out.push({ cle: `attente:${attente}`, classe: 'ambre', action: 'attente', html: `⏳ ${attente} photo(s) en attente de lecture (réseau). Tire l'écran vers le bas ou touche ici pour réessayer.` });
   return out.filter((x) => !masquees.has(x.cle)).map((x) =>
     `<div class="alerte ${x.classe} alerte-action" data-action="${esc(x.action)}" role="link" tabindex="0">
        <span class="grandir">${x.html}</span><button class="fermer-alerte" data-masquer="${esc(x.cle)}" aria-label="Masquer">✕</button></div>`).join('');
@@ -129,6 +170,7 @@ function alertesListe() {
 /** Exécute l'action d'une alerte. */
 function agir(action) {
   const [type, id, extra] = action.split(':');
+  if (type === 'attente') { toast('Nouvel essai…'); traiterFile().then(() => rendre()); return; }
   if (type === 'fiche') ficheArticle(id, extra);
   if (type === 'rabais') {
     allerOnglet('plus', { section: 'rabais' });
@@ -160,27 +202,64 @@ function magasinDeCle(cle) {
   return mags.find((m) => e.ordreRayons[m.id]) || mags[0] || null;
 }
 
+const replies = new Set(); // groupes de magasins repliés (vue « Tout »)
+
+/** Une ligne de la liste. Cocher ne la déplace pas : elle reste à sa place, barrée. */
+function htmlItem(l, a) {
+  // Article placé dans un magasin (répartition) : on montre le prix de CE magasin, sinon le meilleur prix.
+  const k = l.magasinCible;
+  const m = (k && offresArticle(a).find((o) => o.pu != null && cleOffre(o) === k)) || meilleureOffre(a);
+  const meilleur = m ? `${logo(m.banniere)} ${esc(m.magasinNom ? m.magasinNom.replace(/^\S+\s*/, '') : '')} ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu — touche pour trouver les vrais prix';
+  return `<div class="item ${l.coche ? 'coche' : ''}" data-id="${l.id}">
+    <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
+    ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
+    <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
+      <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''} ${l.mode === 'en_ligne' ? '<span class="pastille">en ligne</span>' : ''}</div>
+      <div class="info">${meilleur}</div>
+      <div class="info">${esc(formatLisible(a.format) || '')}${l.ajoutePar ? ` · ajouté par ${esc(l.ajoutePar)}` : ''}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
+    </div>
+    <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
+  </div>`;
+}
+
+/** Sections par rayon (dans l'ordre et les regroupements du magasin). */
+function htmlRayons(items, magId) {
+  let html = '';
+  for (const g of groupesRayons(magId)) {
+    const dans = items.filter(({ a }) => a && g.ids.includes(a.rayonId));
+    if (!dans.length) continue;
+    html += `<section class="rayon"><h3>${esc(g.nom)} <span class="doux">(${dans.length})</span></h3>${dans.map(({ l, a }) => htmlItem(l, a)).join('')}</section>`;
+  }
+  return html;
+}
+
+/** Nom d'un groupe de magasin avec son logo : « [IGA] Extra Varennes » ou « [Super C] Beloeil ». */
+function logoCle(k) {
+  if (k === 'aucun') return '<b>Non assigné</b>';
+  if (k.startsWith('perso:')) { const m = S.get().magasins.find((x) => x.nom === k.slice(6)); return m ? logoMagasin(m) : esc(k.slice(6)); }
+  return logoVille(k);
+}
+
 function vueListe(v) {
   const e = S.get();
-  const tous = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) }));
-  // Filtre par magasin (après une répartition « N arrêts »)
+  const tous = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a);
+  // Groupes de magasins (après « Utiliser cette répartition »), avec total par magasin
   const cibles = {};
-  tous.forEach(({ l }) => { const k = l.magasinCible || 'aucun'; cibles[k] = (cibles[k] || 0) + 1; });
+  tous.forEach((x) => { const k = x.l.magasinCible || 'aucun'; (cibles[k] ||= { n: 0, total: 0, items: [] }); cibles[k].n++; cibles[k].items.push(x);
+    if (k !== 'aucun' && !x.l.coche) cibles[k].total += coutPour(x.l, x.a, k) || 0; });
   const avecCibles = Object.keys(cibles).some((k) => k !== 'aucun');
   if (!avecCibles || (filtreMagasin !== 'tous' && !cibles[filtreMagasin])) filtreMagasin = 'tous';
-  const items = filtreMagasin === 'tous' ? tous : tous.filter(({ l }) => (l.magasinCible || 'aucun') === filtreMagasin);
-  // Filtré sur un magasin : on applique l'ordre de rayons enregistré pour ce magasin.
   const magFiltre = magasinDeCle(filtreMagasin);
   const nbCoches = e.liste.filter((l) => l.coche).length;
   const optionsMag = [`<option value="defaut">Ordre par défaut</option>`]
-    .concat(e.magasins.map((m) => `<option value="${m.id}" ${e.magasinCourant === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`)).join('');
+    .concat(e.magasins.filter((m) => m.actif !== false).map((m) => `<option value="${m.id}" ${e.magasinCourant === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`)).join('');
+  const totalGeneral = Object.entries(cibles).filter(([k]) => k !== 'aucun').reduce((t, [, c]) => t + c.total, 0);
 
   let html = `
     <div class="ajout">
       <div class="rang">
         <input id="saisie" class="grandir" placeholder="Ajouter… (ex. beurre, 2 lait)" autocomplete="off" enterkeyhint="done">
         <button class="icone entree" id="btnEntree" title="Entrée" aria-label="Ajouter">✓</button>
-        <button class="icone" id="btnVoix" title="Dicter">🎤</button>
         <button class="icone" id="btnScan" title="Code-barres">▥</button>
         <button class="icone" id="btnPhoto" title="Photo d'un produit">📷</button>
       </div>
@@ -189,35 +268,28 @@ function vueListe(v) {
     ${alertesListe()}
     <div class="rang" style="margin:4px 0 6px">
       ${magFiltre ? `<div class="grandir doux">Rayons dans l'ordre de <b>${esc(magFiltre.nom)}</b></div>`
+        : avecCibles ? '<div class="grandir doux">Chaque magasin garde son ordre de rayons</div>'
         : `<select id="choixMagasin" class="grandir" aria-label="Ordre des rayons pour quel magasin">${optionsMag}</select>`}
       <button class="btn sec" id="btnReorg">↕ Rayons</button>
     </div>
-    ${avecCibles ? `<div class="rang envelopper" style="margin-bottom:6px">${[['tous', `Tout (${tous.length})`],
-      ...Object.entries(cibles).map(([k, n]) => [k, `${k === 'aucun' ? 'Non assigné' : nomCle(k)} (${n})`])]
-      .map(([k, t]) => `<button class="btn ${filtreMagasin === k ? '' : 'sec'}" data-filtre="${esc(k)}" style="padding:5px 10px;font-size:13px">${esc(t)}</button>`).join('')}</div>` : ''}`;
+    ${avecCibles ? `<div class="rang envelopper" style="margin-bottom:8px">
+      <button class="btn ${filtreMagasin === 'tous' ? '' : 'sec'} puce-filtre" data-filtre="tous">Tout (${tous.length}) · ${argent(totalGeneral)}</button>
+      ${Object.entries(cibles).map(([k, c]) => `<button class="btn ${filtreMagasin === k ? '' : 'sec'} puce-filtre" data-filtre="${esc(k)}">${logoCle(k)} <span>(${c.n})${k !== 'aucun' ? ` · ${argent(c.total)}` : ''}</span></button>`).join('')}</div>` : ''}`;
 
-  if (!items.length) html += `<div class="vide">Ta liste est vide. Ajoute un article, scanne un code-barres ou ajoute une recette.</div>`;
-
-  for (const g of groupesRayons(magFiltre?.id || e.magasinCourant)) {
-    const dans = items.filter(({ a }) => a && g.ids.includes(a.rayonId));
-    if (!dans.length) continue;
-    html += `<section class="rayon"><h3>${esc(g.nom)} <span class="doux">(${dans.length})</span></h3>`;
-    dans.sort((x, y) => x.l.coche - y.l.coche);
-    for (const { l, a } of dans) {
-      const m = meilleureOffre(a);
-      const meilleur = m ? `${puce(m.banniere)}${esc(nomOffre(m))} · ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu — touche pour trouver les vrais prix';
-      html += `<div class="item ${l.coche ? 'coche' : ''}" data-id="${l.id}">
-        <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
-        ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
-        <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
-          <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''} ${l.mode === 'en_ligne' ? '<span class="pastille">en ligne</span>' : ''}${l.magasinCible ? `<span class="pastille vert">${esc(nomCle(l.magasinCible))}</span>` : ''}</div>
-          <div class="info">${meilleur}</div>
-          <div class="info">${esc(formatLisible(a.format) || '')}${l.ajoutePar ? ` · ajouté par ${esc(l.ajoutePar)}` : ''}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
-        </div>
-        <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
-      </div>`;
+  if (!tous.length) html += `<div class="vide">Ta liste est vide. Ajoute un article, scanne un code-barres ou ajoute une recette.</div>`;
+  else if (avecCibles && filtreMagasin === 'tous') {
+    // Vue « Tout » : un bloc par magasin (logo, nombre, total), repliable d'un toucher
+    for (const [k, c] of Object.entries(cibles)) {
+      const mag = magasinDeCle(k);
+      const ferme = replies.has(k);
+      html += `<div class="groupe-mag ${ferme ? 'ferme' : ''}">
+        <button class="tete-mag" data-replier="${esc(k)}"><span class="fleche">${ferme ? '▸' : '▾'}</span><span class="grandir">${logoCle(k)}</span>
+          <span class="doux">${c.n} art.</span>${k !== 'aucun' ? `<b>${argent(c.total)}</b>` : ''}</button>
+        ${ferme ? '' : `<div class="corps-mag">${htmlRayons(c.items, mag?.id || e.magasinCourant)}</div>`}</div>`;
     }
-    html += `</section>`;
+  } else {
+    const items = filtreMagasin === 'tous' ? tous : cibles[filtreMagasin].items;
+    html += htmlRayons(items, magFiltre?.id || e.magasinCourant);
   }
   if (nbCoches) html += `<button class="btn sec" id="btnVider" style="width:100%;margin-top:8px">Retirer les ${nbCoches} article(s) acheté(s)</button>`;
   html += `<button class="btn sec" id="btnRecu" style="width:100%;margin-top:8px">🧾 Photographier mon reçu</button>`;
@@ -228,7 +300,6 @@ function vueListe(v) {
   saisie.onkeydown = (ev) => { if (ev.key === 'Enter') valider(); if (ev.key === 'Escape') masquerSuggestions(); };
   saisie.oninput = () => suggerer(saisie.value);
   $('#btnEntree').onclick = valider;
-  $('#btnVoix').onclick = dicter;
   $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); });
   $('#btnPhoto').onclick = () => photoProduit();
   $('#choixMagasin')?.addEventListener('change', (ev) => S.maj((x) => { x.magasinCourant = ev.target.value; }));
@@ -243,6 +314,9 @@ function vueListe(v) {
   $('#btnVider')?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !l.coche); }));
   $('#btnRecu').onclick = () => nouveauRecu();
   $$('[data-filtre]', v).forEach((b) => b.onclick = () => { filtreMagasin = b.dataset.filtre; rendre(); });
+  $$('[data-replier]', v).forEach((b) => b.onclick = () => {
+    const k = b.dataset.replier; replies.has(k) ? replies.delete(k) : replies.add(k); rendre();
+  });
 
   $$('.item', v).forEach((el) => {
     const id = el.dataset.id;
@@ -333,14 +407,6 @@ function groupesRayons(magId) {
   return groupes;
 }
 
-function dicter() {
-  const R = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!R) { toast('Dictée non disponible sur ce navigateur — utilise le micro du clavier.'); return; }
-  const r = new R(); r.lang = 'fr-CA'; r.interimResults = false;
-  r.onresult = (ev) => ajouterTexte(ev.results[0][0].transcript);
-  r.onerror = () => toast('Dictée interrompue');
-  r.start(); toast('Parle maintenant…');
-}
 
 // --- Réorganiser les rayons (glisser-déposer tactile) -----------------
 function ouvrirReorg(magId) {
@@ -354,9 +420,19 @@ function ouvrirReorg(magId) {
      <button class="icone" data-mv="-1" aria-label="Monter">▲</button><button class="icone" data-mv="1" aria-label="Descendre">▼</button></li>`).join(''); };
   ouvrirModale('Ordre des rayons', `<p class="doux">Pour : <b>${esc(nomMag)}</b> (gardé pour ce magasin). Glisse ≡ ou utilise ▲▼ pour suivre ton parcours. 🔗 regroupe un rayon avec celui du dessus en une seule section ; ⛓ les sépare.</p>
     <ul class="reorg" id="reorg">${rendreListe()}</ul>
-    <div class="rang" style="margin-top:10px"><input id="nouveauRayon" placeholder="Nouveau rayon"><button class="btn sec" id="ajRayon">Ajouter</button></div>`, (c) => {
+    <div class="rang" style="margin-top:10px"><input id="nouveauRayon" placeholder="Nouveau rayon"><button class="btn sec" id="ajRayon">Ajouter</button></div>
+    <button class="btn" id="reorgOk" style="width:100%;margin-top:10px">✓ Terminé</button>`, (c) => {
+    $('#reorgOk', c).onclick = fermerModale;
     const ul = $('#reorg', c);
+    const corps = $('#modaleCorps');
     const sauver = () => S.maj((x) => { x.ordreRayons[cible] = $$('li', ul).map((li) => li.dataset.r); });
+    // Réaffiche en gardant la position de défilement, et fait clignoter le rayon touché (confirmation visuelle)
+    const reafficher = (idTouche) => {
+      const y = corps.scrollTop;
+      ul.innerHTML = rendreListe(); brancher(); corps.scrollTop = y;
+      const li = idTouche && ul.querySelector(`li[data-r="${CSS.escape(idTouche)}"]`);
+      if (li) { li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 700); }
+    };
     const brancher = () => {
       $$('[data-joindre]', ul).forEach((b) => b.onclick = () => {
         S.maj((x) => {
@@ -366,24 +442,34 @@ function ouvrirReorg(magId) {
           x.rayonsJoints[cible] = [...s];
           x.ordreRayons[cible] = $$('li', ul).map((li) => li.dataset.r);
         });
-        ul.innerHTML = rendreListe(); brancher();
+        reafficher(b.dataset.joindre);
       });
-      $$('[data-mv]', ul).forEach((b) => b.onclick = () => {
+      $$('[data-mv]', ul).forEach((b) => b.onclick = (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
         const li = b.closest('li'); const d = Number(b.dataset.mv);
         if (d < 0 && li.previousElementSibling) ul.insertBefore(li, li.previousElementSibling);
         if (d > 0 && li.nextElementSibling) ul.insertBefore(li.nextElementSibling, li);
-        sauver(); ul.innerHTML = rendreListe(); brancher();
+        sauver(); reafficher(li.dataset.r);
       });
-      $$('.poignee', ul).forEach((p) => p.onpointerdown = (ev) => {
-        ev.preventDefault();
-        const li = p.closest('li'); li.classList.add('glisse'); p.setPointerCapture(ev.pointerId);
-        p.onpointermove = (mv) => {
-          const sous = document.elementFromPoint(mv.clientX, mv.clientY)?.closest('#reorg li');
-          if (!sous || sous === li) return;
+      // Glisser au doigt : événements tactiles (fiables sur iPhone) + souris
+      $$('.poignee', ul).forEach((p) => {
+        const li = p.closest('li');
+        const deplacer = (y) => {
+          const sous = [...ul.children].find((x) => { const r = x.getBoundingClientRect(); return x !== li && y > r.top && y < r.bottom; });
+          if (!sous) return;
           const box = sous.getBoundingClientRect();
-          ul.insertBefore(li, mv.clientY < box.top + box.height / 2 ? sous : sous.nextElementSibling);
+          ul.insertBefore(li, y < box.top + box.height / 2 ? sous : sous.nextElementSibling);
         };
-        p.onpointerup = p.onpointercancel = () => { li.classList.remove('glisse'); p.onpointermove = null; sauver(); ul.innerHTML = rendreListe(); brancher(); };
+        const fin = () => { li.classList.remove('glisse'); sauver(); reafficher(li.dataset.r); };
+        p.addEventListener('touchstart', (ev) => { ev.preventDefault(); li.classList.add('glisse'); }, { passive: false });
+        p.addEventListener('touchmove', (ev) => { ev.preventDefault(); deplacer(ev.touches[0].clientY); }, { passive: false });
+        p.addEventListener('touchend', fin);
+        p.onmousedown = (ev) => {
+          ev.preventDefault(); li.classList.add('glisse');
+          const mv = (m) => deplacer(m.clientY);
+          const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); fin(); };
+          document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+        };
       });
     };
     brancher();
@@ -473,19 +559,23 @@ export function ficheArticle(articleId, ligneId) {
       if (res.format) $('#pFormat', c).value = res.format;
       if (res.rabais) $('#pType', c).value = 'circulaire';
       $('#pLecture', c).innerHTML = res.offre ? `✓ Lu : <b>${esc(res.offre)}</b>${res.format ? ` · ${esc(res.format)}` : ''}. Vérifie, puis « Ajouter ce prix ».`
+        : !navigator.onLine ? '📵 Pas de réseau : touche « Ajouter ce prix » sans rien écrire, la photo sera lue au retour du réseau et le prix se remplira tout seul.'
         : 'Je n\'ai pas pu lire le prix sur la photo : entre-le à la main (la photo est gardée).';
     }, $('#pLecture', c));
     $('#pAjout', c).onclick = () => {
       const offre = $('#pOffre', c).value.trim();
-      if (!analyserOffre(offre)) { toast('Prix illisible : ex. 4,99 $, 2/5 $ ou 1,99 $/lb'); return; }
+      const plusTard = !offre && photoPrixId; // photo sans lecture (hors ligne) → lue plus tard
+      if (!plusTard && !analyserOffre(offre)) { toast('Prix illisible : ex. 4,99 $, 2/5 $ ou 1,99 $/lb'); return; }
       const opt = $('#pBan', c).selectedOptions[0];
+      const pid = S.uid('p');
       S.maj((x) => {
-        x.prix.push({ articleId: a.id, banniere: $('#pBan', c).value, magasinId: opt?.dataset.mag, offre, format: $('#pFormat', c).value.trim() || a.format,
+        x.prix.push({ id: pid, articleId: a.id, banniere: $('#pBan', c).value, magasinId: opt?.dataset.mag, offre, format: $('#pFormat', c).value.trim() || a.format,
           type: $('#pType', c).value, fin: $('#pFin', c).value || null, source: photoPrixId ? 'photo' : 'manuel', photoId: photoPrixId,
-          observeLe: new Date().toISOString().slice(0, 10) });
-        if (photoPrixId) x.photos.push({ id: photoPrixId, type: 'prix', articleId: a.id, date: new Date().toISOString(), prise_par: x.utilisateur, note: `${offre} · ${opt?.textContent || ''}` });
+          enAttente: !!plusTard, observeLe: new Date().toISOString().slice(0, 10) });
+        if (photoPrixId) x.photos.push({ id: photoPrixId, type: 'prix', articleId: a.id, date: new Date().toISOString(), prise_par: x.utilisateur, note: `${offre || 'à lire'} · ${opt?.textContent || ''}` });
       });
-      toast('Prix ajouté'); ficheArticle(articleId, ligneId);
+      if (plusTard) ajouterTache({ type: 'prix', prixId: pid, photoId: photoPrixId });
+      toast(plusTard ? 'Photo gardée : le prix sera lu au retour du réseau' : 'Prix ajouté'); ficheArticle(articleId, ligneId);
     };
     $('#fSauver', c).onclick = () => {
       S.maj((x) => {
@@ -513,7 +603,8 @@ const lienMaps = (m) => `https://www.google.com/maps/search/?api=1&query=${encod
 
 function vueMagasins(v) {
   const e = S.get();
-  let html = `<p class="doux" style="margin:0 0 8px">Interrupteur = magasin <b>considéré</b> ou <b>ignoré</b> dans les comparaisons, les listes et les paniers (sans le supprimer). 🗺️ = itinéraire.</p>
+  let html = `<h2 style="margin-top:0">Mes magasins</h2>
+    <p class="doux" style="margin:0 0 8px">Interrupteur = magasin <b>considéré</b> ou <b>ignoré</b> dans les comparaisons, les listes et les paniers (sans le supprimer). 🗺️ = itinéraire. 🏷️ = relevé de prix dans ce magasin.</p>
     <div class="carte"><h2>Codes postaux</h2>
     <div>${e.codesPostaux.map((c) => `<span class="pastille" style="font-size:13px;padding:4px 10px">${esc(c.code)} · ${esc(c.libelle)} <a href="#" data-supcp="${esc(c.code)}" aria-label="Retirer">✕</a></span>`).join(' ')}</div>
     <div class="rang" style="margin-top:8px"><input id="cpCode" placeholder="Code (ex. J3X)" style="max-width:120px"><input id="cpLib" class="grandir" placeholder="Ville"><button class="btn sec" id="cpAjout">Ajouter</button></div></div>`;
@@ -527,7 +618,8 @@ function vueMagasins(v) {
       const actif = m.actif !== false;
       html += `<div class="mag-ligne ${actif ? '' : 'inactif'}">
         <label class="interrupteur" title="${actif ? 'Considéré dans les comparaisons' : 'Ignoré (pas supprimé)'}"><input type="checkbox" data-actif="${m.id}" ${actif ? 'checked' : ''}><span></span></label>
-        ${puce(m.banniere)}<span class="grandir une-ligne"><b>${esc(m.nom)}</b>${rp ? ' <span class="pastille vert">%</span>' : ''}</span>
+        <span class="grandir une-ligne">${logoMagasin(m)}${rp ? ' <span class="pastille vert">%</span>' : ''}</span>
+        <button class="icone" data-releve="${m.id}" aria-label="Relevé de prix">🏷️</button>
         <a class="icone" href="${lienMaps(m)}" target="_blank" rel="noopener" aria-label="Ouvrir dans Google Maps" style="display:grid;place-items:center;text-decoration:none">🗺️</a>
         <button class="icone" data-supmag="${m.id}" aria-label="Retirer">🗑</button></div>`;
     }
@@ -553,6 +645,7 @@ function vueMagasins(v) {
     S.maj((x) => { x.codesPostaux = x.codesPostaux.filter((c) => c.code !== code); });
   });
   // Décocher = ne plus considérer ce magasin (comparaisons, listes, paniers) sans le supprimer
+  $$('[data-releve]').forEach((b) => b.onclick = () => { ouvrirReleve(b.dataset.releve); allerOnglet('plus'); });
   $$('[data-actif]').forEach((i) => i.onchange = () => S.maj((x) => { x.magasins.find((m) => m.id === i.dataset.actif).actif = i.checked; }));
   $$('[data-supmag]').forEach((b) => b.onclick = () => {
     const m = e.magasins.find((x) => x.id === b.dataset.supmag);

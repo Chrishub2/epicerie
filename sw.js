@@ -1,7 +1,7 @@
 // Service worker : l'app fonctionne hors ligne en magasin.
-const CACHE = 'epicerie-v5';
+const CACHE = 'epicerie-v6';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'demo-data.js',
-  'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg'];
+  'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'camera.js', 'attente.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FICHIERS)).then(() => self.skipWaiting()));

@@ -8,6 +8,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icone.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icone.svg">
+<script>
+  // Thème choisi sur cet appareil (Plus → Apparence), appliqué avant l'affichage pour éviter un flash.
+  try { const t = localStorage.getItem('theme'); if (t === 'sombre') document.documentElement.dataset.theme = 'dark'; if (t === 'clair') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+</script>
 <style>
 :root {
   --fond: #f5f6f3; --carte: #ffffff; --texte: #1d2320; --doux: #66706a; --ligne: #e3e6e1;
@@ -25,6 +29,27 @@
     --ombre: none;
   }
 }
+/* Mode sombre forcé (Plus → Apparence → Sombre) */
+:root[data-theme="dark"] {
+  --fond: #121513; --carte: #1b1f1c; --texte: #e8ece9; --doux: #9aa59e; --ligne: #2c322e;
+  --accent: #4cc38a; --accent-doux: #1d3328;
+  --vert: #4cc38a; --vert-fond: #173426; --ambre: #f0b14a; --ambre-fond: #3a2c12;
+  --rouge: #ff7a6b; --rouge-fond: #3b1d19; --gris-fond: #232824;
+  --ombre: none;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+/* Logos de bannières (pastilles aux couleurs de la marque) */
+.logo { display: inline-block; font-weight: 800; font-size: 12px; line-height: 1; padding: 4px 7px; border-radius: 6px;
+  letter-spacing: .02em; white-space: nowrap; vertical-align: middle; font-family: system-ui, sans-serif; }
+.logo-iga { background: #d6001c; color: #fff; }
+.logo-super_c { background: #ffd200; color: #e30613; font-style: italic; }
+.logo-metro { background: #111; color: #fff; text-transform: lowercase; }
+.logo-maxi { background: #ffe100; color: #111; border: 2px solid #e30613; padding: 2px 6px; }
+.logo-costco { background: #fff; color: #e31837; border-bottom: 3px solid #005daa; box-shadow: 0 0 0 1px #d5d9e0 inset; }
+.logo-jean_coutu { background: #003da5; color: #fff; font-weight: 700; }
+.logo-voila { background: #6a1b9a; color: #fff; text-transform: lowercase; }
+.ville { color: var(--doux); font-size: 12px; }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--fond); color: var(--texte);
   font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -96,13 +121,56 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
   background: var(--carte); color: var(--texte); cursor: pointer; }
 .puce-ban.forcee { background: var(--vert-fond); color: var(--vert); border-color: var(--vert); font-weight: 700; }
 .puce-ban.ignoree { background: var(--gris-fond); color: var(--doux); text-decoration: line-through; }
+/* Caméra des reçus (plein écran, cadre jaune) */
+.camera-recu { position: fixed; inset: 0; z-index: 100; background: #000; }
+.camera-recu video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.camera-recu.flash { background: #fff; }
+.camera-recu.flash video { opacity: .4; }
+.cadre-jaune { position: absolute; left: 19%; width: 62%; top: 7%; height: 86%; border: 3px solid #ffd400; border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.45); display: flex; align-items: flex-start; justify-content: center; pointer-events: none; }
+.cadre-jaune span { margin-top: 8px; background: #ffd400; color: #000; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 6px; }
+.cam-haut { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 0; right: 0; text-align: center; color: #fff;
+  display: flex; flex-direction: column; gap: 2px; font-size: 14px; text-shadow: 0 1px 2px #000; }
+.doux-blanc { opacity: .85; font-size: 12px; }
+.cam-bas { position: absolute; bottom: calc(18px + env(safe-area-inset-bottom)); left: 0; right: 0; display: flex;
+  justify-content: space-around; align-items: center; }
+.cam-declencheur { width: 72px; height: 72px; border-radius: 50%; border: 5px solid #fff; background: #ffd400; cursor: pointer; }
+.cam-btn { font: inherit; font-weight: 700; padding: 10px 14px; border-radius: 12px; border: 0; background: #ffd400; color: #000; }
+.cam-btn.sec { background: rgba(255,255,255,.2); color: #fff; }
+.cam-btn:disabled { opacity: .4; }
+/* Tirer pour actualiser */
+#tirer { position: fixed; top: 0; left: 50%; transform: translate(-50%, -60px); z-index: 60; background: var(--carte);
+  color: var(--accent); border: 1px solid var(--ligne); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600;
+  box-shadow: 0 4px 10px rgba(0,0,0,.2); transition: transform .15s; pointer-events: none; }
+/* Recettes */
+.groupe-livre { margin-bottom: 10px; }
+.groupe-livre > summary { display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-weight: 700; cursor: pointer; list-style: none; }
+.vig-recette { width: 52px; flex: none; }
+.vig-recette figcaption { display: none; }
+.etape { margin-bottom: 12px; }
+/* Sous-onglets de Comparer : Tableau · Détails · Online · Écono */
+.sous-onglets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.sous-onglets button { font: inherit; font-size: 14px; font-weight: 600; padding: 8px 4px; border-radius: 10px; border: 1px solid var(--ligne);
+  background: var(--carte); color: var(--texte); cursor: pointer; }
+.sous-onglets button.actif { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* Liste regroupée par magasin (vue « Tout ») */
+.puce-filtre { padding: 5px 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.groupe-mag { border: 1px solid var(--ligne); border-radius: 12px; margin-bottom: 10px; background: var(--gris-fond); overflow: hidden; }
+.tete-mag { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 0; background: var(--carte);
+  color: var(--texte); font: inherit; cursor: pointer; text-align: left; }
+.groupe-mag:not(.ferme) .tete-mag { border-bottom: 1px solid var(--ligne); }
+.tete-mag .fleche { color: var(--doux); width: 14px; }
+.corps-mag { padding: 0 8px 4px; }
+.reorg li.flash { background: var(--vert-fond); transition: background .2s; }
+.reorg li .icone { width: 40px; height: 40px; }
 /* Rayons regroupés */
 .reorg li.joint { margin-top: -6px; border-top-left-radius: 0; border-top-right-radius: 0; border-left: 4px solid var(--accent); }
 /* Magasins compacts */
 .titre-cp { color: var(--doux); font-size: 13px; text-transform: uppercase; letter-spacing: .03em; margin: 14px 2px 6px; }
 .mag-ligne { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--carte); border: 1px solid var(--ligne);
   border-radius: 10px; margin-bottom: 4px; min-height: 48px; }
-.mag-ligne .icone { width: 38px; height: 38px; font-size: 17px; }
+.mag-ligne .icone { width: 36px; height: 36px; font-size: 16px; padding: 0; }
+.mag-ligne .logo { font-size: 13px; }
 .mag-ligne.inactif { opacity: .55; }
 .interrupteur { position: relative; width: 40px; height: 24px; flex: none; }
 .interrupteur input { opacity: 0; width: 0; height: 0; position: absolute; }

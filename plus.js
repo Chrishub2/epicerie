@@ -3,9 +3,12 @@
 // sauvegarde.
 // =====================================================================
 import * as S from './store.js';
-import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, joursRestants, aujourdhui } from './ui.js';
+import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin } from './ui.js';
 import { PROGRAMMES } from './demo-data.js';
-import { prendrePhoto, lireTexte, analyserRecu } from './ocr.js';
+import { photographierRecu } from './camera.js';
+import { prendrePhoto } from './ocr.js';
+import { analyserOffre, analyserFormat } from './normalise.js';
+import { ajouterTache } from './attente.js';
 
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
@@ -19,13 +22,17 @@ export function vuePlus(v) {
   if (section === 'photos') return vuePhotos(v);
   if (section === 'sauvegarde') return vueSauvegarde(v);
   if (section === 'recus') return vueRecus(v);
+  if (section === 'releve') return vueReleve(v);
+  if (section === 'apparence') return vueApparence(v);
   const e = S.get();
   const menu = [
+    ['releve', '🏷️', 'Relevé de prix en magasin', 'Photographie des étiquettes pour ton inventaire de prix, sans rien acheter'],
     ['recus', '🧾', 'Mes reçus', `${(e.recus || []).length} reçu(s) · prends-les en photo après l'épicerie`],
     ['cartes', '💳', 'Cartes fidélité & points', `${e.cartes.length} carte(s)`],
     ['rabais', '🏷️', 'Mes rabais personnels', `${e.rabaisPerso.filter((r) => r.actif).length} actif(s)`],
     ['catalogue', '📚', 'Catalogue de mes articles', `${e.articles.length} articles`],
     ['photos', '🖼️', 'Photos', `${e.photos.length} photo(s)`],
+    ['apparence', '🌓', 'Apparence', { auto: 'Selon le téléphone', clair: 'Clair', sombre: 'Sombre' }[themeActuel()]],
     ['sauvegarde', '💾', 'Sauvegarde et mode démo', 'Exporter, importer, réinitialiser'],
   ];
   v.innerHTML = menu.map(([k, ic, t, s]) => `<button class="carte rang" data-s="${k}" style="width:100%;text-align:left;font:inherit;color:inherit">
@@ -162,48 +169,117 @@ function vuePhotos(v) {
   });
 }
 
+// --- Apparence --------------------------------------------------------
+function vueApparence(v) {
+  const t = themeActuel();
+  v.innerHTML = retour() + `<div class="carte"><h2>Apparence</h2>
+    ${[['auto', 'Selon le téléphone', 'Suit le réglage clair/sombre de ton téléphone'], ['clair', 'Clair', 'Toujours clair'], ['sombre', 'Sombre', 'Toujours sombre']]
+      .map(([k, n, d]) => `<label class="item" style="cursor:pointer"><input type="radio" name="theme" value="${k}" ${t === k ? 'checked' : ''}>
+        <div class="grandir"><div class="nom">${n}</div><div class="info">${d}</div></div></label>`).join('')}
+    <p class="doux">Réglage propre à cet appareil.</p></div>`;
+  brancherRetour(v);
+  $$('input[name=theme]', v).forEach((r) => r.onchange = () => { appliquerTheme(r.value); toast('Apparence changée'); });
+}
+
+// --- Relevé de prix en magasin (inventaire) -----------------------------
+let magasinReleve = null;
+export function ouvrirReleve(magId) { section = 'releve'; if (magId) magasinReleve = magId; }
+
+function vueReleve(v) {
+  const e = S.get();
+  const mags = e.magasins.filter((m) => m.actif !== false);
+  magasinReleve ||= e.magasinCourant !== 'defaut' ? e.magasinCourant : mags[0]?.id;
+  const releves = (e.releves || []).filter((r) => r.statut !== 'enregistré');
+  const faits = (e.releves || []).filter((r) => r.statut === 'enregistré').length;
+  v.innerHTML = retour() + `<div class="carte"><h2>Relevé de prix</h2>
+      <p class="doux">Photographie les étiquettes qui t'intéressent : je lis le prix et le format, tu confirmes le produit. Les prix vont dans ton historique, pas dans ta liste. Sans réseau, les photos sont lues plus tard.</p>
+      <div class="champ"><label>Magasin</label><select id="rlMag">${mags.map((m) => `<option value="${m.id}" ${m.id === magasinReleve ? 'selected' : ''}>${esc(m.nom)}</option>`).join('')}</select></div>
+      <button class="btn" id="rlPhoto" style="width:100%">📷 Photographier une étiquette</button>
+      ${faits ? `<p class="doux">${faits} prix déjà enregistré(s) par relevé.</p>` : ''}</div>
+    <datalist id="rlCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
+    ${releves.map((r) => {
+      const m = e.magasins.find((x) => x.id === r.magasinId);
+      return `<div class="carte" data-rl="${r.id}">
+        <div class="rang"><div class="vignettes" style="width:72px;flex:none" data-ph="${r.photoId}"></div>
+          <div class="grandir"><div class="doux">${m ? logoMagasin(m) : ''} · ${esc(r.date.slice(0, 10))}</div>
+            <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : r.offre ? '✓ Lu sur la photo — vérifie' : 'Prix non lu : écris-le'}</div></div></div>
+        <div class="champ" style="margin-top:6px"><label>Produit</label><input data-nom list="rlCat" value="${esc(r.nom || r.nomLu || '')}" placeholder="ex. Beurre Lactantia"></div>
+        <div class="rang"><div class="champ grandir"><label>Prix</label><input data-offre value="${esc(r.offre || '')}" placeholder="4,99 $ · 2/5 $"></div>
+          <div class="champ grandir"><label>Format</label><input data-format value="${esc(r.format || '')}" placeholder="454 g"></div></div>
+        <label class="doux rang"><input type="checkbox" data-liste style="width:auto"> Ajouter aussi à ma liste</label>
+        <div class="rang" style="margin-top:6px"><button class="btn grandir" data-ok>Enregistrer</button><button class="btn danger" data-sup>✕</button></div></div>`;
+    }).join('')}`;
+  brancherRetour(v);
+  $$('[data-ph]', v).forEach((el) => afficherPhoto({ id: el.dataset.ph, type: 'prix', note: '' }, el));
+  $('#rlMag', v).onchange = (ev) => { magasinReleve = ev.target.value; };
+  $('#rlPhoto', v).onclick = async () => {
+    const blob = await prendrePhoto();
+    if (!blob) return;
+    const photoId = await S.enregistrerPhoto(blob);
+    const id = S.uid('rl');
+    S.maj((x) => { (x.releves ||= []).unshift({ id, photoId, magasinId: magasinReleve, date: new Date().toISOString(), statut: 'à lire', par: x.utilisateur }); });
+    ajouterTache({ type: 'releve', releveId: id, photoId });
+  };
+  $$('[data-rl]', v).forEach((el) => {
+    const r = releves.find((x) => x.id === el.dataset.rl);
+    el.querySelector('[data-sup]').onclick = () => S.maj((x) => { x.releves = x.releves.filter((y) => y.id !== r.id); });
+    el.querySelector('[data-ok]').onclick = async () => {
+      const nom = el.querySelector('[data-nom]').value.trim();
+      const offre = el.querySelector('[data-offre]').value.trim();
+      const format = el.querySelector('[data-format]').value.trim();
+      if (!nom) { toast('Indique le produit'); return; }
+      if (!analyserOffre(offre)) { toast('Prix illisible : ex. 4,99 $, 2/5 $ ou 1,99 $/lb'); return; }
+      const app = await import('./app.js');
+      const a = app.assurerArticle(nom, { format, uniteRef: analyserFormat(format)?.base || 'unite' });
+      const m = S.get().magasins.find((y) => y.id === r.magasinId);
+      S.maj((x) => {
+        x.prix.push({ id: S.uid('p'), articleId: a.id, banniere: m?.banniere, magasinId: r.magasinId, offre, format: format || a.format,
+          type: r.rabais ? 'circulaire' : 'regulier', fin: null, source: 'photo', photoId: r.photoId, observeLe: r.date.slice(0, 10) });
+        x.photos.push({ id: r.photoId, type: 'prix', articleId: a.id, date: r.date, prise_par: r.par, note: `${offre} · ${m?.nom || ''}` });
+        const rr = x.releves.find((y) => y.id === r.id); Object.assign(rr, { statut: 'enregistré', nom, offre, format, articleId: a.id });
+      });
+      if (el.querySelector('[data-liste]').checked) app.ajouterALaListe(a.id);
+      toast(`Prix enregistré : ${nom}`);
+    };
+  });
+}
+
 // --- Reçus ------------------------------------------------------------
 /** Prend un reçu en photo, le lit (sur le téléphone) et l'enregistre. Exporté pour le bouton de la liste. */
 export async function nouveauRecu() {
-  const blob = await prendrePhoto();
-  if (!blob) return;
-  const photoId = await S.enregistrerPhoto(blob);
+  const blobs = await photographierRecu(); // cadre jaune, 1 ou plusieurs sections
+  if (!blobs.length) return;
+  const photoIds = [];
+  for (const b of blobs) photoIds.push(await S.enregistrerPhoto(b));
   const id = S.uid('rc');
+  const date = new Date().toISOString();
   S.maj((x) => {
-    (x.recus ||= []).unshift({ id, photoId, cree: new Date().toISOString(), statut: 'lecture', par: x.utilisateur });
-    x.photos.push({ id: photoId, type: 'recu', articleId: null, date: new Date().toISOString(), prise_par: x.utilisateur, note: 'Reçu' });
+    (x.recus ||= []).unshift({ id, photoId: photoIds[0], photoIds, cree: date, statut: 'à lire', par: x.utilisateur });
+    photoIds.forEach((p, i) => x.photos.push({ id: p, type: 'recu', articleId: null, date, prise_par: x.utilisateur, note: `Reçu ${i + 1}/${photoIds.length}` }));
   });
-  toast('Reçu enregistré — lecture en cours…');
-  try {
-    const texte = await lireTexte(blob, () => {});
-    const r = analyserRecu(texte);
-    S.maj((x) => { const rc = x.recus.find((y) => y.id === id); Object.assign(rc, r, { texte, statut: 'lu' }); });
-    toast(`Reçu lu${r.total ? ` : total ${argent(r.total)}` : ''} — vérifie-le dans Plus → Mes reçus`);
-  } catch {
-    S.maj((x) => { const rc = x.recus.find((y) => y.id === id); rc.statut = 'à lire'; });
-    toast('Reçu gardé ; la lecture n\'a pas pu se faire (hors ligne ?)');
-  }
+  toast(navigator.onLine ? `Reçu enregistré (${photoIds.length} photo(s)) — lecture en cours…` : 'Reçu gardé — il sera lu au retour du réseau');
+  await ajouterTache({ type: 'recu', recuId: id, photoIds });
 }
 
 function vueRecus(v) {
   const e = S.get();
   const recus = e.recus || [];
   v.innerHTML = retour() + `<button class="btn" id="nouvRecu" style="width:100%;margin-bottom:10px">📷 Photographier un reçu</button>
-    <p class="doux">Le reçu est lu sur ton téléphone (magasin, date, total, lignes). La lecture peut se tromper : touche un reçu pour voir la photo et le détail. Prochaine étape : comparer chaque ligne aux prix attendus et à ta liste.</p>`
+    <p class="doux">Centre le reçu dans le cadre jaune. Reçu long : prends-le en plusieurs sections, de haut en bas, puis « Terminer ». Il est lu sur ton téléphone (magasin, date, total, lignes) ; sans réseau, il sera lu plus tard. La lecture peut se tromper : touche un reçu pour voir les photos et le détail.</p>`
     + (recus.length ? recus.map((r) => `<div class="carte" data-recu="${r.id}" style="cursor:pointer"><div class="rang">
         <b class="grandir">${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'} · ${esc(r.date || r.cree.slice(0, 10))}</b><b>${r.total != null ? argent(r.total) : ''}</b></div>
-        <div class="doux">${r.statut === 'lecture' ? 'Lecture en cours…' : r.statut === 'à lire' ? 'Pas encore lu' : `${(r.lignes || []).length} ligne(s) lue(s)`} · par ${esc(r.par || '')}</div></div>`).join('')
+        <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : `${(r.lignes || []).length} ligne(s) lue(s)`} · ${(r.photoIds || [1]).length} photo(s) · par ${esc(r.par || '')}</div></div>`).join('')
       : '<div class="vide">Aucun reçu. Après l\'épicerie, prends ton reçu en photo.</div>');
   brancherRetour(v);
   $('#nouvRecu', v).onclick = nouveauRecu;
   $$('[data-recu]', v).forEach((el) => el.onclick = () => {
     const r = recus.find((x) => x.id === el.dataset.recu);
-    ouvrirModale('Reçu', `<div id="rcPhoto" class="vignettes" style="grid-template-columns:1fr"></div>
+    ouvrirModale('Reçu', `<div id="rcPhoto" class="vignettes" style="grid-template-columns:1fr;gap:0"></div>
       <table class="comp">${(r.lignes || []).map((l) => `<tr><td>${esc(l.libelle)}</td><td class="pu">${argent(l.prix)}</td></tr>`).join('') || '<tr><td class="doux">Aucune ligne reconnue.</td></tr>'}
       ${r.total != null ? `<tr><td><b>Total</b></td><td class="pu">${argent(r.total)}</td></tr>` : ''}</table>
       <details style="margin-top:8px"><summary class="doux">Texte lu</summary><pre style="white-space:pre-wrap;font-size:12px">${esc(r.texte || '')}</pre></details>
       <button class="btn danger" id="supRecu" style="margin-top:10px">Supprimer ce reçu</button>`, (c) => {
-      afficherPhoto({ id: r.photoId, type: 'recu', note: 'Touche pour partager' }, $('#rcPhoto', c), true);
+      (r.photoIds || [r.photoId]).forEach((p, i, t) => afficherPhoto({ id: p, type: 'recu', note: t.length > 1 ? `Section ${i + 1}/${t.length} — touche pour partager` : 'Touche pour partager' }, $('#rcPhoto', c), true));
       $('#supRecu', c).onclick = () => { if (confirm('Supprimer ce reçu ?')) { S.maj((x) => { x.recus = x.recus.filter((y) => y.id !== r.id); }); fermerModale(); } };
     });
   });

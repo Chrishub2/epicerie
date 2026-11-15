@@ -34,6 +34,32 @@ export function libelleFin(fin) {
 export function nomBanniere(b) { return BANNIERES[b]?.nom || b; }
 export function puce(b) { return `<i class="ban" style="background:${BANNIERES[b]?.couleur || '#999'}"></i>`; }
 
+// Pastille aux couleurs de la bannière, qui remplace son nom (style inspiré, pas le logo officiel).
+const LOGOS = { iga: 'IGA', super_c: 'SUPER C', metro: 'metro', maxi: 'maxi', costco: 'COSTCO', jean_coutu: 'Jean Coutu', voila: 'voilà' };
+export function logo(b) {
+  return LOGOS[b] ? `<span class="logo logo-${b}" title="${esc(nomBanniere(b))}">${LOGOS[b]}</span>` : esc(nomBanniere(b));
+}
+/** Logo + ville(s) : « [IGA] Beloeil, Varennes ». */
+export function logoVille(b) {
+  const villes = [...new Set(magasinsActifs(b).map(villeMagasin).filter(Boolean))];
+  return `${logo(b)}${villes.length ? ` <span class="ville">${esc(villes.join(', '))}</span>` : ''}`;
+}
+/** Logo + nom de la succursale sans la bannière : « [IGA] Extra Varennes ». */
+export function logoMagasin(m) {
+  const reste = m.nom.replace(new RegExp(`^${nomBanniere(m.banniere).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '');
+  return `${logo(m.banniere)} <span>${esc(reste || villeMagasin(m))}</span>`;
+}
+
+// ---------------------------------------------------------------------
+// Apparence : « clair », « sombre » ou « selon le téléphone » (gardé sur cet appareil)
+// ---------------------------------------------------------------------
+export function themeActuel() { try { return localStorage.getItem('theme') || 'auto'; } catch { return 'auto'; } }
+export function appliquerTheme(t = themeActuel()) {
+  try { localStorage.setItem('theme', t); } catch { /* navigation privée */ }
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t === 'sombre' ? 'dark' : 'light');
+}
+
 /** Ville d'une succursale (champ ville, sinon tirée de l'adresse « …, Ville, QC … »). */
 export function villeMagasin(m) {
   if (m.ville) return m.ville;
@@ -95,6 +121,7 @@ export function offresArticle(article) {
   const lignes = [];
   for (const p of e.prix.filter((x) => x.articleId === article.id)) {
     if (p.fin && joursRestants(p.fin) < 0) continue;
+    if (p.enAttente) continue; // photo pas encore lue (hors ligne)
     if (!banniereActive(p.banniere)) continue;
     if (article.exclusif && p.banniere !== article.exclusif) continue;
     let n = normaliser(p.offre, p.format || article.format, article.uniteRef);

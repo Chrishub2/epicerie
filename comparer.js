@@ -5,11 +5,11 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, $$, esc, argent, offresArticle, libelleUnitaire, libelleFin, joursRestants, nomBanniere, nomBanniereVille,
-  banniereActive, nomOffre, puce, toast } from './ui.js';
+  banniereActive, nomOffre, puce, toast, logo, logoVille, logoMagasin } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserFormat, formatLisible } from './normalise.js';
 
-let vue = 'tableau';      // 'tableau' | 'cartes'
+let vue = 'tableau';      // 'tableau' | 'details' | 'online' | 'econo'
 let portee = 'liste';     // 'liste' | 'tout'
 let maxArrets = 2;
 let nbSitesEnLigne = 1;
@@ -47,14 +47,14 @@ export function tableauOffres(a, { avecManquants = false } = {}) {
   if (!lignes.length && !manquantes.length) return `<p class="doux">Aucun prix connu pour l'instant.</p>`;
   return `<table class="comp">${lignes.map((l) => `
     <tr class="${l.classe}">
-      <td>${puce(l.banniere)}<b>${esc(nomOffre(l))}</b>
+      <td>${l.perso ? logoCleHtml(cleOffre(l)) : logoVille(l.banniere)}
         <div class="doux">${esc(l.offre)}${l.economie ? ` <b style="color:var(--vert)">(−${argent(l.economie)})</b>` : ''}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
-        <div>${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
+        <div>${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.aVerifier ? '<span class="pastille ambre">lu sur photo : à vérifier</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
         ${l.erreur ? `<div class="doux" style="color:var(--rouge)">${esc(l.erreur)}</div>` : ''}
       </td>
       <td class="pu">${puHtml(l)}${l.prixArticle != null ? `<div class="doux">${argent(l.prixArticle)} / article</div>` : ''}</td>
     </tr>`).join('')}
-    ${manquantes.map((b) => `<tr><td>${puce(b)}<b>${esc(nomBanniereVille(b))}</b><div class="doux">Prix inconnu</div></td>
+    ${manquantes.map((b) => `<tr><td>${logoVille(b)}<div class="doux">Prix inconnu</div></td>
       <td class="pu"><button class="btn sec" data-ajprix="${b}" style="padding:4px 10px">+ prix</button></td></tr>`).join('')}
   </table>
   <p class="doux">Vert = le moins cher · rouge = le plus cher · ambre = moins de 5 % d'écart. (−x $) = économie sur le prix régulier.</p>`;
@@ -89,6 +89,19 @@ function options(cleAutorisee = () => true) {
     }
     return { l, a, parCle };
   });
+}
+
+/** Coût d'une ligne de liste dans un « arrêt » donné (bannière ou magasin à rabais perso). null si pas de prix. */
+export function coutPour(l, a, cle) {
+  const f = analyserFormat(a.format);
+  const besoin = f && f.base === a.uniteRef ? f.total * l.quantite : null;
+  let min = null;
+  for (const o of offresArticle(a)) {
+    if (o.pu == null || cleOffre(o) !== cle) continue;
+    const c = besoin != null ? o.pu * besoin : (o.prixArticle != null ? o.prixArticle * l.quantite : null);
+    if (c != null && (min == null || c < min)) min = c;
+  }
+  return min;
 }
 
 function combinaisons(cles, k, debut = 0, acc = [], out = []) {
@@ -152,7 +165,7 @@ function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
     <div class="total"><span>${r.arrets} arrêt${r.arrets > 1 ? 's' : ''} : ${r.combo.map((k) => esc(nomCle(k))).join(' + ')}</span><span>${argent(r.total)}</span></div>
     ${eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
     ${r.manquants ? `<div class="doux" style="color:var(--ambre)">${r.manquants} article(s) sans prix dans ces magasins</div>` : ''}
-    ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:6px">${puce(banniereDeCle(k))}<b>${esc(nomCle(k))}</b> — ${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}
+    ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:8px">${logoCleHtml(k)} — <b>${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b>
       <ul class="liste-arret">${xs.map((x) => `<li><span>${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
         <span class="doux">${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
     ${avecBouton ? `<button class="btn" ${attr}="${r.arrets}" style="margin-top:8px">Utiliser cette répartition</button>` : ''}</div>`;
@@ -161,53 +174,58 @@ function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
 // ---------------------------------------------------------------------
 // Vue
 // ---------------------------------------------------------------------
+/**
+ * Quatre affichages, choisis par les boutons d'en-tête (de gauche à droite) :
+ * Tableau · Détails · Online (paniers en ligne) · Écono (le moins cher en N arrêts).
+ * Chacun n'affiche que ses propres options.
+ */
 export function vueComparaison(v, rendre) {
   const e = S.get();
   e.optim ||= { forcees: [], ignorees: [] };
-  const articles = portee === 'liste'
-    ? [...new Set(lignesListe().map((x) => x.a.id))].map((id) => e.articles.find((a) => a.id === id))
-    : [...e.articles].sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
+  const onglets = [['tableau', '▦ Tableau'], ['details', '☰ Détails'], ['online', '🛒 Online'], ['econo', '💲 Écono']];
+  let html = `<div class="sous-onglets barre-collante">${onglets.map(([k, t]) =>
+    `<button class="${vue === k ? 'actif' : ''}" data-vue="${k}">${t}</button>`).join('')}</div>`;
 
-  let html = `<div class="rang envelopper barre-collante">
-      <button class="btn ${portee === 'liste' ? '' : 'sec'}" data-portee="liste">Ma liste</button>
-      <button class="btn ${portee === 'tout' ? '' : 'sec'}" data-portee="tout">Tout le catalogue</button>
-      <span class="grandir"></span>
-      <button class="btn ${vue === 'tableau' ? '' : 'sec'}" data-vue="tableau">▦ Tableau</button>
-      <button class="btn ${vue === 'cartes' ? '' : 'sec'}" data-vue="cartes">☰ Détail</button></div>`;
+  if (vue === 'tableau' || vue === 'details') {
+    const articles = portee === 'liste'
+      ? [...new Set(lignesListe().map((x) => x.a.id))].map((id) => e.articles.find((a) => a.id === id))
+      : [...e.articles].sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
+    html += `<div class="rang" style="margin-bottom:8px">
+      <button class="btn ${portee === 'liste' ? '' : 'sec'}" data-portee="liste" style="padding:6px 10px">Ma liste</button>
+      <button class="btn ${portee === 'tout' ? '' : 'sec'}" data-portee="tout" style="padding:6px 10px">Tout le catalogue</button></div>`;
+    if (!articles.length) html += `<div class="vide">Rien à comparer.</div>`;
+    else if (vue === 'tableau') html += matrice(articles);
+    else for (const a of articles) {
+      html += `<div class="carte" data-art="${a.id}" style="cursor:pointer"><h3 class="rang">${a.imageUrl ? `<img class="vignette" src="${esc(a.imageUrl)}" alt="">` : ''}<span class="grandir">${esc(a.nom)} ${a.local ? '🍁' : ''} <span class="doux">· comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef === 'kg' ? 'kilo' : 'litre'}</span></span></h3>${tableauOffres(a)}</div>`;
+    }
+  }
 
-  // --- Créer mes listes ---
-  const { forcees, ignorees } = e.optim;
-  const opt = optimiser(maxArrets, { forcees, ignorees });
-  const toutesCles = [...new Set([...optimiser(1).cles, ...forcees, ...ignorees])];
-  if (opt.nb) {
-    html += `<div class="carte"><h2>Créer mes listes : le moins cher</h2>
+  let opt = null;
+  if (vue === 'econo') {
+    const { forcees, ignorees } = e.optim;
+    opt = optimiser(maxArrets, { forcees, ignorees });
+    const toutesCles = [...new Set([...optimiser(1).cles, ...forcees, ...ignorees])];
+    if (!opt.nb) html += `<div class="vide">Ta liste est vide.</div>`;
+    else html += `<div class="carte"><h2>Le moins cher pour ma liste</h2>
       <div class="rang"><label class="doux grandir">Nombre d'arrêts maximum</label>
         <select id="maxArrets" style="width:auto">${[1, 2, 3, 4].map((n) => `<option ${n === maxArrets ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-      <div class="doux" style="margin:8px 0 4px">Touche une bannière : <b>★ forcée</b> (toujours un arrêt) → <b>✕ ignorée</b> → normale.</div>
+      <div class="doux" style="margin:8px 0 4px">Touche un magasin : <b>★ forcé</b> (toujours un arrêt) → <b>✕ ignoré</b> → normal.</div>
       <div class="rang envelopper">${toutesCles.map((k) => {
         const etat = forcees.includes(k) ? 'forcee' : ignorees.includes(k) ? 'ignoree' : '';
-        return `<button class="puce-ban ${etat}" data-cle="${esc(k)}">${etat === 'forcee' ? '★ ' : etat === 'ignoree' ? '✕ ' : ''}${esc(nomCle(k))}</button>`;
+        return `<button class="puce-ban ${etat}" data-cle="${esc(k)}">${etat === 'forcee' ? '★ ' : etat === 'ignoree' ? '✕ ' : ''}${logoCleHtml(k)}</button>`;
       }).join('')}</div>
-      <button class="btn sec" id="recalculer" style="margin-top:8px">🔄 Refaire l'optimisation</button>
+      <button class="btn sec" id="recalculer" style="margin-top:8px">🔄 Refaire l'optimisation</button></div>
       ${opt.resultats.length ? opt.resultats.map((r) => blocResultat(r, opt.resultats[0], true)).join('')
-        : '<p class="doux">Aucune combinaison possible avec ces choix (trop de bannières forcées pour le nombre d\'arrêts ?).</p>'}
-      ${opt.sansPrix.length ? `<p class="doux">Sans prix connu : ${opt.sansPrix.map((o) => esc(o.a.nom)).join(', ')}. Touche l'article pour trouver ses prix.</p>` : ''}
-      <p class="doux">Coût = prix unitaire × ta quantité habituelle (les gros formats Costco sont ramenés à ton format), avant taxes. Le plafond du rabais perso n'est pas suivi article par article.</p></div>`;
+        : '<p class="doux">Aucune combinaison possible avec ces choix (trop de magasins forcés pour le nombre d\'arrêts ?).</p>'}
+      ${opt.sansPrix.length ? `<p class="doux">Sans prix connu : ${opt.sansPrix.map((o) => esc(o.a.nom)).join(', ')}. Touche l'article dans la liste pour trouver ses prix.</p>` : ''}
+      <p class="doux">Coût = prix unitaire × ta quantité habituelle (les gros formats Costco sont ramenés à ton format), avant taxes. Le plafond du rabais perso n'est pas suivi article par article.</p>`;
   }
 
-  // --- Prix ---
-  if (!articles.length) html += `<div class="vide">Rien à comparer.</div>`;
-  else if (vue === 'tableau') html += matrice(articles);
-  else for (const a of articles) {
-    html += `<div class="carte" data-art="${a.id}" style="cursor:pointer"><h3 class="rang">${a.imageUrl ? `<img class="vignette" src="${esc(a.imageUrl)}" alt="">` : ''}<span class="grandir">${esc(a.nom)} ${a.local ? '🍁' : ''} <span class="doux">· comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef === 'kg' ? 'kilo' : 'litre'}</span></span></h3>${tableauOffres(a)}</div>`;
-  }
-
-  // --- Commande en ligne ---
-  if (lignesListe().length) html += blocEnLigne();
+  if (vue === 'online') html += lignesListe().length ? blocEnLigne() : `<div class="vide">Ta liste est vide.</div>`;
   v.innerHTML = html;
 
   $$('[data-portee]', v).forEach((b) => b.onclick = () => { portee = b.dataset.portee; rendre(); });
-  $$('[data-vue]', v).forEach((b) => b.onclick = () => { vue = b.dataset.vue; rendre(); });
+  $$('[data-vue]', v).forEach((b) => b.onclick = () => { vue = b.dataset.vue; window.scrollTo(0, 0); rendre(); });
   $('#maxArrets', v)?.addEventListener('change', (ev) => { maxArrets = Number(ev.target.value); rendre(); });
   $$('[data-cle]', v).forEach((b) => b.onclick = () => S.maj((x) => {
     const k = b.dataset.cle; const o = (x.optim ||= { forcees: [], ignorees: [] });
@@ -225,6 +243,12 @@ export function vueComparaison(v, rendre) {
   brancherEnLigne(v, rendre);
 }
 
+/** Logo + ville (ou succursale à rabais perso) pour une clé d'arrêt. */
+export function logoCleHtml(k) {
+  if (k.startsWith('perso:')) { const m = S.get().magasins.find((x) => x.nom === k.slice(6)); return m ? logoMagasin(m) : esc(k.slice(6)); }
+  return logoVille(k);
+}
+
 /** Tableau : une ligne par aliment, une colonne par bannière ; vert = moins cher, rouge = plus cher. */
 function matrice(articles) {
   const offres = articles.map((a) => ({ a, os: offresArticle(a) }));
@@ -232,7 +256,7 @@ function matrice(articles) {
   const ordre = Object.keys(BANNIERES);
   cles.sort((x, y) => ordre.indexOf(banniereDeCle(x)) - ordre.indexOf(banniereDeCle(y)) || x.localeCompare(y));
   return `<div class="tableau-wrap"><table class="matrice">
-    <thead><tr><th>Aliment</th>${cles.map((k) => `<th>${puce(banniereDeCle(k))}${esc(nomCle(k))}${k.startsWith('perso:') ? '<div class="doux">rabais perso</div>' : ''}</th>`).join('')}</tr></thead>
+    <thead><tr><th>Aliment</th>${cles.map((k) => `<th>${logoCleHtml(k)}${k.startsWith('perso:') ? '<div class="doux">rabais perso</div>' : ''}</th>`).join('')}</tr></thead>
     <tbody>${offres.map(({ a, os }) => {
       const parCle = {};
       for (const o of os) { if (o.pu == null) continue; const k = cleOffre(o); if (!parCle[k] || o.pu < parCle[k].pu) parCle[k] = o; }
@@ -276,7 +300,7 @@ function blocEnLigne() {
     for (const [site, xs] of Object.entries(parSite)) {
       const s = EN_LIGNE[site];
       html += `<div class="carte" style="margin:10px 0 0;background:var(--gris-fond)" data-site="${site}">
-        <div class="rang"><b class="grandir">${puce(s.prixDe === 'iga' ? 'voila' : s.prixDe)}${esc(s.nom)} — ${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b>
+        <div class="rang"><span class="grandir">${logo(s.prixDe === 'iga' ? 'voila' : s.prixDe)} <b>${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b></span>
           <a class="btn" href="${s.site}" target="_blank" rel="noopener" style="text-decoration:none;padding:6px 10px">Ouvrir</a></div>
         <div class="doux">${esc(s.note)}</div>
         ${xs.map((x) => { const lp = lienProduit(site, x.a); return `<div class="rang" style="padding:6px 0;border-top:1px solid var(--ligne)">
