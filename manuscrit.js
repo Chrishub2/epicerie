@@ -225,7 +225,8 @@ export function identifierArticle(articleId, ligneId) {
     <button class="btn sec" id="idMagasin" style="width:100%">🏷️ Je suis en magasin : photo + prix sur l'étiquette</button>`, (c) => {
     $('#idScan', c).onclick = async () => {
       const { ouvrirScan } = await import('./scan.js');
-      ouvrirScan((trouve) => remplacerArticle(articleId, ligneId, trouve));
+      // Scan POUR cet article : ses champs sont remplis ; si le code appartient déjà à un autre produit, on le remplace
+      ouvrirScan((trouve) => remplacerArticle(articleId, ligneId, trouve), { cibleId: articleId });
     };
     $('#idPhoto', c).onclick = () => photoProduitEnLigne(articleId);
     $('#idNom', c).onclick = () => ouvrirLiaison(articleId, null, { auto: true });
@@ -234,7 +235,7 @@ export function identifierArticle(articleId, ligneId) {
 }
 
 /** La ligne de liste pointe désormais vers l'article trouvé ; l'ancien, s'il ne sert à rien d'autre, disparaît. */
-function remplacerArticle(ancienId, ligneId, trouve) {
+export function remplacerArticle(ancienId, ligneId, trouve) {
   if (!trouve || trouve.id === ancienId) return;
   S.maj((x) => {
     const l = x.liste.find((y) => y.id === ligneId);

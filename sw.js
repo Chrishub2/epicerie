@@ -1,24 +1,42 @@
-// Service worker : l'app fonctionne hors ligne en magasin.
-const CACHE = 'epicerie-v13';
+// =====================================================================
+// Service worker : l'app fonctionne hors ligne, et les mises à jour se font
+// avec ton accord.
+// - Les fichiers de l'app sont servis depuis le cache de la version installée.
+// - Une nouvelle version (CACHE ci-dessous changé) se télécharge en arrière-plan,
+//   puis ATTEND : l'app affiche « Mise à jour disponible — Oui / Non ».
+// - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
+// À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
+// =====================================================================
+const CACHE = 'epicerie-v16';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'demo-data.js',
-  'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'camera.js', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js', 'retouche.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg'];
+  'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'camera.js', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
+  'retouche.js', 'maj.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FICHIERS)).then(() => self.skipWaiting()));
+  // On télécharge toute la nouvelle version en contournant le cache du navigateur.
+  e.waitUntil(caches.open(CACHE).then((c) => Promise.all(FICHIERS.map((f) =>
+    fetch(new Request(f, { cache: 'reload' })).then((r) => { if (!r.ok) throw new Error(f); return c.put(f, r); })))));
+  // Pas de skipWaiting ici : on attend ton « Oui ».
 });
+
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'ACTIVER') self.skipWaiting();
+  if (e.data?.type === 'VERSION') e.source?.postMessage({ type: 'VERSION', version: CACHE });
+});
+
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((k) => Promise.all(k.filter((x) => x !== CACHE).map((x) => caches.delete(x))))
     .then(() => self.clients.claim()));
 });
-// Réseau d'abord (pour avoir la dernière version), cache en secours.
+
+// Fichiers de l'app : depuis le cache de la version installée (rapide, et hors ligne).
+// Ce qui n'y est pas (ex. autres sites, base de données) : réseau normal.
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request).then((r) => {
-      const copie = r.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copie));
-      return r;
-    }).catch(() => caches.match(e.request))
+    caches.open(CACHE).then((c) => c.match(e.request, { ignoreSearch: true })
+      .then((trouve) => trouve || (e.request.mode === 'navigate' ? c.match('./') : null))
+      .then((trouve) => trouve || fetch(e.request)))
   );
 });

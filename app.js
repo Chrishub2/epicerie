@@ -13,7 +13,10 @@ import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './com
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
 import * as Sync from './sync.js';
-import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle } from './manuscrit.js';
+import { surveillerMisesAJour } from './maj.js';
+
+surveillerMisesAJour(); // « Mise à jour disponible — Oui / Non »
+import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle, remplacerArticle } from './manuscrit.js';
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 
 let onglet = 'liste';
@@ -243,7 +246,7 @@ function htmlItem(l, a) {
     <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
     ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
     <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
-      <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''} ${l.mode === 'en_ligne' ? '<span class="pastille">en ligne</span>' : ''}</div>
+      <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''}</div>
       <div class="info">${meilleur}</div>
       <div class="info">${esc(formatLisible(a.format) || '')}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
     </div>
@@ -595,6 +598,7 @@ export function ficheArticle(articleId, ligneId) {
   const photos = e.photos.filter((p) => p.articleId === a.id);
   ouvrirModale(a.nom, `
     ${a.exclusif ? `<div class="alerte ambre">Vendu seulement chez <b>${esc(nomBanniere(a.exclusif))}</b> : les autres bannières sont ignorées pour ce produit.</div>` : ''}
+    <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres pour remplir la fiche</button>
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a, { avecManquants: true })}
     <div class="carte" style="margin-top:8px;background:var(--gris-fond)">
@@ -630,7 +634,7 @@ export function ficheArticle(articleId, ligneId) {
     </div>
     <div class="champ"><label>Vendu seulement chez</label><select id="fExclusif"><option value="">— Toutes les bannières —</option>
       ${Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement).map(([k, b]) => `<option value="${k}" ${a.exclusif === k ? 'selected' : ''}>${esc(b.nom)}</option>`).join('')}</select></div>
-    ${l ? `<div class="champ"><label>Achat</label><select id="fMode"><option value="personne" ${l.mode !== 'en_ligne' ? 'selected' : ''}>En personne</option><option value="en_ligne" ${l.mode === 'en_ligne' ? 'selected' : ''}>En ligne</option></select></div>
+    ${l ? `
     <div class="champ"><label>Note</label><input id="fNote" value="${esc(l.note || '')}" placeholder="ex. sans lactose, gros format"></div>` : ''}
     ${l ? `<div class="doux">Ajouté à la liste par <b>${esc(l.ajoutePar || '?')}</b>${l.cree ? ` le ${esc(new Date(l.cree).toLocaleDateString('fr-CA'))}` : ''}</div>` : ''}
     <div class="doux">Codes-barres : ${a.codes?.length ? a.codes.map(esc).join(', ') : 'aucun'}</div>
@@ -707,11 +711,19 @@ export function ficheArticle(articleId, ligneId) {
         ar.format = $('#fFormat', c).value.trim(); ar.local = $('#fLocal', c).value === '1';
         ar.exclusif = $('#fExclusif', c).value || null;
         const li = x.liste.find((i) => i.id === ligneId);
-        if (li) { li.mode = $('#fMode', c).value; li.note = $('#fNote', c).value.trim(); }
+        if (li) li.note = $('#fNote', c).value.trim();
       });
       fermerModale(); toast('Enregistré');
     };
     $('#fPhoto', c).onclick = () => photoProduit(a.id);
+    // Scan pour CET article : remplit nom, marque, format, catégorie, photo, code et vrais prix
+    $('#fScan', c).onclick = () => ouvrirScan((trouve) => {
+      if (trouve && trouve.id !== a.id && ligneId) {
+        // Ce code-barres appartient déjà à un autre produit du catalogue : on le met à sa place dans la liste
+        remplacerArticle(a.id, ligneId, trouve);
+        setTimeout(() => ficheArticle(trouve.id, ligneId), 300);
+      } else setTimeout(() => ficheArticle(articleId, ligneId), 300);
+    }, { cibleId: a.id });
     $('#fRetirer', c)?.addEventListener('click', () => { S.maj((x) => { x.liste = x.liste.filter((i) => i.id !== ligneId); }); fermerModale(); });
     $('#fAjouter', c)?.addEventListener('click', () => { ajouterALaListe(a.id); fermerModale(); toast(`${a.nom} ajouté`); });
     $('#fSupCat', c).onclick = () => {

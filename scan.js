@@ -68,8 +68,13 @@ async function demarrerCamera(video, surCode) {
 }
 
 /** Ouvre le lecteur. surArticle(article) est appelé pour chaque produit reconnu et confirmé. */
-export function ouvrirScan(surArticle) {
-  ouvrirModale('Code-barres', `
+/**
+ * Ouvre le lecteur. surArticle(article) est appelé pour chaque produit reconnu et confirmé.
+ * opts.cibleId : on scanne POUR un article existant → ses champs sont remplis (nom, marque,
+ * format, catégorie, photo officielle, code, vrais prix) au lieu de créer un autre article.
+ */
+export function ouvrirScan(surArticle, opts = {}) {
+  ouvrirModale(opts.cibleId ? 'Scanner pour remplir la fiche' : 'Code-barres', `
     <video class="scan" id="video" playsinline muted></video>
     <p class="doux" id="etatScan">Démarrage de la caméra…</p>
     <label class="rang doux"><input type="checkbox" id="rafale" style="width:auto"> Mode rafale (scanner plusieurs produits d'affilée)</label>
@@ -83,7 +88,7 @@ export function ouvrirScan(surArticle) {
       if (code === dernier.code && now - dernier.t < 3000) return; // anti-doublon
       dernier = { code, t: now }; bip();
       if (!$('#rafale', c).checked) { arret?.(); arret = null; etat.textContent = `Code ${code}`; }
-      rechercher(code, $('#resultat', c), surArticle, () => $('#rafale', c).checked);
+      rechercher(code, $('#resultat', c), surArticle, () => $('#rafale', c).checked, opts.cibleId);
     };
     $('#okCode', c).onclick = () => traiter($('#codeManuel', c).value);
     quandFermee(() => { arret?.(); arret = null; });
@@ -109,12 +114,12 @@ async function chercherEnLigne(variantes) {
   return null;
 }
 
-async function rechercher(code, zone, surArticle, enRafale) {
+async function rechercher(code, zone, surArticle, enRafale, cibleId) {
   const e = S.get();
   const variantes = gtinVariantes(code);
   // ① catalogue (toutes les variantes : UPC/EAN, caisse ITF-14)
   const local = e.articles.find((a) => a.codes?.some((c) => variantes.includes(c)));
-  if (local) {
+  if (local && local.id !== cibleId) {
     surArticle(local);
     zone.innerHTML = `<div class="alerte vert">✓ ${esc(local.nom)} (déjà au catalogue)</div>`;
     return;
@@ -138,14 +143,16 @@ async function rechercher(code, zone, surArticle, enRafale) {
     <datalist id="sCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
     <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}"></div>
       <div class="champ grandir"><label>Format</label><input id="sFormat" value="${esc(fmt)}" placeholder="454 g"></div></div>
-    <p class="doux">Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.</p>
-    <div class="rang envelopper"><button class="btn" id="sOk">Ajouter à la liste</button>
+    <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
+    <div class="rang envelopper"><button class="btn" id="sOk">${cibleId ? '✓ Remplir la fiche' : 'Ajouter à la liste'}</button>
       <button class="btn sec" id="sPhoto">📷 Photo du produit</button></div>`;
   zone.querySelector('#sOk').onclick = () => {
     const nom = zone.querySelector('#sNom').value.trim();
     if (!nom) { toast('Entre un nom'); return; }
     const format = zone.querySelector('#sFormat').value.trim();
     const f = analyserFormat(format);
+    if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, p, ec, ecp, variantes });
+      surArticle(S.get().articles.find((x) => x.id === cibleId)); fermerModale(); return; }
     const a = assurerArticle(nom, { rayonId, format, uniteRef: f?.base || 'unite', marque: zone.querySelector('#sMarque').value.trim(),
       nutriscore: p?.nutriscore_grade?.length === 1 ? p.nutriscore_grade : null, imageUrl: image });
     S.maj((x) => {
@@ -163,6 +170,27 @@ async function rechercher(code, zone, surArticle, enRafale) {
     if (!enRafale()) setTimeout(fermerModale, 700);
   };
   zone.querySelector('#sPhoto').onclick = () => { fermerModale(); photoProduit(null, code); };
+}
+
+/** Remplit un article existant avec tout ce que le code-barres a permis de trouver. */
+function remplirFiche(id, { nom, format, f, marque, image, rayonId, p, ec, ecp, variantes }) {
+  S.maj((x) => {
+    const ar = x.articles.find((i) => i.id === id);
+    if (!ar) return;
+    ar.nom = nom;
+    if (marque) ar.marque = marque;
+    if (format) { ar.format = format; if (f) ar.uniteRef = f.base; }
+    if (image) ar.imageUrl = image; // la photo officielle remplace l'ancienne
+    if (p?.nutriscore_grade?.length === 1) ar.nutriscore = p.nutriscore_grade;
+    if (!ar.rayonManuel && p) ar.rayonId = rayonId; // une catégorie choisie à la main n'est jamais changée
+    ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
+    if (/kirkland/i.test(`${marque || ''} ${nom}`) && !ar.exclusif) ar.exclusif = 'costco';
+    if (ecp && !(ar.liens || []).some((l) => l.id === ec.id)) {
+      ar.liens = [...(ar.liens || []), { id: ec.id, nom: [ecp.brand, ecp.name].filter(Boolean).join(' '), size: ecp.size, image: ecp.image }];
+    }
+  });
+  if (ecp) actualiserArticle(id, { force: true });
+  toast(`Fiche remplie : ${nom}${ecp ? ' — prix en cours de récupération' : ''}`);
 }
 
 function normaliserQuantite(q) {
