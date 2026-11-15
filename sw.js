@@ -1,5 +1,5 @@
 // Service worker : l'app fonctionne hors ligne en magasin.
-const CACHE = 'epicerie-v6';
+const CACHE = 'epicerie-v8';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'demo-data.js',
   'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'camera.js', 'attente.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg'];
 

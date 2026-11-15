@@ -42,6 +42,24 @@ function correspondance(nom) {
   }) || null;
 }
 
+/** Assez de lettres pour être du vrai texte (et pas « — ä ÿ »). */
+function lisible(l) {
+  const lettres = (l.match(/[a-zà-ÿ]/gi) || []).length;
+  return lettres >= 3 && lettres / l.replace(/\s/g, '').length >= 0.6;
+}
+
+const MOTS_PREPARATION = /minute|portion|pr[ée]paration|cuisson|cuire|chauff|m[ée]lang|ajouter|incorpor|servir|r[ée]server|[ée]tape|four\b|po[êe]le|feu (doux|moyen|vif)|jusqu|pendant|remuer|verser|égoutter|egoutter|fondu/i;
+const UNITE_RECETTE = /\b(\d|½|¼|¾)|\b(tasses?|c\.|cuill|ml|g|kg|lb|oz|gousses?|bo[îi]tes?|pinc[ée]es?|tranches?|paquets?|bottes?|feuilles?)\b/i;
+
+/** Ligne qui ressemble à un ingrédient (pas une instruction, pas du charabia). */
+export function ligneIngredient(l) {
+  const t = l.replace(/^[\s•\-*–·]+/, '').trim();
+  if (t.length < 3 || t.length > 60 || !lisible(t)) return false;
+  if (/^ingr[ée]dients?|^pr[ée]paration/i.test(t)) return false;
+  if (MOTS_PREPARATION.test(t)) return false;
+  return UNITE_RECETTE.test(t) || t.split(/\s+/).length <= 4;
+}
+
 function coutRecette(r) {
   const e = S.get();
   return r.ingredients.reduce((t, i) => {
@@ -108,7 +126,28 @@ function editeur(existante = null) {
       <div class="rang cache" id="rNouveauLivre" style="margin-top:6px"><input id="rLivreNom" class="grandir" placeholder="Nom du livre"><button class="btn sec" id="rCouverture">📷 Couverture</button></div>
       <div class="doux" id="rLivreEtat"></div></div>
     <button class="btn" id="rSuivant" style="width:100%;margin-top:8px">Choisir les ingrédients à acheter →</button>
-    ${existante ? '<button class="btn danger" id="rSup" style="width:100%;margin-top:8px">Supprimer la recette</button>' : ''}`, (c) => {
+    ${existante ? `<button class="btn sec" id="rNettoyer" style="width:100%;margin-top:8px">🧹 Retirer de ma liste les ingrédients de cette recette</button>
+      <button class="btn danger" id="rSup" style="width:100%;margin-top:8px">Supprimer la recette</button>` : ''}`, (c) => {
+    $('#rNettoyer', c)?.addEventListener('click', () => {
+      const st = S.get();
+      const lignes = st.liste.filter((l) => (l.recettes || []).includes(r.titre));
+      if (!lignes.length) { toast('Aucun ingrédient de cette recette dans ta liste'); return; }
+      // Articles créés seulement pour cette recette et jamais utilisés ailleurs (ex. lignes mal lues) : supprimés du catalogue
+      const ids = lignes.map((l) => l.articleId);
+      const orphelins = ids.filter((id) => {
+        const a = st.articles.find((x) => x.id === id);
+        return a && !a.liens?.length && !a.codes?.length && !st.prix.some((p) => p.articleId === id)
+          && !st.recettes.some((y) => y.id !== r.id && y.ingredients.some((i) => i.articleId === id));
+      });
+      if (!confirm(`Retirer ${lignes.length} article(s) de ta liste ?${orphelins.length ? `\n${orphelins.length} d'entre eux, créés seulement pour cette recette, seront aussi retirés du catalogue.` : ''}`)) return;
+      S.maj((x) => {
+        x.liste = x.liste.filter((l) => !(l.recettes || []).includes(r.titre));
+        x.articles = x.articles.filter((a) => !orphelins.includes(a.id));
+        const rr = x.recettes.find((y) => y.id === r.id);
+        if (rr) rr.ingredients.forEach((i) => { if (orphelins.includes(i.articleId)) i.articleId = null; });
+      });
+      fermerModale(); toast(`${lignes.length} article(s) retiré(s) de ta liste`);
+    });
     // ① Ingrédients par photo
     $('#rPhotoIngr', c).onclick = async () => {
       const blob = await prendrePhoto(); if (!blob) return;
@@ -116,12 +155,13 @@ function editeur(existante = null) {
       const texte = await lirePhotoTexte(blob, $('#rEtat', c));
       if (!texte) return;
       const lignes = texte.split('\n').map((l) => l.trim()).filter(Boolean);
-      // Le titre est souvent la 1re ligne qui ne commence pas par une quantité
-      const titre = lignes.find((l) => !/^[\d½¼¾•\-*]/.test(l) && l.length > 3 && !/ingr[ée]dient/i.test(l));
-      const ingr = lignes.filter((l) => l !== titre && !/^ingr[ée]dients?:?$/i.test(l));
+      // Le titre est souvent la 1re ligne lisible qui ne commence pas par une quantité
+      const titre = lignes.find((l) => !/^[\d½¼¾•\-*]/.test(l) && l.length > 3 && lisible(l) && !/ingr[ée]dient|pr[ée]paration|portion|minute/i.test(l));
+      const ingr = lignes.filter((l) => l !== titre && ligneIngredient(l));
       $('#rIng', c).value = ingr.join('\n');
       if (titre && !$('#rTitre', c).value) $('#rTitre', c).value = titre.replace(/\s+/g, ' ');
-      $('#rEtat', c).textContent = `✓ ${ingr.length} ligne(s) lue(s) — vérifie et corrige au besoin.`;
+      const ignorees = lignes.length - ingr.length - (titre ? 1 : 0);
+      $('#rEtat', c).innerHTML = `✓ ${ingr.length} ingrédient(s) probable(s)${ignorees > 0 ? `, ${ignorees} ligne(s) ignorée(s) (préparation ou illisible)` : ''}. <b>Vérifie et corrige</b> : la lecture sur le téléphone se trompe souvent avec les pages en 2 colonnes. Astuce : photographie seulement la colonne des ingrédients.`;
     };
     // ③ Photo du plat
     $('#rPhotoPlat', c).onclick = async () => {
@@ -182,10 +222,12 @@ function choisir(r) {
       const a = e.articles.find((x) => x.id === i.articleId);
       const garde = GARDE_MANGER.includes(sansAccents(i.nom));
       const deja = dejaDansListe(i.articleId);
+      // Coché d'office seulement si c'est clairement un ingrédient (quantité lue ou produit connu)
+      const sur = (i.quantite != null || a) && ligneIngredient(i.brut);
       return `<label class="item" style="cursor:pointer">
-        <input type="checkbox" data-k="${k}" ${garde || deja ? '' : 'checked'}>
+        <input type="checkbox" data-k="${k}" ${garde || deja || !sur ? '' : 'checked'}>
         <div class="grandir"><div class="nom">${esc(a ? a.nom : i.nom)}</div>
-        <div class="info">${esc(i.brut)}${a ? ' · au catalogue' : ' · nouvel article'}${deja ? ' · <b>déjà dans la liste</b>' : ''}</div></div></label>`;
+        <div class="info">${esc(i.brut)}${a ? ' · au catalogue' : ' · nouvel article'}${deja ? ' · <b>déjà dans la liste</b>' : ''}${!sur && !garde && !deja ? ' · <span style="color:var(--ambre)">à vérifier</span>' : ''}</div></div></label>`;
     }).join('')}</div>
     <button class="btn" id="ajSel" style="width:100%;margin-top:8px">Ajouter la sélection</button>`, (c) => {
     $('#ajSel', c).onclick = () => {

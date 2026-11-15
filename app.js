@@ -115,7 +115,7 @@ export function ajouterALaListe(articleId, quantite = 1, extra = {}) {
       ex.quantite += quantite; fusion = true;
       if (extra.recette) ex.recettes = [...new Set([...(ex.recettes || []), extra.recette])];
     } else {
-      e.liste.push({ id: S.uid('l'), articleId, quantite, coche: false, mode: 'personne', ajoutePar: e.utilisateur,
+      e.liste.push({ id: S.uid('l'), articleId, quantite, coche: false, mode: 'personne', ajoutePar: e.utilisateur, cree: new Date().toISOString(),
         recettes: extra.recette ? [extra.recette] : [], note: extra.note || '' });
     }
   });
@@ -216,7 +216,7 @@ function htmlItem(l, a) {
     <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
       <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''} ${l.mode === 'en_ligne' ? '<span class="pastille">en ligne</span>' : ''}</div>
       <div class="info">${meilleur}</div>
-      <div class="info">${esc(formatLisible(a.format) || '')}${l.ajoutePar ? ` · ajouté par ${esc(l.ajoutePar)}` : ''}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
+      <div class="info">${esc(formatLisible(a.format) || '')}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
     </div>
     <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
   </div>`;
@@ -527,6 +527,7 @@ export function ficheArticle(articleId, ligneId) {
       ${Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement).map(([k, b]) => `<option value="${k}" ${a.exclusif === k ? 'selected' : ''}>${esc(b.nom)}</option>`).join('')}</select></div>
     ${l ? `<div class="champ"><label>Achat</label><select id="fMode"><option value="personne" ${l.mode !== 'en_ligne' ? 'selected' : ''}>En personne</option><option value="en_ligne" ${l.mode === 'en_ligne' ? 'selected' : ''}>En ligne</option></select></div>
     <div class="champ"><label>Note</label><input id="fNote" value="${esc(l.note || '')}" placeholder="ex. sans lactose, gros format"></div>` : ''}
+    ${l ? `<div class="doux">Ajouté à la liste par <b>${esc(l.ajoutePar || '?')}</b>${l.cree ? ` le ${esc(new Date(l.cree).toLocaleDateString('fr-CA'))}` : ''}</div>` : ''}
     <div class="doux">Codes-barres : ${a.codes?.length ? a.codes.map(esc).join(', ') : 'aucun'}</div>
     <h3 style="margin-top:14px">Photos</h3>
     <div class="vignettes" id="fPhotos">${photos.length ? '' : '<span class="doux">Aucune photo.</span>'}</div>
@@ -534,6 +535,7 @@ export function ficheArticle(articleId, ligneId) {
       <button class="btn" id="fSauver">Enregistrer</button>
       <button class="btn sec" id="fPhoto">📷 Photo</button>
       ${l ? '<button class="btn danger" id="fRetirer">Retirer de la liste</button>' : '<button class="btn sec" id="fAjouter">+ À la liste</button>'}
+      <button class="btn danger" id="fSupCat">Supprimer du catalogue</button>
     </div>`, (c) => {
     photos.forEach((p) => afficherPhoto(p, $('#fPhotos', c)));
     const rouvrir = () => ficheArticle(articleId, ligneId);
@@ -593,6 +595,15 @@ export function ficheArticle(articleId, ligneId) {
     $('#fPhoto', c).onclick = () => photoProduit(a.id);
     $('#fRetirer', c)?.addEventListener('click', () => { S.maj((x) => { x.liste = x.liste.filter((i) => i.id !== ligneId); }); fermerModale(); });
     $('#fAjouter', c)?.addEventListener('click', () => { ajouterALaListe(a.id); fermerModale(); toast(`${a.nom} ajouté`); });
+    $('#fSupCat', c).onclick = () => {
+      if (!confirm(`Supprimer « ${a.nom} » du catalogue ?\nIl sera aussi retiré de ta liste. Son historique de prix est gardé.`)) return;
+      S.maj((x) => {
+        x.articles = x.articles.filter((i) => i.id !== a.id);
+        x.liste = x.liste.filter((i) => i.articleId !== a.id);
+        x.recettes.forEach((rc) => rc.ingredients.forEach((ing) => { if (ing.articleId === a.id) ing.articleId = null; }));
+      });
+      fermerModale(); toast(`${a.nom} supprimé du catalogue`);
+    };
   }, { image: a.imageUrl });
 }
 
@@ -604,7 +615,7 @@ const lienMaps = (m) => `https://www.google.com/maps/search/?api=1&query=${encod
 function vueMagasins(v) {
   const e = S.get();
   let html = `<h2 style="margin-top:0">Mes magasins</h2>
-    <p class="doux" style="margin:0 0 8px">Interrupteur = magasin <b>considéré</b> ou <b>ignoré</b> dans les comparaisons, les listes et les paniers (sans le supprimer). 🗺️ = itinéraire. 🏷️ = relevé de prix dans ce magasin.</p>
+    <p class="doux" style="margin:0 0 8px">Interrupteur = magasin <b>considéré</b> ou <b>ignoré</b> dans les comparaisons, les listes et les paniers (sans le supprimer). Touche un nom pour l'adresse, l'itinéraire ou le retirer. 🏷️ = relevé de prix dans ce magasin.</p>
     <div class="carte"><h2>Codes postaux</h2>
     <div>${e.codesPostaux.map((c) => `<span class="pastille" style="font-size:13px;padding:4px 10px">${esc(c.code)} · ${esc(c.libelle)} <a href="#" data-supcp="${esc(c.code)}" aria-label="Retirer">✕</a></span>`).join(' ')}</div>
     <div class="rang" style="margin-top:8px"><input id="cpCode" placeholder="Code (ex. J3X)" style="max-width:120px"><input id="cpLib" class="grandir" placeholder="Ville"><button class="btn sec" id="cpAjout">Ajouter</button></div></div>`;
@@ -618,10 +629,8 @@ function vueMagasins(v) {
       const actif = m.actif !== false;
       html += `<div class="mag-ligne ${actif ? '' : 'inactif'}">
         <label class="interrupteur" title="${actif ? 'Considéré dans les comparaisons' : 'Ignoré (pas supprimé)'}"><input type="checkbox" data-actif="${m.id}" ${actif ? 'checked' : ''}><span></span></label>
-        <span class="grandir une-ligne">${logoMagasin(m)}${rp ? ' <span class="pastille vert">%</span>' : ''}</span>
-        <button class="icone" data-releve="${m.id}" aria-label="Relevé de prix">🏷️</button>
-        <a class="icone" href="${lienMaps(m)}" target="_blank" rel="noopener" aria-label="Ouvrir dans Google Maps" style="display:grid;place-items:center;text-decoration:none">🗺️</a>
-        <button class="icone" data-supmag="${m.id}" aria-label="Retirer">🗑</button></div>`;
+        <button class="grandir une-ligne nom-mag" data-magfiche="${m.id}">${logoMagasin(m)}${rp ? ' <span class="pastille vert">%</span>' : ''} <span class="doux">›</span></button>
+        <button class="btn-releve" data-releve="${m.id}" aria-label="Relevé de prix">🏷️</button></div>`;
     }
   }
   html += `<div class="carte"><h2>Trouver une succursale</h2>
@@ -647,11 +656,7 @@ function vueMagasins(v) {
   // Décocher = ne plus considérer ce magasin (comparaisons, listes, paniers) sans le supprimer
   $$('[data-releve]').forEach((b) => b.onclick = () => { ouvrirReleve(b.dataset.releve); allerOnglet('plus'); });
   $$('[data-actif]').forEach((i) => i.onchange = () => S.maj((x) => { x.magasins.find((m) => m.id === i.dataset.actif).actif = i.checked; }));
-  $$('[data-supmag]').forEach((b) => b.onclick = () => {
-    const m = e.magasins.find((x) => x.id === b.dataset.supmag);
-    if (!confirm(`Retirer ${m.nom} ?`)) return;
-    S.maj((x) => { x.magasins = x.magasins.filter((y) => y.id !== m.id); x.rabaisPerso = x.rabaisPerso.filter((r) => r.magasinId !== m.id); });
-  });
+  $$('[data-magfiche]').forEach((b) => b.onclick = () => ficheMagasin(b.dataset.magfiche));
   $('#mChercher').onclick = async () => {
     const ban = $('#mBan').value, ville = $('#mVille').value.trim();
     if (!ville) { toast('Entre une ville ou un code postal'); return; }
@@ -678,6 +683,32 @@ function vueMagasins(v) {
       toast('Magasin ajouté');
     });
   };
+}
+
+/** Détails d'un magasin : adresse, itinéraire, rabais perso, relevé de prix, retrait. */
+function ficheMagasin(id) {
+  const e = S.get();
+  const m = e.magasins.find((x) => x.id === id);
+  if (!m) return;
+  const rp = e.rabaisPerso.filter((r) => r.magasinId === m.id);
+  const nbPrix = e.prix.filter((p) => p.magasinId === m.id).length;
+  ouvrirModale(m.nom, `
+    <div style="margin-bottom:10px">${logoMagasin(m)}</div>
+    <div class="champ"><label>Adresse</label><input id="mfAdr" value="${esc(m.adresse || '')}" placeholder="Adresse"></div>
+    <a class="btn" href="${lienMaps(m)}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;margin-bottom:8px">🗺️ Itinéraire (Google Maps)</a>
+    <button class="btn" id="mfReleve" style="width:100%;margin-bottom:8px">🏷️ Relevé de prix dans ce magasin</button>
+    ${rp.length ? `<div class="doux" style="margin-bottom:8px">Rabais perso : ${rp.map((r) => esc(r.description)).join(', ')}</div>` : ''}
+    <div class="doux" style="margin-bottom:12px">${nbPrix} prix relevé(s) dans ce magasin.</div>
+    <button class="btn danger" id="mfSup" style="width:100%">🗑 Retirer ce magasin</button>
+    <p class="doux">Pour seulement l'ignorer dans les comparaisons, utilise plutôt l'interrupteur dans la liste des magasins.</p>`, (c) => {
+    $('#mfAdr', c).onchange = () => S.maj((x) => { x.magasins.find((y) => y.id === m.id).adresse = $('#mfAdr', c).value.trim(); });
+    $('#mfReleve', c).onclick = () => { fermerModale(); ouvrirReleve(m.id); allerOnglet('plus'); };
+    $('#mfSup', c).onclick = () => {
+      if (!confirm(`Retirer ${m.nom} de tes magasins ?`)) return;
+      S.maj((x) => { x.magasins = x.magasins.filter((y) => y.id !== m.id); x.rabaisPerso = x.rabaisPerso.filter((r) => r.magasinId !== m.id); });
+      fermerModale(); toast(`${m.nom} retiré`);
+    };
+  });
 }
 
 /** Succursales d'une bannière près d'une ville / d'un code postal (OpenStreetMap Nominatim, 1 requête). */

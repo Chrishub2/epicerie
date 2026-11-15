@@ -23,7 +23,8 @@ export const EN_LIGNE = {
   voila: { nom: 'Voilà (IGA)', prixDe: 'iga', site: 'https://voila.ca/', recherche: (q) => `https://voila.ca/search?q=${encodeURIComponent(q)}`, note: 'Épicerie en ligne d\'IGA. Prix d\'IGA en magasin à titre indicatif.' },
   metro: { nom: 'Metro', prixDe: 'metro', site: 'https://www.metro.ca/epicerie-en-ligne', recherche: (q) => `https://www.metro.ca/epicerie-en-ligne/recherche?filter=${encodeURIComponent(q)}`, note: 'App Metro.' },
   maxi: { nom: 'Maxi (PC Express)', prixDe: 'maxi', site: 'https://www.maxi.ca/fr', recherche: (q) => `https://www.maxi.ca/fr/search?search-bar=${encodeURIComponent(q)}`, note: 'App PC Express.' },
-  costco: { nom: 'Costco', prixDe: 'costco', site: 'https://www.costco.ca/?lang=fr-CA', recherche: (q) => `https://www.costco.ca/s?keyword=${encodeURIComponent(q)}&lang=fr-CA`, note: 'Épicerie le jour même via Instacart : prix plus élevés qu\'en entrepôt.' },
+  // L'épicerie Costco en ligne passe par Instacart : on l'affiche comme tel.
+  costco: { nom: 'Costco via Instacart', logo: 'instacart', prixDe: 'costco', site: 'https://www.instacart.ca/store/costco', recherche: (q) => `https://www.instacart.ca/store/costco/s?k=${encodeURIComponent(q)}`, note: 'Costco via Instacart : plus cher qu\'en entrepôt (prix affichés = prix d\'entrepôt, à titre indicatif).' },
   jean_coutu: { nom: 'Jean Coutu', prixDe: 'jean_coutu', site: 'https://www.jeancoutu.com/', recherche: (q) => `https://www.jeancoutu.com/magasiner/recherche?filter=${encodeURIComponent(q)}`, note: 'Boutique en ligne (choix limité).' },
   instacart: { nom: 'Instacart', prixDe: null, site: 'https://www.instacart.ca/', recherche: (q) => `https://www.instacart.ca/store/s?k=${encodeURIComponent(q)}`, note: '⚠️ Prix souvent plus élevés qu\'en magasin + frais.' },
 };
@@ -157,16 +158,19 @@ function appliquer(res) {
   toast(`Liste répartie sur ${res.arrets} magasin(s). Touche un magasin en haut de la liste pour voir sa partie.`);
 }
 
+/** Petite photo du produit (ou un emplacement vide pour garder l'alignement). */
+const vignette = (a) => (a.imageUrl ? `<img class="vignette mini" src="${esc(a.imageUrl)}" alt="">` : '<span class="vignette mini"></span>');
+
 function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
   const eco = un && r !== un ? un.total - r.total : 0;
   const parMag = {};
   r.affect.forEach((x) => (parMag[x.choix.cle] ??= []).push(x));
   return `<div class="carte" style="margin:10px 0 0;background:var(--gris-fond)">
-    <div class="total"><span>${r.arrets} arrêt${r.arrets > 1 ? 's' : ''} : ${r.combo.map((k) => esc(nomCle(k))).join(' + ')}</span><span>${argent(r.total)}</span></div>
+    <div class="total"><span>${r.arrets} arrêt${r.arrets > 1 ? 's' : ''}</span><span>${argent(r.total)}</span></div>
     ${eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
     ${r.manquants ? `<div class="doux" style="color:var(--ambre)">${r.manquants} article(s) sans prix dans ces magasins</div>` : ''}
     ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:8px">${logoCleHtml(k)} — <b>${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b>
-      <ul class="liste-arret">${xs.map((x) => `<li><span>${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
+      <ul class="liste-arret">${xs.map((x) => `<li><span class="rang" style="gap:6px">${vignette(x.a)}${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
         <span class="doux">${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
     ${avecBouton ? `<button class="btn" ${attr}="${r.arrets}" style="margin-top:8px">Utiliser cette répartition</button>` : ''}</div>`;
 }
@@ -290,7 +294,7 @@ function blocEnLigne() {
   let html = `<div class="carte"><h2>Préparer mes paniers en ligne</h2>
     <div class="rang"><label class="doux grandir">Nombre de sites maximum</label>
       <select id="nbSites" style="width:auto">${[1, 2, 3].map((n) => `<option ${n === nbSitesEnLigne ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    <p class="doux">Le moins cher pour ta liste parmi Voilà (IGA), Metro, Maxi, Costco et Jean Coutu, avec les mêmes bannières forcées ou ignorées que plus haut. Super C n'a pas de commande en ligne.</p>`;
+    <p class="doux">Le moins cher pour ta liste parmi Voilà (IGA), Metro, Maxi, Costco (via Instacart) et Jean Coutu, avec les magasins forcés ou ignorés dans Écono. Super C n'a pas de commande en ligne.</p>`;
   if (!r) {
     html += '<p class="doux">Pas assez de prix connus pour proposer des paniers. Lie tes produits aux vrais prix (fiche → 🔎).</p>';
   } else {
@@ -300,17 +304,31 @@ function blocEnLigne() {
     for (const [site, xs] of Object.entries(parSite)) {
       const s = EN_LIGNE[site];
       html += `<div class="carte" style="margin:10px 0 0;background:var(--gris-fond)" data-site="${site}">
-        <div class="rang"><span class="grandir">${logo(s.prixDe === 'iga' ? 'voila' : s.prixDe)} <b>${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b></span>
+        <div class="rang"><span class="grandir">${logo(s.logo || (s.prixDe === 'iga' ? 'voila' : s.prixDe))}${s.logo ? ` ${logo(s.prixDe)}` : ''} <b>${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b></span>
           <a class="btn" href="${s.site}" target="_blank" rel="noopener" style="text-decoration:none;padding:6px 10px">Ouvrir</a></div>
         <div class="doux">${esc(s.note)}</div>
         ${xs.map((x) => { const lp = lienProduit(site, x.a); return `<div class="rang" style="padding:6px 0;border-top:1px solid var(--ligne)">
-          <span class="grandir une-ligne">${x.l.quantite} × ${esc(x.a.nom)}${x.a.format ? ` <span class="doux">${esc(formatLisible(x.a.format))}</span>` : ''}</span>
+          ${vignette(x.a)}<span class="grandir une-ligne">${x.l.quantite} × ${esc(x.a.nom)}${x.a.format ? ` <span class="doux">${esc(formatLisible(x.a.format))}</span>` : ''}</span>
           <a href="${esc(lp.url)}" target="_blank" rel="noopener" style="white-space:nowrap">${lp.exact ? 'Produit ›' : 'Chercher ›'}</a></div>`; }).join('')}
         <div class="rang envelopper" style="margin-top:8px">
           <button class="btn sec" data-copier="${site}">Copier la liste</button>
           <button class="btn sec" data-claude="${site}">🤖 Remplir avec Claude</button></div></div>`;
     }
-    if (opt.sansPrix.length || r.manquants) html += `<p class="doux">${opt.sansPrix.length + r.manquants} article(s) sans prix en ligne : à chercher toi-même.</p>`;
+  }
+  // Articles qui ne sont PAS dans ces paniers : on les montre, avec où les trouver en ligne
+  const dansPanier = new Set((r?.affect || []).map((x) => x.l.id));
+  const manquants = lignesListe().filter(({ l }) => !dansPanier.has(l.id));
+  if (manquants.length) {
+    html += `<div class="carte manquants" style="margin:10px 0 0">
+      <b>⚠️ ${manquants.length} article(s) manquent dans ${nbSitesEnLigne > 1 ? 'ces paniers' : 'ce panier'}</b>
+      ${manquants.map(({ l, a }) => {
+        const ailleurs = [...new Set(offresArticle(a).filter((o) => o.pu != null && !o.perso && SITE_DE_BANNIERE[o.banniere]).map((o) => SITE_DE_BANNIERE[o.banniere]))]
+          .filter((sk) => !r || !Object.keys(r.affect.reduce((m, x) => ({ ...m, [SITE_DE_BANNIERE[x.choix.cle]]: 1 }), {})).includes(sk));
+        const ou = ailleurs.length ? `Offert en ligne chez ${ailleurs.map((sk) => logo(EN_LIGNE[sk].logo || (EN_LIGNE[sk].prixDe === 'iga' ? 'voila' : EN_LIGNE[sk].prixDe))).join(' ')}${ailleurs.includes('costco') ? ' <span class="doux">(Costco via Instacart, plus cher qu\'en entrepôt)</span>' : ''} — choisis plus de sites`
+          : a.exclusif && !SITE_DE_BANNIERE[a.exclusif] ? `Vendu seulement chez ${esc(nomBanniere(a.exclusif))} (pas en ligne)` : 'Aucun prix en ligne connu';
+        return `<div class="rang" style="padding:6px 0;border-top:1px solid var(--ligne)">${vignette(a)}
+          <div class="grandir"><div class="une-ligne">${l.quantite} × ${esc(a.nom)}</div><div class="doux" style="font-size:12px">${ou}</div></div></div>`;
+      }).join('')}</div>`;
   }
   html += `<p class="doux">🤖 « Remplir avec Claude » copie des instructions : colle-les dans Claude sur ton ordinateur pendant que tu es connecté au site dans Chrome. Claude ajoute les articles au panier et s'arrête <b>avant le paiement</b> ; tu vérifies et tu paies toi-même. Depuis le téléphone, l'app ne peut pas remplir le panier seule (aucun magasin n'offre d'accès pour ça).</p></div>`;
   return html;

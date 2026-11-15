@@ -49,6 +49,9 @@
 .logo-costco { background: #fff; color: #e31837; border-bottom: 3px solid #005daa; box-shadow: 0 0 0 1px #d5d9e0 inset; }
 .logo-jean_coutu { background: #003da5; color: #fff; font-weight: 700; }
 .logo-voila { background: #6a1b9a; color: #fff; text-transform: lowercase; }
+.logo-instacart { background: #0aad0a; color: #fff; text-transform: lowercase; }
+.vignette.mini { width: 28px; height: 28px; border-radius: 6px; flex: none; }
+.manquants { border-color: var(--ambre); background: var(--ambre-fond); }
 .ville { color: var(--doux); font-size: 12px; }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--fond); color: var(--texte);
@@ -80,6 +83,9 @@ h3 { font-size: 15px; margin: 0 0 6px; }
 input, select, textarea { font: inherit; color: var(--texte); background: var(--carte); border: 1px solid var(--ligne);
   border-radius: 8px; padding: 8px 10px; width: 100%; }
 textarea { min-height: 120px; }
+/* Cases et boutons radio : jamais pleine largeur (sinon ils écrasent le texte, surtout sur iPhone) */
+input[type=checkbox], input[type=radio] { width: auto; flex: none; padding: 0; }
+.item input[type=radio] { width: 22px; height: 22px; accent-color: var(--accent); }
 button.btn { font: inherit; border: 0; border-radius: 10px; padding: 9px 12px; background: var(--accent); color: #fff;
   font-weight: 600; white-space: nowrap; }
 button.btn.sec { background: var(--accent-doux); color: var(--accent); }
@@ -145,8 +151,11 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 /* Recettes */
 .groupe-livre { margin-bottom: 10px; }
 .groupe-livre > summary { display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-weight: 700; cursor: pointer; list-style: none; }
-.vig-recette { width: 52px; flex: none; }
+.vig-recette { width: 56px; height: 56px; flex: none; display: block; overflow: hidden; border-radius: 8px; }
+.vig-recette figure { margin: 0; }
+.vig-recette img { width: 56px !important; height: 56px !important; object-fit: cover; border-radius: 8px; }
 .vig-recette figcaption { display: none; }
+.item.recette .nom { word-break: break-word; }
 .etape { margin-bottom: 12px; }
 /* Sous-onglets de Comparer : Tableau · Détails · Online · Écono */
 .sous-onglets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
@@ -171,6 +180,9 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
   border-radius: 10px; margin-bottom: 4px; min-height: 48px; }
 .mag-ligne .icone { width: 36px; height: 36px; font-size: 16px; padding: 0; }
 .mag-ligne .logo { font-size: 13px; }
+.nom-mag { border: 0; background: none; color: var(--texte); font: inherit; text-align: left; padding: 8px 4px; cursor: pointer; min-width: 0; }
+.btn-releve { flex: none; width: 56px; height: 44px; font-size: 24px; border-radius: 12px; border: 1px solid var(--accent);
+  background: var(--accent-doux); cursor: pointer; }
 .mag-ligne.inactif { opacity: .55; }
 .interrupteur { position: relative; width: 40px; height: 24px; flex: none; }
 .interrupteur input { opacity: 0; width: 0; height: 0; position: absolute; }

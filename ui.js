@@ -35,7 +35,7 @@ export function nomBanniere(b) { return BANNIERES[b]?.nom || b; }
 export function puce(b) { return `<i class="ban" style="background:${BANNIERES[b]?.couleur || '#999'}"></i>`; }
 
 // Pastille aux couleurs de la bannière, qui remplace son nom (style inspiré, pas le logo officiel).
-const LOGOS = { iga: 'IGA', super_c: 'SUPER C', metro: 'metro', maxi: 'maxi', costco: 'COSTCO', jean_coutu: 'Jean Coutu', voila: 'voilà' };
+const LOGOS = { iga: 'IGA', super_c: 'SUPER C', metro: 'metro', maxi: 'maxi', costco: 'COSTCO', jean_coutu: 'Jean Coutu', voila: 'voilà', instacart: '🥕 instacart' };
 export function logo(b) {
   return LOGOS[b] ? `<span class="logo logo-${b}" title="${esc(nomBanniere(b))}">${LOGOS[b]}</span>` : esc(nomBanniere(b));
 }
