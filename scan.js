@@ -101,6 +101,17 @@ export function ouvrirScan(surArticle, opts = {}) {
   });
 }
 
+/** Infos d'un code-barres (bases ouvertes + épiceries.ca), sans interface. null si inconnu. */
+export async function infosCode(code) {
+  const variantes = gtinVariantes(code);
+  const [trouve, ec] = await Promise.all([chercherEnLigne(variantes), parCodeBarres(variantes).catch(() => null)]);
+  const p = trouve?.p || null, ecp = ec?.product || null;
+  if (!p && !ecp) return null;
+  return { nom: p ? (p.product_name_fr || p.product_name || '') : (ecp?.name || ''), marque: p?.brands?.split(',')[0]?.trim() || ecp?.brand || '',
+    format: p?.quantity ? normaliserQuantite(p.quantity) : (ecp?.size ? formatLisible(ecp.size) : ''),
+    image: p?.image_front_url || p?.image_url || ecp?.image || '', ec, ecp, variantes };
+}
+
 async function chercherEnLigne(variantes) {
   for (const [nomBase, url] of BASES) {
     for (const v of variantes) {

@@ -47,11 +47,14 @@ let lecteurIA = null;
 /** Branché par sync.js une fois connecté : fn(type, blobs) → données ou null. */
 export function brancherIA(fn) { lecteurIA = fn; }
 
-async function essayerIA(type, blobs, etat) {
+async function essayerIA(type, blobs, etat, extra) {
   if (!lecteurIA) return null;
   etat?.('Lecture par l\'IA…');
-  return lecteurIA(type, blobs).catch(() => null);
+  return lecteurIA(type, blobs, extra).catch(() => null);
 }
+
+/** L'IA peut-elle lire maintenant (foyer connecté + réseau) ? */
+export const iaDisponible = () => !!lecteurIA && navigator.onLine;
 
 /** Étiquette de prix → { offre, format, rabais, nom, source }. */
 export async function lireEtiquette(blob, etat) {
@@ -62,12 +65,17 @@ export async function lireEtiquette(blob, etat) {
   return { ...analyserEtiquette(texte), nom: null, texte, source: 'ocr' };
 }
 
-/** Reçu (1 ou plusieurs photos) → { banniere, date, total, lignes:[{libelle, prix}], … }. */
-export async function lireRecu(blobs, etat) {
-  const r = await essayerIA('recu', blobs, etat);
-  if (r) return { banniere: r.banniere === 'autre' ? null : r.banniere, magasin: r.magasin, date: r.date, total: r.total, tps: r.tps, tvq: r.tvq,
-    pointsGagnes: r.points_gagnes, soldePoints: r.solde_points, source: 'ia',
-    lignes: (r.lignes || []).map((l) => ({ libelle: l.libelle, prix: l.prix_total, quantite: l.quantite, rabais: l.rabais })) };
+/** Reçu (1 ou plusieurs photos) → { banniere, date, total, lignes:[{libelle, prix, code…}], verification, … }. liste = noms à relier. */
+export async function lireRecu(blobs, etat, liste = []) {
+  const r = await essayerIA('recu', blobs, etat, liste.length ? { liste } : {});
+  if (r) return { banniere: r.banniere === 'autre' ? null : r.banniere, magasin: r.magasin, adresse: r.adresse, telephone: r.telephone,
+    date: r.date, heure: r.heure, caisse: r.caisse, caissier: r.caissier, transaction: r.transaction,
+    nombreArticles: r.nombre_articles, sousTotal: r.sous_total, total: r.total, tps: r.tps, tvq: r.tvq, economies: r.economies,
+    modePaiement: r.mode_paiement, programmeFidelite: r.programme_fidelite, pointsGagnes: r.points_gagnes, soldePoints: r.solde_points,
+    autres: r.autres || [], verification: r.verification || null, source: 'ia',
+    lignes: (r.lignes || []).map((l) => ({ libelle: l.libelle, nomClair: l.nom_clair, marque: l.marque, format: l.format,
+      code: l.code_barres ? String(l.code_barres).replace(/\D/g, '') || null : null, quantite: l.quantite, poids: l.poids,
+      prixUnitaire: l.prix_unitaire, prix: l.prix_total, rabais: l.rabais, taxable: l.taxable, articleListe: l.article_liste })) };
   let texte = '';
   for (const b of blobs) texte += (await lireTexte(b, etat)) + '\n';
   return { ...analyserRecu(texte), texte, source: 'ocr' };

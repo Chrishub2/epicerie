@@ -27,7 +27,7 @@ export function photographierRecu() {
     ecran.className = 'camera-recu';
     ecran.innerHTML = `
       <video playsinline muted autoplay></video>
-      <div class="cadre-jaune"><span>Centre le reçu dans le cadre jaune</span></div>
+      <div class="cadre-jaune"><div class="cam-raccord" hidden><img alt=""><em>Aligne ici le bas de la photo précédente</em></div><span>Centre le reçu dans le cadre jaune</span></div>
       <div class="cam-haut"><b id="camCompte">Section 1</b><span class="doux-blanc">Reçu long : prends le haut, puis la suite.</span></div>
       <div class="cam-bas">
         <button class="cam-btn sec" id="camAnnuler">Annuler</button>
@@ -43,7 +43,7 @@ export function photographierRecu() {
     const demarrer = () => video.play().catch(() => {});
     demarrer();
     let ferme = false;
-    const fermer = (res) => { ferme = true; flux.getTracks().forEach((t) => t.stop()); ecran.remove(); ok(res); };
+    const fermer = (res) => { ferme = true; const ri = ecran.querySelector('.cam-raccord img'); if (ri?.src) URL.revokeObjectURL(ri.src); flux.getTracks().forEach((t) => t.stop()); ecran.remove(); ok(res); };
 
     // Toujours noir après 4 s : on propose l'appareil photo du téléphone
     setTimeout(() => {
@@ -82,6 +82,12 @@ export function photographierRecu() {
       const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.88));
       photos.push(blob);
       navigator.vibrate?.(40);
+      // Raccord : le bas de cette photo s'affiche en haut du cadre pour aligner la suivante (chevauchement)
+      const raccord = ecran.querySelector('.cam-raccord'), img = raccord.querySelector('img');
+      if (img.src) URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(blob);
+      raccord.hidden = false;
+      ecran.querySelector('.cadre-jaune > span').hidden = true; // le raccord a sa propre consigne
       ecran.querySelector('#camCompte').textContent = `${photos.length} section(s) — section ${photos.length + 1} ?`;
       ecran.querySelector('#camFini').disabled = false;
       ecran.querySelector('#camFini').textContent = `Terminer (${photos.length})`;

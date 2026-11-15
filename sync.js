@@ -299,11 +299,11 @@ const enBase64 = (blob) => new Promise((ok, ko) => {
 });
 
 /** Retourne les données lues, ou null (pas connecté, hors ligne, fonction absente, erreur). */
-export async function lireAvecIA(type, blobs) {
+export async function lireAvecIA(type, blobs, extra = {}) {
   if (!sb || !session || !navigator.onLine) return null;
   try {
     const images = await Promise.all(blobs.map(async (b) => ({ data: await enBase64(b), media_type: 'image/jpeg' })));
-    const { data, error } = await sb.functions.invoke('lire-photo', { body: { type, images } });
+    const { data, error } = await sb.functions.invoke('lire-photo', { body: { type, images, ...extra } });
     if (error || !data?.ok) { console.warn('IA indisponible', error || data?.erreur); return null; }
     return data.data;
   } catch (err) {

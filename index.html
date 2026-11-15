@@ -142,6 +142,10 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .camera-recu.flash video { opacity: .4; }
 .cadre-jaune { position: absolute; left: 19%; width: 62%; top: 7%; height: 86%; border: 3px solid #ffd400; border-radius: 8px;
   box-shadow: 0 0 0 9999px rgba(0,0,0,.45); display: flex; align-items: flex-start; justify-content: center; pointer-events: none; }
+.cam-raccord { position: absolute; top: 0; left: 0; right: 0; height: 18%; overflow: hidden; border-bottom: 2px dashed #ffd400; }
+.cam-raccord img { width: 100%; height: 100%; object-fit: cover; object-position: bottom; opacity: .5; display: block; }
+.cam-raccord em { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font-size: 11px; font-style: normal; font-weight: 700; color: #ffd400; text-shadow: 0 1px 2px #000; }
+.cadre-jaune > span { position: relative; z-index: 1; }
 .cadre-jaune span { margin-top: 8px; background: #ffd400; color: #000; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 6px; }
 .cam-haut { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 0; right: 0; text-align: center; color: #fff;
   display: flex; flex-direction: column; gap: 2px; font-size: 14px; text-shadow: 0 1px 2px #000; }
@@ -153,6 +157,8 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .cam-btn.sec { background: rgba(255,255,255,.2); color: #fff; }
 .cam-btn:disabled { opacity: .4; }
 .cam-secours { position: absolute; left: 16px; right: 16px; top: 40%; display: flex; flex-direction: column; gap: 10px; align-items: stretch; text-align: center; color: #fff; z-index: 2; }
+.recu-entier { max-height: 60vh; overflow-y: auto; border-radius: 8px; background: #fff; }
+.recu-entier img { display: block; width: 100%; }
 /* Tirer pour actualiser */
 #tirer { position: fixed; top: 0; left: 50%; transform: translate(-50%, -60px); z-index: 60; background: var(--carte);
   color: var(--accent); border: 1px solid var(--ligne); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600;

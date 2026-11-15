@@ -360,44 +360,98 @@ function vueReleve(v) {
 }
 
 // --- Reçus ------------------------------------------------------------
-/** Prend un reçu en photo, le lit (sur le téléphone) et l'enregistre. Exporté pour le bouton de la liste. */
+/**
+ * Prend un reçu en photo (1 ou plusieurs sections qui se chevauchent), puis :
+ *  - avec l'IA : lecture immédiate, aperçu du reçu entier et verdict (complet ? sinon « reprends ») ;
+ *  - sans réseau / sans IA : gardé et lu plus tard (file d'attente).
+ * Exporté pour le bouton de la liste.
+ */
 export async function nouveauRecu() {
+  fermerModale(); // la caméra doit passer devant (une fenêtre ouverte la cacherait)
   const blobs = await photographierRecu(); // cadre jaune, 1 ou plusieurs sections
   if (!blobs.length) return;
+  const { iaDisponible, lireRecu } = await import('./ocr.js');
+  if (!iaDisponible()) {
+    const id = await enregistrerRecu(blobs, null);
+    toast(navigator.onLine ? `Reçu enregistré (${blobs.length} photo(s)) — lecture en cours…` : 'Reçu gardé — il sera lu et vérifié au retour du réseau');
+    await ajouterTache({ type: 'recu', recuId: id, photoIds: S.get().recus.find((r) => r.id === id).photoIds });
+    return;
+  }
+  const R = await import('./recu.js');
+  ouvrirModale('Vérification du reçu', `<div id="rvVerdict"><div class="alerte">⏳ Je lis et je vérifie ton reçu (${blobs.length} photo(s))… environ 20 à 40 secondes.</div></div>
+    <p class="doux">Le reçu entier, tel que je le vois :</p><div id="rvEntier"></div><div id="rvActions" class="rang envelopper" style="margin-top:10px"></div>`, async (c) => {
+    R.apercuEntier(blobs, $('#rvEntier', c));
+    const lu = await lireRecu(blobs, undefined, R.nomsListe());
+    if (!$('#rvVerdict', c)) return; // fenêtre fermée ou remplacée entre-temps
+    const v = R.verifierRecu(lu);
+    $('#rvVerdict', c).innerHTML = v.ok
+      ? `<div class="alerte vert">✅ <b>Reçu complet et bien lu.</b> ${esc(v.resume)}<br>Je peux prendre l'information.</div>`
+      : `<div class="alerte">⚠️ <b>${v.incertain ? 'Je ne peux pas confirmer ce reçu.' : 'Reçu incomplet ou mal lu — reprends les photos.'}</b><ul>${v.problemes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${v.resume ? `<span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
+    $('#rvActions', c).innerHTML = v.ok
+      ? '<button class="btn" id="rvOk">✓ Enregistrer et remplir ma liste</button><button class="btn sec" id="rvRefaire">📷 Reprendre</button>'
+      : '<button class="btn" id="rvRefaire">📷 Reprendre les photos</button><button class="btn sec" id="rvOk">Garder quand même</button>';
+    $('#rvRefaire', c).onclick = () => nouveauRecu();
+    $('#rvOk', c).onclick = async () => {
+      const id = await enregistrerRecu(blobs, lu);
+      $('#rvActions', c).innerHTML = '';
+      const etat = (m) => { $('#rvVerdict', c).innerHTML = `<div class="alerte">⏳ Je remplis ta liste et je complète les fiches… ${esc(m)}</div>`; };
+      const bilan = await R.appliquerRecu(id, etat);
+      toast(`Reçu enregistré ✓ ${R.texteBilan(bilan)}`);
+      ouvrirDetailRecu(id);
+    };
+  });
+}
+
+/** Enregistre les photos et le reçu (lu ou non). Retourne son id. */
+async function enregistrerRecu(blobs, lu) {
   const photoIds = [];
   for (const b of blobs) photoIds.push(await S.enregistrerPhoto(b));
   const id = S.uid('rc');
   const date = new Date().toISOString();
   S.maj((x) => {
-    (x.recus ||= []).unshift({ id, photoId: photoIds[0], photoIds, cree: date, statut: 'à lire', par: x.utilisateur });
+    (x.recus ||= []).unshift({ ...(lu || {}), id, photoId: photoIds[0], photoIds, cree: date, statut: lu ? 'lu' : 'à lire', par: x.utilisateur });
     photoIds.forEach((p, i) => x.photos.push({ id: p, type: 'recu', articleId: null, date, prise_par: x.utilisateur, note: `Reçu ${i + 1}/${photoIds.length}` }));
   });
-  toast(navigator.onLine ? `Reçu enregistré (${photoIds.length} photo(s)) — lecture en cours…` : 'Reçu gardé — il sera lu au retour du réseau');
-  await ajouterTache({ type: 'recu', recuId: id, photoIds });
+  return id;
+}
+
+/** Fenêtre de détail d'un reçu : verdict, reçu entier, toutes les informations lues. */
+async function ouvrirDetailRecu(id) {
+  const R = await import('./recu.js');
+  const r = (S.get().recus || []).find((x) => x.id === id);
+  if (!r) return;
+  const v = r.statut === 'lu' ? R.verifierRecu(r) : null;
+  ouvrirModale('Reçu', `${R.htmlDetail(r)}
+    <div class="rang envelopper" style="margin-top:10px">
+      ${r.statut === 'lu' && !r.applique ? '<button class="btn" id="rcAppliquer">Remplir ma liste avec ce reçu</button>' : ''}
+      ${v && !v.ok ? '<button class="btn sec" id="rcRefaire">📷 Reprendre ce reçu</button>' : ''}
+      <button class="btn danger" id="supRecu">Supprimer ce reçu</button></div>`, (c) => {
+    const det = $('#rcEntierBloc', c);
+    const montrer = () => { if (det.open && !$('#rcEntier', c).childElementCount) R.apercuEntier(r.photoIds || [r.photoId], $('#rcEntier', c)); };
+    det.addEventListener('toggle', montrer);
+    if (v && !v.ok) { det.open = true; montrer(); }
+    $('#rcAppliquer', c)?.addEventListener('click', async (ev) => {
+      ev.target.disabled = true; ev.target.textContent = '⏳ En cours…';
+      const bilan = await R.appliquerRecu(r.id, (m) => { ev.target.textContent = `⏳ ${m}`; });
+      toast(R.texteBilan(bilan)); ouvrirDetailRecu(r.id);
+    });
+    $('#rcRefaire', c)?.addEventListener('click', () => nouveauRecu());
+    $('#supRecu', c).onclick = () => { if (confirm('Supprimer ce reçu ?')) { S.maj((x) => { x.recus = x.recus.filter((y) => y.id !== r.id); }); fermerModale(); } };
+  });
 }
 
 function vueRecus(v) {
   const e = S.get();
   const recus = e.recus || [];
   v.innerHTML = retour() + `<button class="btn" id="nouvRecu" style="width:100%;margin-bottom:10px">📷 Photographier un reçu</button>
-    <p class="doux">Centre le reçu dans le cadre jaune. Reçu long : prends-le en plusieurs sections, de haut en bas, puis « Terminer ». Il est lu sur ton téléphone (magasin, date, total, lignes) ; sans réseau, il sera lu plus tard. La lecture peut se tromper : touche un reçu pour voir les photos et le détail.</p>`
+    <p class="doux">Centre le reçu dans le cadre jaune. Reçu long : prends-le en plusieurs sections, de haut en bas ; le bas de la photo précédente s'affiche en haut du cadre pour que les photos se chevauchent. Je te montre ensuite le reçu entier et je te confirme s'il est complet, sinon je te demande de reprendre.</p>`
     + (recus.length ? recus.map((r) => `<div class="carte" data-recu="${r.id}" style="cursor:pointer"><div class="rang">
         <b class="grandir">${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'} · ${esc(r.date || r.cree.slice(0, 10))}</b><b>${r.total != null ? argent(r.total) : ''}</b></div>
-        <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : `${(r.lignes || []).length} ligne(s) lue(s)`} · ${(r.photoIds || [1]).length} photo(s) · par ${esc(r.par || '')}</div></div>`).join('')
+        <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : `${(r.lignes || []).length} ligne(s) lue(s)${r.verification?.complet === false ? ' · ⚠️ à vérifier' : ''}${r.applique ? ' · ✓ liste remplie' : ''}`} · ${(r.photoIds || [1]).length} photo(s) · par ${esc(r.par || '')}</div></div>`).join('')
       : '<div class="vide">Aucun reçu. Après l\'épicerie, prends ton reçu en photo.</div>');
   brancherRetour(v);
   $('#nouvRecu', v).onclick = nouveauRecu;
-  $$('[data-recu]', v).forEach((el) => el.onclick = () => {
-    const r = recus.find((x) => x.id === el.dataset.recu);
-    ouvrirModale('Reçu', `<div id="rcPhoto" class="vignettes" style="grid-template-columns:1fr;gap:0"></div>
-      <table class="comp">${(r.lignes || []).map((l) => `<tr><td>${esc(l.libelle)}</td><td class="pu">${argent(l.prix)}</td></tr>`).join('') || '<tr><td class="doux">Aucune ligne reconnue.</td></tr>'}
-      ${r.total != null ? `<tr><td><b>Total</b></td><td class="pu">${argent(r.total)}</td></tr>` : ''}</table>
-      <details style="margin-top:8px"><summary class="doux">Texte lu</summary><pre style="white-space:pre-wrap;font-size:12px">${esc(r.texte || '')}</pre></details>
-      <button class="btn danger" id="supRecu" style="margin-top:10px">Supprimer ce reçu</button>`, (c) => {
-      (r.photoIds || [r.photoId]).forEach((p, i, t) => afficherPhoto({ id: p, type: 'recu', note: t.length > 1 ? `Section ${i + 1}/${t.length} — touche pour partager` : 'Touche pour partager' }, $('#rcPhoto', c), true));
-      $('#supRecu', c).onclick = () => { if (confirm('Supprimer ce reçu ?')) { S.maj((x) => { x.recus = x.recus.filter((y) => y.id !== r.id); }); fermerModale(); } };
-    });
-  });
+  $$('[data-recu]', v).forEach((el) => el.onclick = () => ouvrirDetailRecu(el.dataset.recu));
 }
 
 const PROGRAMMES_NOMS = { iga: 'IGA', super_c: 'Super C', metro: 'Metro', maxi: 'Maxi', costco: 'Costco', jean_coutu: 'Jean Coutu' };
