@@ -72,6 +72,41 @@ function variantesRecu(code) {
 
 const simple = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 
+/**
+ * Article dont le nom ressemble au texte d'une ligne de reçu (abréviations : « BEUR SAL » ≈ « Beurre salé »).
+ * Chaque mot (3+ lettres) de l'article doit commencer comme un mot de la ligne, ou l'inverse.
+ * Articles de la liste d'abord ; le reste du catalogue seulement si tous les mots concordent.
+ */
+function parNom(texte, e) {
+  const mots = (s) => simple(s).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter((m) => m.length >= 3);
+  const ligne = mots(texte);
+  if (!ligne.length) return null;
+  const pareil = (m) => ligne.some((t) => (t.length >= 3 && m.startsWith(t)) || t.startsWith(m));
+  const score = (a) => { const ms = mots(a.nom); return ms.length ? ms.filter(pareil).length / ms.length : 0; };
+  const surListe = new Set(e.liste.map((l) => l.articleId));
+  let meilleur = null, max = 0;
+  for (const a of e.articles) {
+    const s = score(a);
+    const seuil = surListe.has(a.id) ? 0.6 : 1;
+    if (s >= seuil && s + (surListe.has(a.id) ? 0.01 : 0) > max) { max = s + (surListe.has(a.id) ? 0.01 : 0); meilleur = a; }
+  }
+  return meilleur;
+}
+
+/** Relit un reçu enregistré avec l'IA (nouvelle lecture : codes, liens avec la liste, vérification). */
+export async function relireRecu(recuId) {
+  const { lireRecu, iaDisponible } = await import('./ocr.js');
+  if (!iaDisponible()) throw new Error('IA indisponible : connecte-toi à ton foyer (Plus → Mon foyer) et au réseau.');
+  const r = (S.get().recus || []).find((x) => x.id === recuId);
+  const blobs = [];
+  for (const id of r?.photoIds || [r?.photoId]) { const b = id && await S.lirePhoto(id); if (b) blobs.push(b); }
+  if (!blobs.length) throw new Error('Photos du reçu introuvables sur ce téléphone.');
+  const lu = await lireRecu(blobs, undefined, nomsListe());
+  if (lu.source !== 'ia') throw new Error('La lecture par l\'IA a échoué. Réessaie dans un instant.');
+  S.maj((x) => { const rc = x.recus.find((y) => y.id === recuId); if (rc) { Object.assign(rc, lu, { statut: 'lu', relu: new Date().toISOString() }); delete rc.applique; delete rc.bilan; } });
+  return lu;
+}
+
 /** Prix d'une ligne en texte d'offre (« 4,99 $ » ou « 4,39 $/kg »). */
 function offreLigne(l) {
   const m = /([\d]+[.,]\d{2})\s*\$?\s*\/\s*(kg|lb)/i.exec(l.poids || '');
@@ -90,7 +125,7 @@ function offreLigne(l) {
 export async function appliquerRecu(recuId, etat = () => {}) {
   const e = S.get();
   const r = (e.recus || []).find((x) => x.id === recuId);
-  if (!r || r.applique) return null;
+  if (!r || (r.applique && r.bilan?.relies)) return null; // déjà appliqué avec succès
   const mag = e.magasins.find((m) => m.banniere === r.banniere && r.magasin && simple(r.magasin).includes(simple(m.nom).split(' ').pop()))
     || e.magasins.find((m) => m.banniere === r.banniere);
   const date = r.date || r.cree.slice(0, 10);
@@ -105,6 +140,8 @@ export async function appliquerRecu(recuId, etat = () => {}) {
     let a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
       && etatNow.liste.some((li) => li.articleId === x.id));
     if (!a && codes.length) a = etatNow.articles.find((x) => x.codes?.some((c) => codes.includes(c)));
+    // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
+    if (!a) a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow);
     // Recherche en ligne : complète la fiche reliée ou documente la ligne non reliée
     let info = null;
     const manque = a && (!a.imageUrl || !a.format || !a.marque);
@@ -133,7 +170,7 @@ export async function appliquerRecu(recuId, etat = () => {}) {
       if (info?.ecp && !(ar.liens || []).some((k) => k.id === info.ec.id)) {
         ar.liens = [...(ar.liens || []), { id: info.ec.id, nom: [info.ecp.brand, info.ecp.name].filter(Boolean).join(' '), size: info.ecp.size, image: info.ecp.image }];
       }
-      if (offre && r.banniere) {
+      if (offre && r.banniere && !x.prix.some((p) => p.recuId === recuId && p.articleId === ar.id)) {
         x.prix.push({ id: S.uid('p'), articleId: ar.id, banniere: r.banniere, magasinId: mag?.id, offre, format: ar.format,
           type: l.rabais ? 'circulaire' : 'regulier', fin: null, source: 'recu', recuId, observeLe: date });
       }
