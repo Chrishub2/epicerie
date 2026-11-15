@@ -13,7 +13,7 @@ import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './com
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
 import * as Sync from './sync.js';
-import { ouvrirListeManuscrite, photoEnMagasin } from './manuscrit.js';
+import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle } from './manuscrit.js';
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 
 let onglet = 'liste';
@@ -247,7 +247,7 @@ function htmlItem(l, a) {
       <div class="info">${meilleur}</div>
       <div class="info">${esc(formatLisible(a.format) || '')}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
     </div>
-    ${!m && !a.liens?.length && !l.coche ? `<button class="icone photo-mag" data-photomag="${a.id}" title="Photographier ce produit en magasin" aria-label="Photo en magasin">📷</button>` : ''}
+    ${!m && !a.liens?.length && !l.coche ? `<button class="icone photo-mag" data-photomag="${a.id}" title="Identifier ce produit (code-barres, photo)" aria-label="Identifier le produit">🔎</button>` : ''}
     <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
   </div>`;
 }
@@ -365,7 +365,7 @@ function vueListe(v) {
       if (l.quantite === 0) x.liste = x.liste.filter((i) => i.id !== id);
     }));
     el.querySelectorAll('[data-fiche]').forEach((f) => f.onclick = () => ficheArticle(f.dataset.fiche, id));
-    el.querySelector('[data-photomag]')?.addEventListener('click', (ev) => { ev.stopPropagation(); photoEnMagasin(ev.currentTarget.dataset.photomag, id); });
+    el.querySelector('[data-photomag]')?.addEventListener('click', (ev) => { ev.stopPropagation(); identifierArticle(ev.currentTarget.dataset.photomag, id); });
   });
 }
 
@@ -458,8 +458,10 @@ function ouvrirReorg(magId) {
   ouvrirModale('Ordre des rayons', `<p class="doux">Pour : <b>${esc(nomMag)}</b> (gardé pour ce magasin). Glisse ≡ ou utilise ▲▼ pour suivre ton parcours. 🔗 regroupe un rayon avec celui du dessus en une seule section ; ⛓ les sépare.</p>
     <ul class="reorg" id="reorg">${rendreListe()}</ul>
     <div class="rang" style="margin-top:10px"><input id="nouveauRayon" placeholder="Nouveau rayon"><button class="btn sec" id="ajRayon">Ajouter</button></div>
+    <button class="btn sec" id="reorgGerer" style="width:100%;margin-top:8px">⚙️ Gérer les catégories (supprimer…)</button>
     <button class="btn" id="reorgOk" style="width:100%;margin-top:10px">✓ Terminé</button>`, (c) => {
     $('#reorgOk', c).onclick = fermerModale;
+    $('#reorgGerer', c).onclick = () => gererCategories(() => ouvrirReorg(magId));
     const ul = $('#reorg', c);
     const corps = $('#modaleCorps');
     const sauver = () => S.maj((x) => { x.ordreRayons[cible] = $$('li', ul).map((li) => li.dataset.r); });
@@ -518,6 +520,72 @@ function ouvrirReorg(magId) {
   });
 }
 
+// --- Catégories (rayons) --------------------------------------------------
+/** Options du menu des catégories, triées, avec « + Ajouter une catégorie… » à la fin. */
+function optionsCategories(selection) {
+  const rayons = [...S.get().rayons].sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
+  return rayons.map((r) => `<option value="${r.id}" ${r.id === selection ? 'selected' : ''}>${esc(r.nom)}</option>`).join('')
+    + '<option value="+">+ Ajouter une catégorie…</option>';
+}
+
+/** Demande un nom et crée la catégorie (ou reprend celle du même nom). Retourne son id, ou null. */
+function ajouterCategorie() {
+  const nom = (prompt('Nom de la nouvelle catégorie :') || '').trim();
+  if (!nom) return null;
+  const exist = S.get().rayons.find((r) => sansAccents(r.nom) === sansAccents(nom));
+  if (exist) { toast(`« ${exist.nom} » existe déjà`); return exist.id; }
+  const id = S.uid('r');
+  S.maj((x) => x.rayons.push({ id, nom: nom.replace(/^./, (k) => k.toUpperCase()) }));
+  return id;
+}
+
+/** Liste des catégories : nombre de produits, ajout, suppression (avec déplacement des produits). */
+function gererCategories(retour) {
+  const e = S.get();
+  const compte = (id) => e.articles.filter((a) => a.rayonId === id).length;
+  ouvrirModale('Catégories', `
+    <p class="doux">Une catégorie = un rayon de ta liste. Pour la supprimer, ses produits sont d'abord déplacés dans une autre.</p>
+    ${[...e.rayons].sort((x, y) => x.nom.localeCompare(y.nom, 'fr')).map((r) => `<div class="item">
+      <div class="grandir"><div class="nom">${esc(r.nom)}</div><div class="info">${compte(r.id)} produit(s)</div></div>
+      <button class="icone" data-supcat="${r.id}" aria-label="Supprimer ${esc(r.nom)}">🗑</button></div>`).join('')}
+    <button class="btn" id="catAjout" style="width:100%;margin-top:8px">+ Ajouter une catégorie</button>
+    ${retour ? '<button class="btn sec" id="catRetour" style="width:100%;margin-top:8px">‹ Retour à la fiche</button>' : ''}`, (c) => {
+    $('#catAjout', c).onclick = () => { if (ajouterCategorie()) gererCategories(retour); };
+    $('#catRetour', c)?.addEventListener('click', retour);
+    $$('[data-supcat]', c).forEach((b) => b.onclick = () => supprimerCategorie(b.dataset.supcat, () => gererCategories(retour)));
+  });
+}
+
+/** Fenêtre de suppression : choisir où vont les produits, puis supprimer. */
+function supprimerCategorie(id, apres) {
+  const e = S.get();
+  const r = e.rayons.find((x) => x.id === id);
+  if (!r) return;
+  if (e.rayons.length <= 1) { toast('Il faut garder au moins une catégorie'); return; }
+  const produits = e.articles.filter((a) => a.rayonId === id);
+  const autres = [...e.rayons].filter((x) => x.id !== id).sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
+  ouvrirModale(`Supprimer « ${r.nom} »`, `
+    ${produits.length ? `<p><b>${produits.length} produit(s)</b> sont dans cette catégorie : ${produits.slice(0, 8).map((a) => esc(a.nom)).join(', ')}${produits.length > 8 ? '…' : ''}</p>
+      <div class="champ"><label>Les déplacer vers :</label><select id="catCible"><option value="">— Choisis une catégorie —</option>
+        ${autres.map((x) => `<option value="${x.id}">${esc(x.nom)}</option>`).join('')}</select></div>`
+      : '<p>Cette catégorie est vide.</p>'}
+    <div class="rang" style="margin-top:8px"><button class="btn danger grandir" id="catOk">Supprimer</button><button class="btn sec grandir" id="catAnnuler">Annuler</button></div>`, (c) => {
+    $('#catAnnuler', c).onclick = apres;
+    $('#catOk', c).onclick = () => {
+      const cible = produits.length ? $('#catCible', c).value : null;
+      if (produits.length && !cible) { toast('Choisis où déplacer les produits'); return; }
+      S.maj((x) => {
+        x.articles.forEach((a) => { if (a.rayonId === id) { a.rayonId = cible; a.rayonManuel = true; } });
+        x.rayons = x.rayons.filter((y) => y.id !== id);
+        for (const k of Object.keys(x.ordreRayons || {})) x.ordreRayons[k] = x.ordreRayons[k].filter((y) => y !== id);
+        for (const k of Object.keys(x.rayonsJoints || {})) x.rayonsJoints[k] = x.rayonsJoints[k].filter((y) => y !== id);
+      });
+      toast(`« ${r.nom} » supprimée${produits.length ? ` — ${produits.length} produit(s) déplacé(s)` : ''}`);
+      apres();
+    };
+  });
+}
+
 // --- Fiche article ----------------------------------------------------
 export function ficheArticle(articleId, ligneId) {
   const e = S.get();
@@ -550,7 +618,7 @@ export function ficheArticle(articleId, ligneId) {
     <h3 style="margin-top:14px">Fiche</h3>
     <div class="champ"><label>Nom</label><input id="fNom" value="${esc(a.nom)}"></div>
     <div class="rang">
-      <div class="champ grandir"><label>Rayon ${a.rayonManuel ? '<span class="pastille">choisi par toi</span>' : '<span class="pastille">auto</span>'}</label><select id="fRayon">${e.rayons.map((r) => `<option value="${r.id}" ${r.id === a.rayonId ? 'selected' : ''}>${esc(r.nom)}</option>`).join('')}</select></div>
+      <div class="champ grandir"><label>Catégorie (rayon) ${a.rayonManuel ? '<span class="pastille">choisie par toi</span>' : '<span class="pastille">auto</span>'}</label><div class="rang"><select id="fRayon" class="grandir">${optionsCategories(a.rayonId)}</select><button class="icone" id="fGererCat" title="Gérer les catégories" aria-label="Gérer les catégories">⚙️</button></div></div>
       <div class="champ grandir"><label>Comparer au</label><select id="fUnite">
         <option value="kg" ${a.uniteRef === 'kg' ? 'selected' : ''}>$/kg</option>
         <option value="l" ${a.uniteRef === 'l' ? 'selected' : ''}>$/L</option>
@@ -588,6 +656,19 @@ export function ficheArticle(articleId, ligneId) {
       rouvrir();
     });
     $('#fHisto', c).ontoggle = () => { if ($('#fHisto', c).open && !$('#histo', c).dataset.ok) { $('#histo', c).dataset.ok = 1; afficherHistorique(a, $('#histo', c)); } };
+    // Catégorie : appliquée tout de suite ; « + Ajouter une catégorie… » en crée une nouvelle
+    $('#fRayon', c).onchange = () => {
+      const sel = $('#fRayon', c);
+      let id = sel.value;
+      if (id === '+') {
+        id = ajouterCategorie();
+        if (!id) { sel.value = S.get().articles.find((x) => x.id === a.id)?.rayonId || ''; return; }
+        sel.innerHTML = optionsCategories(id);
+      }
+      S.maj((x) => { const ar = x.articles.find((i) => i.id === a.id); if (ar) { ar.rayonId = id; ar.rayonManuel = true; } });
+      toast(`Catégorie : ${S.get().rayons.find((r) => r.id === id)?.nom}`);
+    };
+    $('#fGererCat', c).onclick = () => gererCategories(() => ficheArticle(articleId, ligneId));
     $$('[data-ajprix]', c).forEach((b) => b.onclick = () => {
       $('#fAjPrix', c).open = true; $('#pBan', c).value = b.dataset.ajprix; $('#pOffre', c).focus();
     });
@@ -621,7 +702,8 @@ export function ficheArticle(articleId, ligneId) {
         const ar = x.articles.find((i) => i.id === a.id);
         ar.nom = $('#fNom', c).value.trim() || ar.nom; ar.uniteRef = $('#fUnite', c).value;
         // Rayon changé à la main → verrouillé : l'app ne le modifiera plus jamais automatiquement
-        if ($('#fRayon', c).value !== ar.rayonId) { ar.rayonId = $('#fRayon', c).value; ar.rayonManuel = true; }
+        const rv = $('#fRayon', c).value;
+        if (rv !== '+' && rv !== ar.rayonId) { ar.rayonId = rv; ar.rayonManuel = true; }
         ar.format = $('#fFormat', c).value.trim(); ar.local = $('#fLocal', c).value === '1';
         ar.exclusif = $('#fExclusif', c).value || null;
         const li = x.liste.find((i) => i.id === ligneId);

@@ -85,6 +85,21 @@ export async function lireRecetteIA(blob, etat) {
   return r ? { titre: r.titre, portions: r.portions, lignes: r.ingredients.map((i) => i.texte) } : null;
 }
 
+/** Photo d'un emballage → { nom, marque, format, code_barres } ou null (IA indisponible). */
+export async function lireProduitIA(blob, etat) {
+  const r = await essayerIA('produit', [blob], etat);
+  return r ? { ...r, format: r.format ? formatLisible(r.format) : null } : null;
+}
+
+/** Couverture de livre → « Titre — Auteur » ; IA d'abord, sinon la plus longue ligne lue. */
+export async function lireTitreLivre(blob, etat) {
+  const r = await essayerIA('livre', [blob], etat);
+  if (r?.titre) return { titre: r.titre, auteur: r.auteur || null, source: 'ia' };
+  const texte = await lireTexte(blob, etat);
+  const titre = texte.split('\n').map((l) => l.trim()).filter((l) => /[a-zà-ÿ]{3,}/i.test(l)).sort((a, b) => b.length - a.length)[0] || '';
+  return { titre: titre.replace(/\s+/g, ' ').slice(0, 80), auteur: null, source: 'ocr' };
+}
+
 /** Petite image (data URL, ~160 px) à afficher comme photo d'un produit. */
 export async function miniature(blob, taille = 160) {
   const img = await createImageBitmap(blob);

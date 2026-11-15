@@ -5,7 +5,8 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, meilleureOffre, toast } from './ui.js';
-import { prendrePhoto, lireTexte, lireRecetteIA } from './ocr.js';
+import { prendrePhoto, lireTexte, lireRecetteIA, lireTitreLivre } from './ocr.js';
+import { retoucher } from './retouche.js';
 import { trouverArticle, assurerArticle, ajouterALaListe, sansAccents } from './app.js';
 import { afficherPhoto } from './plus.js';
 
@@ -79,9 +80,9 @@ export function vueRecettes(v) {
     { livre: null, recettes: e.recettes.filter((r) => !r.livreId || !livres.some((l) => l.id === r.livreId)) }]
     .filter((g) => g.recettes.length);
   for (const g of groupes) {
-    html += `<details class="groupe-livre" open><summary><span class="grandir">📖 ${esc(g.livre ? g.livre.nom : 'Sans livre')}</span><span class="doux">${g.recettes.length} recette(s)</span></summary>
+    html += `<details class="groupe-livre" open><summary>${g.livre?.photoId ? `<div class="vignettes vig-livre" data-ph="${g.livre.photoId}"></div>` : '<span>📖</span>'}<span class="grandir">${esc(g.livre ? g.livre.nom : 'Sans livre')}</span><span class="doux">${g.recettes.length} recette(s)</span></summary>
       ${g.recettes.map((r) => `<div class="item recette" data-r="${r.id}">
-        ${r.photoPlatId || r.photoId ? `<div class="vignettes vig-recette" data-ph="${r.photoPlatId || r.photoId}"></div>` : '<span class="vignette" style="display:grid;place-items:center">🍲</span>'}
+        ${r.photoPlatId ? `<div class="vignettes vig-recette" data-ph="${r.photoPlatId}"></div>` : '<span class="vignette" style="display:grid;place-items:center">🍲</span>'}
         <div class="grandir"><div class="nom">${esc(r.titre)}</div>
           <div class="info">${r.ingredients.length} ingrédients · ~${argent(coutRecette(r))}</div></div>
         <button class="btn" data-ajout style="padding:6px 10px">+ Liste</button>
@@ -95,6 +96,27 @@ export function vueRecettes(v) {
     el.querySelector('[data-ajout]').onclick = () => choisir(r);
     el.querySelector('[data-edit]').onclick = () => editeur(r);
   });
+}
+
+/**
+ * Retouche la photo (plat ou couverture), l'enregistre, et affiche « Améliorée / Originale »
+ * pour que tu choisisses. Retourne l'id de la photo (la version choisie y est gardée).
+ */
+async function photoRetouchee(original, type, zone) {
+  let retouchee = original;
+  try { retouchee = await retoucher(original, { type }); } catch { /* navigateur trop ancien : on garde l'original */ }
+  const id = await S.enregistrerPhoto(retouchee);
+  const u1 = URL.createObjectURL(retouchee), u2 = URL.createObjectURL(original);
+  zone.innerHTML = `<div class="comparer-photos">
+      <button class="choix-photo actif" data-v="r"><img src="${u1}" alt=""><span>✨ Améliorée</span></button>
+      <button class="choix-photo" data-v="o"><img src="${u2}" alt=""><span>Originale</span></button></div>
+    <p class="doux">Éclairage, couleurs et cadrage corrigés, sans rien changer au contenu. Touche celle que tu préfères.</p>`;
+  zone.querySelectorAll('[data-v]').forEach((b) => b.onclick = async (ev) => {
+    ev.preventDefault();
+    zone.querySelectorAll('[data-v]').forEach((x) => x.classList.toggle('actif', x === b));
+    await S.enregistrerPhotoSous(id, b.dataset.v === 'r' ? retouchee : original);
+  });
+  return id;
 }
 
 /** Lit une photo et rend le texte (ou null hors ligne / échec). */
@@ -120,11 +142,12 @@ function editeur(existante = null) {
     <div class="etape"><b>2. Nom de la recette</b>
       <input id="rTitre" value="${esc(r.titre)}" placeholder="Lu sur la photo, ou tape-le"></div>
     <div class="etape"><b>3. Photo du plat</b> <span class="doux">(facultatif)</span>
-      <div class="rang" style="margin-top:6px"><button class="btn sec" id="rPhotoPlat">🍽️ Photo du plat</button><span class="doux" id="rPlatEtat">${r.photoPlatId ? '✓ photo gardée' : ''}</span></div></div>
+      <div class="rang" style="margin-top:6px"><button class="btn sec" id="rPhotoPlat">🍽️ ${r.photoPlatId ? 'Changer la photo du plat' : 'Photo du plat'}</button><span class="doux" id="rPlatEtat">${r.photoPlatId ? '✓ photo gardée' : ''}</span></div>
+      <div id="rPlatChoix"></div></div>
     <div class="etape"><b>4. Livre</b> <span class="doux">(s'il y a lieu)</span>
       <select id="rLivre" style="margin-top:6px"><option value="">— Aucun livre —</option>${livres.map((l) => `<option value="${l.id}" ${r.livreId === l.id ? 'selected' : ''}>${esc(l.nom)}</option>`).join('')}<option value="+">+ Nouveau livre…</option></select>
       <div class="rang cache" id="rNouveauLivre" style="margin-top:6px"><input id="rLivreNom" class="grandir" placeholder="Nom du livre"><button class="btn sec" id="rCouverture">📷 Couverture</button></div>
-      <div class="doux" id="rLivreEtat"></div></div>
+      <div class="doux" id="rLivreEtat"></div><div id="rLivreChoix"></div></div>
     <button class="btn" id="rSuivant" style="width:100%;margin-top:8px">Choisir les ingrédients à acheter →</button>
     ${existante ? `<button class="btn sec" id="rNettoyer" style="width:100%;margin-top:8px">🧹 Retirer de ma liste les ingrédients de cette recette</button>
       <button class="btn danger" id="rSup" style="width:100%;margin-top:8px">Supprimer la recette</button>` : ''}`, (c) => {
@@ -149,9 +172,9 @@ function editeur(existante = null) {
       fermerModale(); toast(`${lignes.length} article(s) retiré(s) de ta liste`);
     });
     // ① Ingrédients par photo
+    // (la photo des ingrédients sert seulement à la lecture : elle n'est pas gardée)
     $('#rPhotoIngr', c).onclick = async () => {
       const blob = await prendrePhoto(); if (!blob) return;
-      r.photoId = await S.enregistrerPhoto(blob);
       // ① l'IA (Claude) si le foyer est connecté : comprend les pages en 2 colonnes
       const ia = navigator.onLine ? await lireRecetteIA(blob, (m) => { $('#rEtat', c).textContent = m; }) : null;
       if (ia) {
@@ -172,22 +195,25 @@ function editeur(existante = null) {
       const ignorees = lignes.length - ingr.length - (titre ? 1 : 0);
       $('#rEtat', c).innerHTML = `✓ ${ingr.length} ingrédient(s) probable(s)${ignorees > 0 ? `, ${ignorees} ligne(s) ignorée(s) (préparation ou illisible)` : ''}. <b>Vérifie et corrige</b> : la lecture sur le téléphone se trompe souvent avec les pages en 2 colonnes. Astuce : photographie seulement la colonne des ingrédients.`;
     };
-    // ③ Photo du plat
+    // ③ Photo du plat, retouchée automatiquement (on peut garder l'originale)
     $('#rPhotoPlat', c).onclick = async () => {
       const blob = await prendrePhoto(); if (!blob) return;
-      r.photoPlatId = await S.enregistrerPhoto(blob);
+      r.photoPlatId = await photoRetouchee(blob, 'plat', $('#rPlatChoix', c));
       $('#rPlatEtat', c).textContent = '✓ photo gardée';
     };
-    // ④ Livre : existant, nouveau tapé, ou lu sur la couverture
+    // ④ Livre : existant, nouveau tapé, ou couverture photographiée (titre lu par l'IA)
     $('#rLivre', c).onchange = () => $('#rNouveauLivre', c).classList.toggle('cache', $('#rLivre', c).value !== '+');
     $('#rCouverture', c).onclick = async () => {
       const blob = await prendrePhoto(); if (!blob) return;
-      r.photoLivreId = await S.enregistrerPhoto(blob);
-      const texte = await lirePhotoTexte(blob, $('#rLivreEtat', c));
-      if (!texte) return;
-      const nom = texte.split('\n').map((l) => l.trim()).filter((l) => /[a-zà-ÿ]{3,}/i.test(l)).sort((a, b) => b.length - a.length)[0] || '';
-      $('#rLivreNom', c).value = nom.replace(/\s+/g, ' ').slice(0, 80);
-      $('#rLivreEtat', c).textContent = nom ? '✓ Titre lu sur la couverture — corrige-le au besoin.' : 'Titre non lu : tape-le.';
+      r.photoLivreId = await photoRetouchee(blob, 'livre', $('#rLivreChoix', c));
+      if (!navigator.onLine) { $('#rLivreEtat', c).textContent = '📵 Pas de réseau : tape le titre.'; return; }
+      try {
+        const lu = await lireTitreLivre(blob, (m) => { $('#rLivreEtat', c).textContent = m; });
+        $('#rLivreNom', c).value = lu.titre;
+        $('#rLivreEtat', c).textContent = lu.titre
+          ? `✓ Titre lu ${lu.source === 'ia' ? 'par l\'IA' : 'sur le téléphone (vérifie-le)'}${lu.auteur ? ` · ${lu.auteur}` : ''}.`
+          : 'Titre non lu : tape-le.';
+      } catch { $('#rLivreEtat', c).textContent = 'Titre non lu : tape-le.'; }
     };
     $('#rSup', c)?.addEventListener('click', () => {
       if (confirm(`Supprimer la recette « ${r.titre} » ?`)) { S.maj((x) => { x.recettes = x.recettes.filter((y) => y.id !== r.id); }); fermerModale(); }
@@ -212,7 +238,7 @@ function editeur(existante = null) {
         r.livreId = livreId || null;
         const i = x.recettes.findIndex((y) => y.id === r.id);
         if (i >= 0) x.recettes[i] = r; else x.recettes.unshift(r);
-        for (const [pid, type] of [[r.photoId, 'recette'], [r.photoPlatId, 'recette'], [r.photoLivreId, 'livre']]) {
+        for (const [pid, type] of [[r.photoPlatId, 'recette'], [r.photoLivreId, 'livre']]) {
           if (pid && !x.photos.some((p) => p.id === pid)) x.photos.push({ id: pid, type, articleId: null, date: new Date().toISOString(), prise_par: x.utilisateur, note: r.titre });
         }
       });

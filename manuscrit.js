@@ -10,8 +10,8 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, nomBanniere, puce, logo, meilleureOffre } from './ui.js';
-import { prendrePhoto, lireTexte, lireEtiquette, lireListeIA, miniature } from './ocr.js';
-import { rechercherSouple, actualiserArticle, MAGASINS_EC, puDepuisEC } from './epiceries.js';
+import { prendrePhoto, lireTexte, lireEtiquette, lireListeIA, lireProduitIA, miniature } from './ocr.js';
+import { rechercherSouple, actualiserArticle, ouvrirLiaison, MAGASINS_EC, puDepuisEC } from './epiceries.js';
 import { normaliser, formatLisible, analyserFormat, analyserOffre } from './normalise.js';
 import { ajouterTache } from './attente.js';
 
@@ -42,11 +42,21 @@ export async function ouvrirListeManuscrite() {
     <p class="doux" id="lmEtat">Lecture…</p>
     <label class="doux">Un article par ligne — corrige ce qui a été mal lu :</label>
     <textarea id="lmTexte" style="min-height:160px" placeholder="2 lait&#10;beurre&#10;bananes"></textarea>
-    <button class="btn" id="lmSuivant" style="width:100%;margin-top:8px">Continuer →</button>`, async (c) => {
+    <button class="btn" id="lmSuivant" style="width:100%;margin-top:8px">Continuer : chercher les produits →</button>
+    <button class="btn sec" id="lmTout" style="width:100%;margin-top:8px">⚡ Tout ajouter sans recherche</button>
+    <p class="doux">« Tout ajouter » met chaque ligne dans ta liste tout de suite. Les produits inconnus auront un 🔎 pour les identifier plus tard (code-barres ou photo).</p>`, async (c) => {
+    const lire = () => $('#lmTexte', c).value.split('\n').map(analyserLigne).filter(Boolean);
     $('#lmSuivant', c).onclick = () => {
-      const lignes = $('#lmTexte', c).value.split('\n').map(analyserLigne).filter(Boolean);
+      const lignes = lire();
       if (!lignes.length) { toast('Écris au moins un article'); return; }
       assistant(lignes);
+    };
+    $('#lmTout', c).onclick = async () => {
+      const lignes = lire();
+      if (!lignes.length) { toast('Écris au moins un article'); return; }
+      const n = await toutAjouter(lignes);
+      fermerModale();
+      toast(`${lignes.length} article(s) ajouté(s) — ${n.connus} reconnu(s), ${n.nouveaux} à identifier (🔎)`);
     };
     if (!navigator.onLine) { $('#lmEtat', c).textContent = '📵 Pas de réseau : tape les articles (la photo est gardée).'; return; }
     try {
@@ -84,6 +94,26 @@ function trouverReference(nom) {
     return an === n || an.startsWith(n) || n.startsWith(an) || (n.length >= 4 && an.includes(n));
   });
   return candidats.sort((a, b) => score(b) - score(a))[0] || null;
+}
+
+/** Ajoute toutes les lignes d'un coup : reconnues dans l'historique, sinon nouvel article (nom exact). */
+export async function toutAjouter(lignes) {
+  const app = await import('./app.js');
+  const n = { connus: 0, nouveaux: 0 };
+  for (const { quantite, nom } of lignes) {
+    let a = trouverReference(nom);
+    if (a) n.connus++;
+    else {
+      a = S.get().articles.find((x) => sansAccents(x.nom) === sansAccents(nom));
+      if (!a) {
+        a = { id: S.uid('a'), nom: nom.replace(/^./, (x) => x.toUpperCase()), rayonId: app.rayonParDefaut(), uniteRef: 'unite', format: '', local: false, codes: [] };
+        S.maj((x) => x.articles.push(a));
+      }
+      n.nouveaux++;
+    }
+    app.ajouterALaListe(a.id, quantite);
+  }
+  return n;
 }
 
 /** Traite une liste de lignes { quantite, nom } (utilisé après la photo ; l'IA l'utilisera aussi). */
@@ -179,6 +209,66 @@ export async function assistant(lignes) {
   };
 
   suivant();
+}
+
+// ---------------------------------------------------------------------
+// Identifier un article inconnu de la liste (ajouté sans référence)
+// ---------------------------------------------------------------------
+export function identifierArticle(articleId, ligneId) {
+  const a = S.get().articles.find((x) => x.id === articleId);
+  if (!a) return;
+  ouvrirModale(`Identifier « ${a.nom} »`, `
+    <p class="doux">Choisis comment retrouver ce produit. Il gardera sa place dans ta liste.</p>
+    <button class="btn" id="idScan" style="width:100%;margin-bottom:8px">▥ Scanner son code-barres</button>
+    <button class="btn" id="idPhoto" style="width:100%;margin-bottom:8px">📷 Photo du produit → chercher ses prix en ligne</button>
+    <button class="btn sec" id="idNom" style="width:100%;margin-bottom:8px">🔎 Chercher ses prix par son nom</button>
+    <button class="btn sec" id="idMagasin" style="width:100%">🏷️ Je suis en magasin : photo + prix sur l'étiquette</button>`, (c) => {
+    $('#idScan', c).onclick = async () => {
+      const { ouvrirScan } = await import('./scan.js');
+      ouvrirScan((trouve) => remplacerArticle(articleId, ligneId, trouve));
+    };
+    $('#idPhoto', c).onclick = () => photoProduitEnLigne(articleId);
+    $('#idNom', c).onclick = () => ouvrirLiaison(articleId, null, { auto: true });
+    $('#idMagasin', c).onclick = () => { fermerModale(); photoEnMagasin(articleId, ligneId); };
+  });
+}
+
+/** La ligne de liste pointe désormais vers l'article trouvé ; l'ancien, s'il ne sert à rien d'autre, disparaît. */
+function remplacerArticle(ancienId, ligneId, trouve) {
+  if (!trouve || trouve.id === ancienId) return;
+  S.maj((x) => {
+    const l = x.liste.find((y) => y.id === ligneId);
+    if (l) l.articleId = trouve.id;
+    const ancien = x.articles.find((y) => y.id === ancienId);
+    const sert = x.liste.some((y) => y.articleId === ancienId) || x.prix.some((p) => p.articleId === ancienId)
+      || x.recettes.some((r) => r.ingredients.some((i) => i.articleId === ancienId)) || ancien?.liens?.length;
+    if (!sert) x.articles = x.articles.filter((y) => y.id !== ancienId);
+  });
+  toast(`Remplacé par « ${trouve.nom} »`);
+}
+
+/** Photo de l'emballage : l'IA lit nom, marque et format, puis on cherche les prix chez les bannières. */
+async function photoProduitEnLigne(articleId) {
+  const blob = await prendrePhoto();
+  if (!blob) return;
+  const photoId = await S.enregistrerPhoto(blob);
+  const mini = await miniature(blob);
+  ouvrirModale('Lecture du produit…', '<p class="doux" id="ppEtat">Lecture de la photo…</p>', async (c) => {
+    const lu = navigator.onLine ? await lireProduitIA(blob, (m) => { $('#ppEtat', c).textContent = m; }) : null;
+    S.maj((x) => {
+      const ar = x.articles.find((y) => y.id === articleId);
+      if (!ar) return;
+      ar.imageUrl ||= mini; // ta photo sert d'image en attendant celle du magasin
+      if (lu?.nom && !ar.liens?.length) ar.nom = lu.nom.replace(/^./, (k) => k.toUpperCase());
+      if (lu?.marque) ar.marque = lu.marque;
+      if (lu?.format && !ar.format) { ar.format = lu.format; const f = analyserFormat(lu.format); if (f) ar.uniteRef = f.base; }
+      if (lu?.code_barres && /^\d{8,14}$/.test(lu.code_barres)) ar.codes = [...new Set([...(ar.codes || []), lu.code_barres])];
+      x.photos.push({ id: photoId, type: 'produit', articleId, date: new Date().toISOString(), prise_par: x.utilisateur, note: 'Photo du produit' });
+    });
+    if (!lu) toast(navigator.onLine ? 'IA indisponible : je cherche avec le nom' : '📵 Pas de réseau : photo gardée, cherche plus tard');
+    if (navigator.onLine) ouvrirLiaison(articleId, null, { auto: true });
+    else fermerModale();
+  });
 }
 
 // ---------------------------------------------------------------------

@@ -160,6 +160,14 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .vig-recette figcaption { display: none; }
 .item.recette .nom { word-break: break-word; }
 .etape { margin-bottom: 12px; }
+.vig-livre { width: 34px; height: 44px; flex: none; overflow: hidden; border-radius: 4px; }
+.vig-livre figure { margin: 0; } .vig-livre figcaption { display: none; }
+.vig-livre img { width: 34px !important; height: 44px !important; object-fit: cover; border-radius: 4px; }
+.comparer-photos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.choix-photo { border: 2px solid var(--ligne); border-radius: 10px; padding: 4px; background: var(--carte); color: var(--texte);
+  font: inherit; font-size: 13px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.choix-photo img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+.choix-photo.actif { border-color: var(--accent); background: var(--accent-doux); font-weight: 700; }
 /* Sous-onglets de Comparer : Tableau · Détails · Online · Écono */
 .sous-onglets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .sous-onglets button { font: inherit; font-size: 14px; font-weight: 600; padding: 8px 4px; border-radius: 10px; border: 1px solid var(--ligne);
