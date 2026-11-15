@@ -147,6 +147,63 @@ export function normaliser(offre, format, uniteRef) {
 
 function arrondi(x) { return Math.round(x * 10000) / 10000; }
 
+/**
+ * Format lisible : « 54000 g » → « 54 kg », « 1500 mL » → « 1,5 L », « 0.5 kg » → « 500 g ».
+ * Multipack : « 4 x 454 g » → « 4 × 454 g (1,82 kg) ». Non reconnu → tel quel.
+ */
+export function formatLisible(txt) {
+  const f = analyserFormat(txt);
+  if (!f) return txt ? String(txt).trim() : '';
+  const n = (x, d = 2) => Number(x.toFixed(d)).toLocaleString('fr-CA', { maximumFractionDigits: d });
+  const mesure = (total, base) => {
+    if (base === 'kg') return total >= 1 ? `${n(total)} kg` : `${n(total * 1000, 0)} g`;
+    if (base === 'l') return total >= 1 ? `${n(total)} L` : `${n(total * 1000, 0)} mL`;
+    return `${n(total, 0)} unités`;
+  };
+  if (f.nbUnites) {
+    const unitaire = analyserFormat(`${f.quantite / f.nbUnites} ${f.unite}`);
+    return `${f.nbUnites} × ${mesure(unitaire.total, f.base)} (${mesure(f.total, f.base)})`;
+  }
+  if (f.base === 'unite') return String(txt).trim();
+  return mesure(f.total, f.base);
+}
+
+// ---------------------------------------------------------------------
+// Codes-barres (GTIN)
+// ---------------------------------------------------------------------
+/** Chiffre de contrôle GTIN pour les chiffres sans le dernier. */
+export function chiffreControle(sansControle) {
+  let s = 0;
+  const d = sansControle.split('').reverse();
+  d.forEach((c, i) => { s += Number(c) * (i % 2 === 0 ? 3 : 1); });
+  return String((10 - (s % 10)) % 10);
+}
+
+export function gtinValide(code) {
+  return /^\d{8}$|^\d{12,14}$/.test(code) && chiffreControle(code.slice(0, -1)) === code.slice(-1);
+}
+
+/**
+ * Variantes à essayer pour un code lu :
+ * - UPC-A 12 ⇄ EAN-13 avec un 0 devant ;
+ * - ITF-14 / GTIN-14 (caisses Costco) → code du produit à l'unité :
+ *   on retire l'indicateur (1er chiffre) et on recalcule le contrôle.
+ */
+export function gtinVariantes(code) {
+  const c = String(code).replace(/\D/g, '');
+  const v = [c];
+  if (c.length === 12) v.push('0' + c);
+  if (c.length === 13 && c.startsWith('0')) v.push(c.slice(1));
+  if (c.length === 14) {
+    const base = c.slice(1, 13);
+    const ean13 = base + chiffreControle(base);
+    v.push(ean13);
+    if (ean13.startsWith('0')) v.push(ean13.slice(1));
+    if (c.startsWith('0')) v.push(c.slice(1));
+  }
+  return [...new Set(v)];
+}
+
 /** Libellé lisible : « 9,98 $/kg (0,998 $/100 g) » */
 export function libelleUnitaire(pu, uniteRef) {
   if (pu == null || !isFinite(pu)) return '—';

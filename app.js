@@ -5,25 +5,14 @@ import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
   libelleFin, joursRestants, nomBanniere, puce, toast } from './ui.js';
 import { BANNIERES } from './demo-data.js';
-import { analyserFormat } from './normalise.js';
+import { analyserOffre, formatLisible } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
 import { vuePlus, afficherPhoto } from './plus.js';
+import { vueComparaison, tableauOffres, nomCle } from './comparer.js';
 
-const SEUIL_2E_ARRET = 8; // $ — voir config/seuils.json
 let onglet = 'liste';
-let vueComparer = 'liste';
-
-// Liens de recherche par bannière (à valider avec Chris ; aucune connexion automatique).
-export const RECHERCHE_EN_LIGNE = {
-  iga: (q) => `https://www.iga.net/fr/search?k=${encodeURIComponent(q)}`,
-  metro: (q) => `https://www.metro.ca/epicerie-en-ligne/recherche?filter=${encodeURIComponent(q)}`,
-  super_c: (q) => `https://www.superc.ca/recherche?filter=${encodeURIComponent(q)}`,
-  maxi: (q) => `https://www.maxi.ca/fr/search?search-bar=${encodeURIComponent(q)}`,
-  costco: (q) => `https://www.costco.ca/CatalogSearch?keyword=${encodeURIComponent(q)}&lang=fr-CA`,
-  jean_coutu: (q) => `https://www.jeancoutu.com/recherche/?k=${encodeURIComponent(q)}`,
-  instacart: (q) => `https://www.instacart.ca/store/s?k=${encodeURIComponent(q)}`,
-};
+let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
 
 // ---------------------------------------------------------------------
 // Démarrage
@@ -42,7 +31,7 @@ export function rendre() {
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
   const v = $('#vue');
   if (onglet === 'liste') vueListe(v);
-  else if (onglet === 'comparer') vueComparaison(v);
+  else if (onglet === 'comparer') vueComparaison(v, rendre);
   else if (onglet === 'recettes') vueRecettes(v);
   else if (onglet === 'magasins') vueMagasins(v);
   else vuePlus(v);
@@ -127,7 +116,13 @@ function alertesListe() {
 function vueListe(v) {
   const e = S.get();
   const rayons = ordreRayons();
-  const items = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) }));
+  const tous = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) }));
+  // Filtre par magasin (après une répartition « N arrêts »)
+  const cibles = {};
+  tous.forEach(({ l }) => { const k = l.magasinCible || 'aucun'; cibles[k] = (cibles[k] || 0) + 1; });
+  const avecCibles = Object.keys(cibles).some((k) => k !== 'aucun');
+  if (!avecCibles || (filtreMagasin !== 'tous' && !cibles[filtreMagasin])) filtreMagasin = 'tous';
+  const items = filtreMagasin === 'tous' ? tous : tous.filter(({ l }) => (l.magasinCible || 'aucun') === filtreMagasin);
   const nbCoches = e.liste.filter((l) => l.coche).length;
   const optionsMag = [`<option value="defaut">Ordre par défaut</option>`]
     .concat(e.magasins.map((m) => `<option value="${m.id}" ${e.magasinCourant === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`)).join('');
@@ -146,7 +141,10 @@ function vueListe(v) {
     <div class="rang" style="margin:4px 0 6px">
       <select id="choixMagasin" class="grandir" aria-label="Ordre des rayons pour quel magasin">${optionsMag}</select>
       <button class="btn sec" id="btnReorg">↕ Rayons</button>
-    </div>`;
+    </div>
+    ${avecCibles ? `<div class="rang envelopper" style="margin-bottom:6px">${[['tous', `Tout (${tous.length})`],
+      ...Object.entries(cibles).map(([k, n]) => [k, `${k === 'aucun' ? 'Non assigné' : nomCle(k)} (${n})`])]
+      .map(([k, t]) => `<button class="btn ${filtreMagasin === k ? '' : 'sec'}" data-filtre="${esc(k)}" style="padding:5px 10px;font-size:13px">${esc(t)}</button>`).join('')}</div>` : ''}`;
 
   if (!items.length) html += `<div class="vide">Ta liste est vide. Ajoute un article, scanne un code-barres ou ajoute une recette.</div>`;
 
@@ -160,10 +158,11 @@ function vueListe(v) {
       const meilleur = m ? `${puce(m.banniere)}${esc(m.magasinNom || nomBanniere(m.banniere))} · ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu';
       html += `<div class="item ${l.coche ? 'coche' : ''}" data-id="${l.id}">
         <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
+        ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
         <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
-          <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local">🍁</span>' : ''} ${l.mode === 'en_ligne' ? '<span class="pastille">en ligne</span>' : ''}</div>
+          <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local">🍁</span>' : ''} ${l.mode === 'en_ligne' ? '<span class="pastille">en ligne</span>' : ''}${l.magasinCible ? `<span class="pastille vert">${esc(nomCle(l.magasinCible))}</span>` : ''}</div>
           <div class="info">${meilleur}</div>
-          <div class="info">${esc(a.format || '')}${l.ajoutePar ? ` · ajouté par ${esc(l.ajoutePar)}` : ''}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
+          <div class="info">${esc(formatLisible(a.format) || '')}${l.ajoutePar ? ` · ajouté par ${esc(l.ajoutePar)}` : ''}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
         </div>
         <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
       </div>`;
@@ -181,6 +180,7 @@ function vueListe(v) {
   $('#choixMagasin').onchange = (ev) => S.maj((x) => { x.magasinCourant = ev.target.value; });
   $('#btnReorg').onclick = ouvrirReorg;
   $('#btnVider')?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !l.coche); }));
+  $$('[data-filtre]', v).forEach((b) => b.onclick = () => { filtreMagasin = b.dataset.filtre; rendre(); });
 
   $$('.item', v).forEach((el) => {
     const id = el.dataset.id;
@@ -192,7 +192,7 @@ function vueListe(v) {
       l.quantite = Math.max(0, l.quantite + Number(b.dataset.q));
       if (l.quantite === 0) x.liste = x.liste.filter((i) => i.id !== id);
     }));
-    el.querySelector('[data-fiche]').onclick = () => ficheArticle(el.querySelector('[data-fiche]').dataset.fiche, id);
+    el.querySelectorAll('[data-fiche]').forEach((f) => f.onclick = () => ficheArticle(f.dataset.fiche, id));
   });
 }
 
@@ -269,7 +269,17 @@ export function ficheArticle(articleId, ligneId) {
   const l = e.liste.find((x) => x.id === ligneId);
   const photos = e.photos.filter((p) => p.articleId === a.id);
   ouvrirModale(a.nom, `
-    ${tableauOffres(a)}
+    ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="Photo du produit" style="display:block;max-height:180px;max-width:100%;margin:0 auto 10px;border-radius:8px;background:#fff">` : ''}
+    <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
+    ${tableauOffres(a, { avecManquants: true })}
+    <details id="fAjPrix" style="margin-top:8px"><summary class="btn sec" style="display:inline-block">+ Ajouter un prix vu</summary>
+      <div class="carte" style="margin-top:8px">
+        <div class="rang"><div class="champ grandir"><label>Bannière</label><select id="pBan">${Object.entries(BANNIERES).map(([k, b]) => `<option value="${k}">${esc(b.nom)}</option>`).join('')}</select></div>
+          <div class="champ grandir"><label>Type</label><select id="pType"><option value="regulier">Prix régulier</option><option value="circulaire">Circulaire / rabais</option></select></div></div>
+        <div class="rang"><div class="champ grandir"><label>Prix affiché</label><input id="pOffre" placeholder="4,99 $ · 2/5 $ · 1,99 $/lb"></div>
+          <div class="champ grandir"><label>Format</label><input id="pFormat" value="${esc(a.format || '')}" placeholder="454 g"></div></div>
+        <div class="champ"><label>Fin du rabais (facultatif)</label><input id="pFin" type="date"></div>
+        <button class="btn" id="pAjout">Ajouter ce prix</button></div></details>
     <h3 style="margin-top:14px">Fiche</h3>
     <div class="champ"><label>Nom</label><input id="fNom" value="${esc(a.nom)}"></div>
     <div class="rang">
@@ -294,6 +304,16 @@ export function ficheArticle(articleId, ligneId) {
       ${l ? '<button class="btn danger" id="fRetirer">Retirer de la liste</button>' : '<button class="btn sec" id="fAjouter">+ À la liste</button>'}
     </div>`, (c) => {
     photos.forEach((p) => afficherPhoto(p, $('#fPhotos', c)));
+    $$('[data-ajprix]', c).forEach((b) => b.onclick = () => {
+      $('#fAjPrix', c).open = true; $('#pBan', c).value = b.dataset.ajprix; $('#pOffre', c).focus();
+    });
+    $('#pAjout', c).onclick = () => {
+      const offre = $('#pOffre', c).value.trim();
+      if (!analyserOffre(offre)) { toast('Prix illisible : ex. 4,99 $, 2/5 $ ou 1,99 $/lb'); return; }
+      S.maj((x) => x.prix.push({ articleId: a.id, banniere: $('#pBan', c).value, offre, format: $('#pFormat', c).value.trim() || a.format,
+        type: $('#pType', c).value, fin: $('#pFin', c).value || null, source: 'manuel', observeLe: new Date().toISOString().slice(0, 10) }));
+      toast('Prix ajouté'); ficheArticle(articleId, ligneId);
+    };
     $('#fSauver', c).onclick = () => {
       S.maj((x) => {
         const ar = x.articles.find((i) => i.id === a.id);
@@ -308,107 +328,6 @@ export function ficheArticle(articleId, ligneId) {
     $('#fRetirer', c)?.addEventListener('click', () => { S.maj((x) => { x.liste = x.liste.filter((i) => i.id !== ligneId); }); fermerModale(); });
     $('#fAjouter', c)?.addEventListener('click', () => { ajouterALaListe(a.id); fermerModale(); toast(`${a.nom} ajouté`); });
   });
-}
-
-// ---------------------------------------------------------------------
-// Onglet COMPARER
-// ---------------------------------------------------------------------
-export function tableauOffres(a) {
-  const lignes = offresArticle(a);
-  if (!lignes.length) return `<p class="doux">Aucun prix connu pour l'instant.</p>`;
-  return `<table class="comp">${lignes.map((l) => `
-    <tr class="${l.classe}">
-      <td>${puce(l.banniere)}<b>${esc(l.magasinNom || nomBanniere(l.banniere))}</b>
-        <div class="doux">${esc(l.offre)}${l.format ? ` · ${esc(l.format)}` : ''}</div>
-        <div>${l.type === 'circulaire' ? '<span class="pastille ambre">circulaire</span>' : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.local ? '<span class="pastille">🍁 local</span>' : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}</div>
-        ${l.erreur ? `<div class="doux" style="color:var(--rouge)">${esc(l.erreur)}</div>` : ''}
-      </td>
-      <td class="pu">${esc(libelleUnitaire(l.pu, l.uniteRef)).replace(' · ', '<br><span class="doux">')}${l.pu != null && l.uniteRef !== 'unite' ? '</span>' : ''}
-        ${l.prixArticle != null ? `<div class="doux">${argent(l.prixArticle)} / article</div>` : ''}</td>
-    </tr>`).join('')}</table>
-    <p class="doux">Vert = meilleur prix · ambre = moins de 5 % d'écart. Prix ramenés à la même unité.</p>`;
-}
-
-function repartition() {
-  const e = S.get();
-  const lignes = e.liste.filter((l) => !l.coche).map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a);
-  const parMagasin = {}; // clé → { nom, total, manquants }
-  let mix = 0; const mixDetail = {};
-  for (const { l, a } of lignes) {
-    // Coût équivalent = prix unitaire × quantité réellement voulue (format habituel × qté).
-    // Ainsi un 4 × 454 g de Costco est comparé au prix de 454 g, pas au paquet entier.
-    const f = analyserFormat(a.format);
-    const besoin = f && f.base === a.uniteRef ? f.total * l.quantite : null;
-    const cout = (o) => besoin != null ? o.pu * besoin : o.prixArticle * l.quantite;
-    const offres = offresArticle(a).filter((o) => o.pu != null && (besoin != null || o.prixArticle != null));
-    const vus = new Set();
-    for (const o of offres) {
-      const cle = o.perso ? 'perso:' + o.magasinNom : o.banniere;
-      if (vus.has(cle)) continue; vus.add(cle);
-      parMagasin[cle] ??= { nom: o.magasinNom || nomBanniere(o.banniere), banniere: o.banniere, total: 0, articles: 0 };
-      parMagasin[cle].total += cout(o); parMagasin[cle].articles++;
-    }
-    if (offres[0]) {
-      mix += cout(offres[0]);
-      const n = offres[0].magasinNom || nomBanniere(offres[0].banniere);
-      (mixDetail[n] ??= []).push(a.nom);
-    }
-  }
-  const complets = Object.values(parMagasin).filter((m) => m.articles === lignes.length).sort((x, y) => x.total - y.total);
-  return { nb: lignes.length, complets, partiels: Object.values(parMagasin).filter((m) => m.articles < lignes.length), mix, mixDetail };
-}
-
-function vueComparaison(v) {
-  const e = S.get();
-  const r = repartition();
-  let html = `<div class="rang" style="margin-bottom:10px">
-      <button class="btn ${vueComparer === 'liste' ? '' : 'sec'}" data-vc="liste">Ma liste</button>
-      <button class="btn ${vueComparer === 'tout' ? '' : 'sec'}" data-vc="tout">Tout le catalogue</button></div>`;
-
-  if (r.nb) {
-    const unSeul = r.complets[0];
-    const eco = unSeul ? unSeul.total - r.mix : null;
-    const nbArrets = Object.keys(r.mixDetail).length;
-    html += `<div class="carte"><h2>Répartir ma liste (${r.nb} articles)</h2>
-      ${unSeul ? `<div class="total"><span>${puce(unSeul.banniere)}Tout chez ${esc(unSeul.nom)}</span><span>${argent(unSeul.total)}</span></div>` : '<p class="doux">Aucun magasin n\'a un prix pour tous les articles.</p>'}
-      <div class="total"><span>Meilleur prix partout (${nbArrets} arrêt${nbArrets > 1 ? 's' : ''})</span><span>${argent(r.mix)}</span></div>
-      <div class="doux">${Object.entries(r.mixDetail).map(([m, arts]) => `<div>• <b>${esc(m)}</b> : ${arts.map(esc).join(', ')}</div>`).join('')}</div>
-      ${eco != null ? `<div class="alerte ${eco >= SEUIL_2E_ARRET ? 'vert' : 'ambre'}" style="margin-top:8px">${eco >= SEUIL_2E_ARRET
-        ? `Faire ${nbArrets} arrêts économise <b>${argent(eco)}</b> (au-dessus de ton seuil de ${SEUIL_2E_ARRET} $).`
-        : `Économie de ${argent(eco)} seulement : un seul arrêt chez ${esc(unSeul.nom)} est plus simple.`}</div>` : ''}
-      ${r.complets.slice(1, 4).map((m) => `<div class="total doux"><span>${puce(m.banniere)}${esc(m.nom)}</span><span>${argent(m.total)}</span></div>`).join('')}
-      <p class="doux">Estimation avant taxes : prix unitaire × ta quantité habituelle (les gros formats Costco sont ramenés à ton format). Rabais perso appliqué à l'article ; plafond non suivi article par article.</p>
-    </div>`;
-  }
-
-  const articles = vueComparer === 'liste'
-    ? [...new Set(e.liste.filter((l) => !l.coche).map((l) => l.articleId))].map((id) => e.articles.find((a) => a.id === id)).filter(Boolean)
-    : [...e.articles].sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
-  if (!articles.length) html += `<div class="vide">Rien à comparer.</div>`;
-  for (const a of articles) {
-    html += `<div class="carte"><h3>${esc(a.nom)} ${a.local ? '🍁' : ''} <span class="doux">· comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef === 'kg' ? 'kilo' : 'litre'}</span></h3>${tableauOffres(a)}</div>`;
-  }
-
-  // Commander en ligne
-  const enLigne = e.liste.filter((l) => !l.coche).map((l) => e.articles.find((a) => a.id === l.articleId)).filter(Boolean);
-  if (enLigne.length) {
-    html += `<div class="carte"><h2>Commander en ligne</h2>
-      <p class="doux">Liens de recherche par article. Tu te connectes et tu confirmes toi-même. ⚠️ Sur Instacart, les prix peuvent être plus élevés qu'en magasin, et des frais s'ajoutent.</p>
-      <select id="bannEnLigne">${Object.keys(RECHERCHE_EN_LIGNE).map((b) => `<option value="${b}">${b === 'instacart' ? 'Instacart' : nomBanniere(b)}</option>`).join('')}</select>
-      <div id="liensEnLigne" style="margin-top:8px"></div>
-      <button class="btn sec" id="copierListe" style="margin-top:8px">Copier la liste</button></div>`;
-  }
-  v.innerHTML = html;
-  $$('[data-vc]', v).forEach((b) => b.onclick = () => { vueComparer = b.dataset.vc; rendre(); });
-  const sel = $('#bannEnLigne', v);
-  if (sel) {
-    const maj = () => { $('#liensEnLigne', v).innerHTML = enLigne.map((a) => `<div>• <a href="${RECHERCHE_EN_LIGNE[sel.value](a.nom)}" target="_blank" rel="noopener">${esc(a.nom)}</a></div>`).join(''); };
-    sel.onchange = maj; maj();
-    $('#copierListe', v).onclick = async () => {
-      const txt = e.liste.filter((l) => !l.coche).map((l) => `${l.quantite} × ${e.articles.find((a) => a.id === l.articleId)?.nom}`).join('\n');
-      try { await navigator.clipboard.writeText(txt); toast('Liste copiée'); } catch { toast('Copie impossible'); }
-    };
-  }
 }
 
 // ---------------------------------------------------------------------

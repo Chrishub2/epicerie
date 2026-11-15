@@ -6,7 +6,15 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, esc, ouvrirModale, fermerModale, quandFermee, toast, aujourdhui } from './ui.js';
-import { analyserFormat, analyserOffre } from './normalise.js';
+import { analyserFormat, analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
+
+// Bases ouvertes interrogées dans l'ordre (aliments → beauté/pharmacie → autres produits).
+const BASES = [
+  ['Open Food Facts', 'https://world.openfoodfacts.org'],
+  ['Open Beauty Facts', 'https://world.openbeautyfacts.org'],
+  ['Open Products Facts', 'https://world.openproductsfacts.org'],
+];
+const CHAMPS = 'product_name_fr,product_name,brands,quantity,categories_tags,nutriscore_grade,image_front_url,image_url';
 import { assurerArticle, ajouterALaListe, rayonParDefaut } from './app.js';
 
 const ZXING_URL = 'https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
@@ -36,7 +44,8 @@ async function demarrerCamera(video, surCode) {
     try {
       const formats = await window.BarcodeDetector.getSupportedFormats();
       if (formats.includes('ean_13')) {
-        const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'].filter((f) => formats.includes(f)) });
+        // itf = caisses Costco (ITF-14), code_128 = certaines étiquettes de gros formats
+        const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'code_128'].filter((f) => formats.includes(f)) });
         const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         video.srcObject = flux; await video.play();
         let actif = true;
@@ -86,30 +95,42 @@ export function ouvrirScan(surArticle) {
   });
 }
 
+async function chercherEnLigne(variantes) {
+  for (const [nomBase, url] of BASES) {
+    for (const v of variantes) {
+      try {
+        const r = await fetch(`${url}/api/v2/product/${v}.json?fields=${CHAMPS}`);
+        const j = await r.json();
+        if (j.status === 1 && j.product && (j.product.product_name_fr || j.product.product_name)) return { p: j.product, source: nomBase };
+      } catch { /* hors ligne ou base indisponible */ }
+    }
+  }
+  return null;
+}
+
 async function rechercher(code, zone, surArticle, enRafale) {
   const e = S.get();
-  // ① catalogue
-  const local = e.articles.find((a) => a.codes?.includes(code));
+  const variantes = gtinVariantes(code);
+  // ① catalogue (toutes les variantes : UPC/EAN, caisse ITF-14)
+  const local = e.articles.find((a) => a.codes?.some((c) => variantes.includes(c)));
   if (local) {
     surArticle(local);
     zone.innerHTML = `<div class="alerte vert">✓ ${esc(local.nom)} (déjà au catalogue)</div>`;
     return;
   }
-  zone.innerHTML = `<p class="doux">Recherche du produit ${esc(code)}…</p>`;
-  // ② Open Food Facts
-  let p = null;
-  try {
-    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name_fr,product_name,brands,quantity,categories_tags,nutriscore_grade`);
-    const j = await r.json();
-    if (j.status === 1 && j.product) p = j.product;
-  } catch { /* hors ligne */ }
+  zone.innerHTML = `<p class="doux">Recherche du produit ${esc(code)}${code.length === 14 ? ' (code de caisse, je cherche aussi le produit à l\'unité)' : ''}…</p>`;
+  // ② bases ouvertes
+  const trouve = await chercherEnLigne(variantes);
+  const p = trouve?.p || null;
 
   const nomPropose = p ? (p.product_name_fr || p.product_name || '') : '';
   const fmt = p?.quantity ? normaliserQuantite(p.quantity) : '';
   const rayonId = p ? devinerRayon(p.categories_tags || []) : rayonParDefaut();
+  const image = p?.image_front_url || p?.image_url || '';
   zone.innerHTML = `
-    ${p ? `<div class="alerte vert">Trouvé sur Open Food Facts${p.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>`
-        : `<div class="alerte ambre">Produit inconnu (code ${esc(code)}). Tape le nom ou prends une photo.</div>`}
+    ${p ? `<div class="alerte vert">Trouvé sur ${esc(trouve.source)}${p.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>
+          ${image ? `<img src="${esc(image)}" alt="" style="display:block;max-height:160px;max-width:100%;margin:0 auto 8px;border-radius:8px;background:#fff">` : ''}`
+        : `<div class="alerte ambre">Produit inconnu dans les bases ouvertes (code ${esc(code)}). Fréquent pour les produits Kirkland/Costco. Tape le nom ou prends une photo : le code sera retenu pour la prochaine fois.</div>`}
     <div class="champ"><label>Nom (en français, à ta façon)</label><input id="sNom" value="${esc(nomPropose)}" list="sCat"></div>
     <datalist id="sCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
     <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || '')}"></div>
@@ -123,8 +144,12 @@ async function rechercher(code, zone, surArticle, enRafale) {
     const format = zone.querySelector('#sFormat').value.trim();
     const f = analyserFormat(format);
     const a = assurerArticle(nom, { rayonId, format, uniteRef: f?.base || 'unite', marque: zone.querySelector('#sMarque').value.trim(),
-      nutriscore: p?.nutriscore_grade?.length === 1 ? p.nutriscore_grade : null });
-    S.maj((x) => { const ar = x.articles.find((i) => i.id === a.id); ar.codes = [...new Set([...(ar.codes || []), code])]; });
+      nutriscore: p?.nutriscore_grade?.length === 1 ? p.nutriscore_grade : null, imageUrl: image });
+    S.maj((x) => {
+      const ar = x.articles.find((i) => i.id === a.id);
+      ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
+      if (image && !ar.imageUrl) ar.imageUrl = image; // photo officielle du produit
+    });
     surArticle(a);
     zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} ajouté${enRafale() ? ' — scanne le suivant' : ''}</div>`;
     if (!enRafale()) setTimeout(fermerModale, 700);
@@ -133,9 +158,12 @@ async function rechercher(code, zone, surArticle, enRafale) {
 }
 
 function normaliserQuantite(q) {
-  // « 454g » → « 454 g » ; garde tel quel si non reconnu
-  const m = String(q).match(/(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|cl|lb|oz)\b/i);
-  return m ? `${m[1]} ${m[2].replace(/^l$/i, 'L').replace(/^ml$/i, 'mL')}` : String(q);
+  // « 54000g » → « 54 kg », « 2 x 1.5L » → « 2 × 1,5 L (3 L) » ; garde tel quel si non reconnu
+  const s = String(q);
+  const multi = s.match(/(\d+)\s*[x×]\s*(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|cl|lb|oz)\b/i);
+  if (multi) return formatLisible(`${multi[1]} x ${multi[2]} ${multi[3]}`);
+  const m = s.match(/(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|cl|lb|oz)\b/i);
+  return m ? formatLisible(`${m[1]} ${m[2]}`) : s;
 }
 
 function devinerRayon(tags) {

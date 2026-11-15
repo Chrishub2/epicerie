@@ -90,6 +90,21 @@ table.comp tr.proche td { background: var(--ambre-fond); }
 table.comp td.pu { text-align: right; font-weight: 600; white-space: nowrap; }
 table.comp tr.meilleur td.pu { color: var(--vert); }
 table.comp tr.proche td.pu { color: var(--ambre); }
+.vignette { width: 44px; height: 44px; object-fit: contain; border-radius: 8px; background: #fff; flex: none; cursor: pointer; }
+.tableau-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--ligne); border-radius: 12px;
+  background: var(--carte); margin-bottom: 6px; }
+table.matrice { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 100%; }
+table.matrice th, table.matrice td { padding: 7px 8px; border-bottom: 1px solid var(--ligne); text-align: left;
+  vertical-align: top; white-space: nowrap; }
+table.matrice thead th { position: sticky; top: 0; background: var(--gris-fond); font-weight: 600; }
+table.matrice tbody th { position: sticky; left: 0; z-index: 1; background: var(--carte); font-weight: 600;
+  white-space: normal; min-width: 110px; max-width: 130px; cursor: pointer; border-right: 1px solid var(--ligne); }
+table.matrice thead th:first-child { left: 0; z-index: 2; position: sticky; }
+table.matrice td.meilleur { background: var(--vert-fond); color: var(--vert); outline: 2px solid var(--vert); outline-offset: -2px; }
+table.matrice td.proche { background: var(--ambre-fond); color: var(--ambre); }
+table.matrice td.vide-cel { color: var(--doux); text-align: center; }
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
 .reorg { list-style: none; padding: 0; margin: 0; }
 .reorg li { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--carte); border: 1px solid var(--ligne);
   border-radius: 10px; margin-bottom: 6px; user-select: none; }
