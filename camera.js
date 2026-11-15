@@ -36,14 +36,39 @@ export function photographierRecu() {
       </div>`;
     document.body.appendChild(ecran);
     const video = ecran.querySelector('video');
+    // iPhone : il faut ces propriétés ET un play() explicite, sinon l'image reste noire
+    video.muted = true; video.playsInline = true;
+    video.setAttribute('playsinline', ''); video.setAttribute('webkit-playsinline', '');
     video.srcObject = flux;
-    const fermer = (res) => { flux.getTracks().forEach((t) => t.stop()); ecran.remove(); ok(res); };
+    const demarrer = () => video.play().catch(() => {});
+    demarrer();
+    let ferme = false;
+    const fermer = (res) => { ferme = true; flux.getTracks().forEach((t) => t.stop()); ecran.remove(); ok(res); };
+
+    // Toujours noir après 4 s : on propose l'appareil photo du téléphone
+    setTimeout(() => {
+      if (ferme || video.videoWidth) return;
+      const secours = document.createElement('div');
+      secours.className = 'cam-secours';
+      secours.innerHTML = `<p>La caméra ne s'affiche pas.</p>
+        <button class="cam-btn" id="camReessayer">Réessayer</button>
+        <button class="cam-btn" id="camTel">📷 Utiliser l'appareil photo du téléphone</button>`;
+      ecran.appendChild(secours);
+      secours.querySelector('#camReessayer').onclick = () => { demarrer(); if (video.videoWidth) secours.remove(); };
+      secours.querySelector('#camTel').onclick = async () => {
+        flux.getTracks().forEach((t) => t.stop());
+        ecran.style.display = 'none';
+        const b = await prendrePhoto();
+        if (b) photos.push(b);
+        fermer(photos);
+      };
+    }, 4000);
 
     ecran.querySelector('#camAnnuler').onclick = () => fermer([]);
     ecran.querySelector('#camFini').onclick = () => fermer(photos);
     ecran.querySelector('#camPrendre').onclick = async () => {
       const vw = video.videoWidth, vh = video.videoHeight;
-      if (!vw) return;
+      if (!vw) { demarrer(); toast('La caméra démarre… réessaie dans un instant.'); return; }
       // La vidéo remplit l'écran (object-fit: cover) : on retrouve la zone du cadre dans l'image réelle
       const ew = ecran.clientWidth, eh = ecran.clientHeight;
       const k = Math.max(ew / vw, eh / vh);
