@@ -258,7 +258,11 @@ dialog { border: 0; border-radius: 14px; padding: 0; width: min(560px, calc(100v
 dialog::backdrop { background: rgba(0,0,0,.5); }
 dialog .tete { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--ligne); }
 dialog .tete h2 { margin: 0; flex: 1; }
-dialog .corps { padding: 14px; overflow: auto; max-height: calc(88vh - 60px); }
+dialog .corps { padding: 14px; overflow-y: auto; overflow-x: hidden; max-height: calc(88vh - 60px); }
+/* Dans les fenêtres, un bouton trop long passe à la ligne au lieu de pousser la fiche hors de l'écran */
+dialog .corps .btn { white-space: normal; max-width: 100%; }
+dialog .corps table { max-width: 100%; }
+dialog .corps * { min-width: 0; }
 video.scan { width: 100%; border-radius: 10px; background: #000; aspect-ratio: 4/3; object-fit: cover; }
 .champ { margin-bottom: 10px; }
 .champ label { display: block; font-size: 13px; color: var(--doux); margin-bottom: 3px; }

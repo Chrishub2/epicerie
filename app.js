@@ -598,7 +598,8 @@ export function ficheArticle(articleId, ligneId) {
   const photos = e.photos.filter((p) => p.articleId === a.id);
   ouvrirModale(a.nom, `
     ${a.exclusif ? `<div class="alerte ambre">Vendu seulement chez <b>${esc(nomBanniere(a.exclusif))}</b> : les autres bannières sont ignorées pour ce produit.</div>` : ''}
-    <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres pour remplir la fiche</button>
+    <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres</button>
+    <p class="doux" style="margin:-4px 0 10px">Remplit la fiche : nom, marque, format, catégorie, photo et prix.</p>
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a, { avecManquants: true })}
     <div class="carte" style="margin-top:8px;background:var(--gris-fond)">
@@ -643,6 +644,7 @@ export function ficheArticle(articleId, ligneId) {
     <div class="rang envelopper" style="margin-top:12px">
       <button class="btn" id="fSauver">Enregistrer</button>
       <button class="btn sec" id="fPhoto">📷 Photo</button>
+      <button class="btn sec" id="fScan2">▥ Code-barres</button>
       ${l ? '<button class="btn danger" id="fRetirer">Retirer de la liste</button>' : '<button class="btn sec" id="fAjouter">+ À la liste</button>'}
       <button class="btn danger" id="fSupCat">Supprimer du catalogue</button>
     </div>`, (c) => {
@@ -724,6 +726,7 @@ export function ficheArticle(articleId, ligneId) {
         setTimeout(() => ficheArticle(trouve.id, ligneId), 300);
       } else setTimeout(() => ficheArticle(articleId, ligneId), 300);
     }, { cibleId: a.id });
+    $('#fScan2', c).onclick = () => $('#fScan', c).click();
     $('#fRetirer', c)?.addEventListener('click', () => { S.maj((x) => { x.liste = x.liste.filter((i) => i.id !== ligneId); }); fermerModale(); });
     $('#fAjouter', c)?.addEventListener('click', () => { ajouterALaListe(a.id); fermerModale(); toast(`${a.nom} ajouté`); });
     $('#fSupCat', c).onclick = () => {
