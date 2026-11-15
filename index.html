@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="fr-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Épicerie</title>
+<meta name="theme-color" content="#1f7a4d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icone.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icone.svg">
+<style>
+:root {
+  --fond: #f5f6f3; --carte: #ffffff; --texte: #1d2320; --doux: #66706a; --ligne: #e3e6e1;
+  --accent: #1f7a4d; --accent-doux: #e3f2ea;
+  --vert: #1f8a50; --vert-fond: #e1f4e8; --ambre: #b26a00; --ambre-fond: #fff1d6;
+  --rouge: #c0392b; --rouge-fond: #fde7e4; --gris-fond: #f0f1ee;
+  --ombre: 0 1px 3px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fond: #121513; --carte: #1b1f1c; --texte: #e8ece9; --doux: #9aa59e; --ligne: #2c322e;
+    --accent: #4cc38a; --accent-doux: #1d3328;
+    --vert: #4cc38a; --vert-fond: #173426; --ambre: #f0b14a; --ambre-fond: #3a2c12;
+    --rouge: #ff7a6b; --rouge-fond: #3b1d19; --gris-fond: #232824;
+    --ombre: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--fond); color: var(--texte);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+header { position: sticky; top: 0; z-index: 5; background: #1f7a4d; color: #fff;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; gap: 10px; }
+header h1 { font-size: 18px; margin: 0; flex: 1; }
+header select { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.35);
+  border-radius: 8px; padding: 4px 6px; font-size: 14px; }
+header select option { color: #000; }
+.bandeau-demo { background: var(--ambre-fond); color: var(--ambre); font-size: 13px; padding: 6px 16px; }
+main { padding: 12px 16px; max-width: 720px; margin: 0 auto; }
+nav.onglets { position: fixed; bottom: 0; left: 0; right: 0; z-index: 6; display: flex;
+  background: var(--carte); border-top: 1px solid var(--ligne); padding-bottom: env(safe-area-inset-bottom); }
+nav.onglets button { flex: 1; border: 0; background: none; color: var(--doux); padding: 8px 0 10px;
+  font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+nav.onglets button span { font-size: 20px; }
+nav.onglets button.actif { color: var(--accent); font-weight: 600; }
+.carte { background: var(--carte); border-radius: 12px; box-shadow: var(--ombre); border: 1px solid var(--ligne);
+  padding: 12px; margin-bottom: 12px; }
+h2 { font-size: 17px; margin: 4px 0 10px; }
+h3 { font-size: 15px; margin: 0 0 6px; }
+.doux { color: var(--doux); font-size: 13px; }
+.rang { display: flex; gap: 8px; align-items: center; }
+.rang.envelopper { flex-wrap: wrap; }
+.grandir { flex: 1; min-width: 0; }
+input, select, textarea { font: inherit; color: var(--texte); background: var(--carte); border: 1px solid var(--ligne);
+  border-radius: 8px; padding: 8px 10px; width: 100%; }
+textarea { min-height: 120px; }
+button.btn { font: inherit; border: 0; border-radius: 10px; padding: 9px 12px; background: var(--accent); color: #fff;
+  font-weight: 600; white-space: nowrap; }
+button.btn.sec { background: var(--accent-doux); color: var(--accent); }
+button.btn.danger { background: var(--rouge-fond); color: var(--rouge); }
+button.icone { font-size: 20px; width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--ligne);
+  background: var(--carte); color: var(--texte); flex: none; }
+.ajout { position: sticky; top: 52px; z-index: 4; background: var(--fond); padding: 4px 0 8px; }
+.alerte { border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+.alerte.ambre { background: var(--ambre-fond); color: var(--ambre); }
+.alerte.rouge { background: var(--rouge-fond); color: var(--rouge); }
+.alerte.vert { background: var(--vert-fond); color: var(--vert); }
+.rayon { margin-bottom: 10px; }
+.rayon > h3 { display: flex; align-items: center; gap: 6px; color: var(--doux); font-size: 13px;
+  text-transform: uppercase; letter-spacing: .03em; margin: 12px 2px 6px; }
+.item { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--carte);
+  border: 1px solid var(--ligne); border-radius: 10px; margin-bottom: 6px; }
+.item input[type=checkbox] { width: 24px; height: 24px; flex: none; accent-color: var(--accent); }
+.item.coche .nom { text-decoration: line-through; color: var(--doux); }
+.item .nom { font-weight: 600; }
+.item .info { font-size: 12px; color: var(--doux); }
+.qte { display: flex; align-items: center; gap: 4px; }
+.qte button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--ligne); background: var(--gris-fond);
+  color: var(--texte); font-size: 16px; }
+.pastille { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--gris-fond);
+  color: var(--doux); margin-right: 4px; white-space: nowrap; }
+.pastille.vert { background: var(--vert-fond); color: var(--vert); }
+.pastille.ambre { background: var(--ambre-fond); color: var(--ambre); }
+.pastille.rouge { background: var(--rouge-fond); color: var(--rouge); }
+.ban { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+table.comp { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.comp td { padding: 7px 6px; border-top: 1px solid var(--ligne); vertical-align: top; }
+table.comp tr.meilleur td { background: var(--vert-fond); }
+table.comp tr.proche td { background: var(--ambre-fond); }
+table.comp td.pu { text-align: right; font-weight: 600; white-space: nowrap; }
+table.comp tr.meilleur td.pu { color: var(--vert); }
+table.comp tr.proche td.pu { color: var(--ambre); }
+.reorg { list-style: none; padding: 0; margin: 0; }
+.reorg li { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--carte); border: 1px solid var(--ligne);
+  border-radius: 10px; margin-bottom: 6px; user-select: none; }
+.reorg li.glisse { opacity: .6; outline: 2px dashed var(--accent); }
+.poignee { touch-action: none; cursor: grab; font-size: 20px; color: var(--doux); padding: 0 4px; }
+dialog { border: 0; border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 24px)); max-height: 88vh;
+  background: var(--carte); color: var(--texte); }
+dialog::backdrop { background: rgba(0,0,0,.5); }
+dialog .tete { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--ligne); }
+dialog .tete h2 { margin: 0; flex: 1; }
+dialog .corps { padding: 14px; overflow: auto; max-height: calc(88vh - 60px); }
+video.scan { width: 100%; border-radius: 10px; background: #000; aspect-ratio: 4/3; object-fit: cover; }
+.champ { margin-bottom: 10px; }
+.champ label { display: block; font-size: 13px; color: var(--doux); margin-bottom: 3px; }
+.vignettes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.vignettes figure { margin: 0; }
+.vignettes img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; }
+.vignettes figcaption { font-size: 11px; color: var(--doux); }
+.code-barre-svg { background: #fff; border-radius: 8px; padding: 8px; text-align: center; }
+.vide { text-align: center; color: var(--doux); padding: 24px 8px; }
+.total { display: flex; justify-content: space-between; font-weight: 600; padding: 6px 0; }
+a { color: var(--accent); }
+.cache { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛒 Épicerie</h1>
+  <select id="choixMembre" aria-label="Qui utilise l'app"></select>
+</header>
+<div class="bandeau-demo" id="bandeauDemo">Mode démo : prix fictifs, données gardées sur ce téléphone seulement (pas encore partagées).</div>
+<main id="vue"></main>
+<nav class="onglets" id="onglets">
+  <button data-onglet="liste" class="actif"><span>📝</span>Liste</button>
+  <button data-onglet="comparer"><span>⚖️</span>Comparer</button>
+  <button data-onglet="recettes"><span>🍲</span>Recettes</button>
+  <button data-onglet="magasins"><span>📍</span>Magasins</button>
+  <button data-onglet="plus"><span>☰</span>Plus</button>
+</nav>
+<dialog id="modale"><div class="tete"><h2 id="modaleTitre"></h2><button class="icone" id="modaleFermer" aria-label="Fermer">✕</button></div><div class="corps" id="modaleCorps"></div></dialog>
+<script type="module" src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
