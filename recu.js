@@ -187,7 +187,41 @@ export async function appliquerRecu(recuId, etat = () => {}) {
   return bilan;
 }
 
-export const texteBilan = (b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s) · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}` : '';
+/** Articles reliés à ce reçu sans photo ou sans lien avec les bannières : [{ articleId, q, libelle }]. */
+export async function aCompleter(recuId) {
+  const { MAGASINS_EC } = await import('./epiceries.js');
+  const e = S.get();
+  const r = (e.recus || []).find((x) => x.id === recuId);
+  const vus = new Set();
+  return (r?.lignes || []).flatMap((l) => {
+    const a = l.articleId && e.articles.find((x) => x.id === l.articleId);
+    if (!a || vus.has(a.id)) return [];
+    vus.add(a.id);
+    if (a.exclusif && !Object.values(MAGASINS_EC).includes(a.exclusif)) return []; // ex. Costco : pas couvert
+    if (a.imageUrl && a.liens?.length) return [];
+    const marque = l.marque || a.marque;
+    return [{ articleId: a.id, q: marque ? `${marque} ${a.nom}` : a.nom, essais: [marque && `${marque} ${a.nom}`, a.nom, l.nomClair], libelle: a.nom }];
+  });
+}
+
+/**
+ * Pour chaque article à compléter, ouvre la recherche par nom chez les bannières (épiceries.ca).
+ * Rien n'est lié sans ton toucher sur « Lier la sélection » ; « Plus tard » passe au suivant.
+ */
+export async function completerFiches(recuId, fin) {
+  const { ouvrirLiaison } = await import('./epiceries.js');
+  const file = await aCompleter(recuId);
+  let i = 0;
+  const suivant = () => {
+    const x = file[i++];
+    if (!x) { fin?.(); return; }
+    ouvrirLiaison(x.articleId, suivant, { auto: true, sansCoche: true, q: x.q, essais: x.essais, etape: `Fiche ${i}/${file.length} — ${x.libelle} : touche le bon produit, puis « Lier la sélection »`, passer: suivant });
+  };
+  suivant();
+  return file.length;
+}
+
+export const texteBilan =(b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s) · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}` : '';
 
 /** Détail complet d'un reçu (en-tête, lignes, totaux, paiement, fidélité, autres infos). */
 export function htmlDetail(r) {

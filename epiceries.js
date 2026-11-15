@@ -183,6 +183,23 @@ export async function actualiserTout() {
  * opts.auto : ouverte automatiquement après un ajout par texte → le résultat
  * le plus pertinent est présélectionné ; un toucher sur « Lier » suffit.
  */
+/**
+ * Plusieurs formulations (la recherche dépend de l'ordre des mots : « Lactantia beurre salé » ≠ « Beurre salé Lactantia »),
+ * fusionnées et triées par pertinence : part des mots du nom de l'article présents dans le produit. Les hors-sujet sont écartés.
+ */
+async function rechercheMulti(essais, a) {
+  const mots = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').split(' ').filter((m) => m.length >= 3);
+  const cle = mots(a.nom);
+  const vus = new Map();
+  for (const q of [...new Set(essais.filter(Boolean))]) {
+    try { (await rechercherSouple(q, a.format)).forEach((r) => { if (!vus.has(r.id)) vus.set(r.id, r); }); } catch { /* suivant */ }
+  }
+  const score = (r) => { const t = mots(`${r.brand} ${r.name}`); return cle.length ? cle.filter((m) => t.some((x) => x.startsWith(m) || m.startsWith(x))).length / cle.length : 0; };
+  const tous = [...vus.values()].map((r) => ({ r, s: score(r) }));
+  const bons = tous.filter((x) => x.s >= 0.5).sort((x, y) => y.s - x.s);
+  return (bons.length ? bons : tous).map((x) => x.r);
+}
+
 export function ouvrirLiaison(articleId, apres, opts = {}) {
   const a = S.get().articles.find((x) => x.id === articleId);
   if (a.exclusif && !Object.values(MAGASINS_EC).includes(a.exclusif)) { // ex. Costco : pas couvert par épiceries.ca
@@ -190,8 +207,9 @@ export function ouvrirLiaison(articleId, apres, opts = {}) {
     return;
   }
   ouvrirModale(`Vrais prix — ${a.nom}`, `
+    ${opts.etape ? `<p><b>${esc(opts.etape)}</b></p>` : ''}
     <p class="doux">${opts.auto ? 'Voici les produits trouvés pour ta saisie. ' : ''}Coche le ou les produits qui correspondent (un par magasin si les marques diffèrent, ex. Natrel chez IGA, Québon chez Maxi). <span style="color:var(--vert)">Vert</span> = le moins cher au kg/L, <span style="color:var(--rouge)">rouge</span> = le plus cher. Source : épiceries.ca (Maxi, IGA, Super C, Metro).</p>
-    <div class="rang"><input id="ecQ" class="grandir" value="${esc(a.nom)}${a.marque ? ' ' + esc(a.marque) : ''}"><button class="btn" id="ecGo">Chercher</button></div>
+    <div class="rang"><input id="ecQ" class="grandir" value="${esc(opts.q || `${a.nom}${a.marque ? ' ' + a.marque : ''}`)}"><button class="btn" id="ecGo">Chercher</button></div>
     <div id="ecRes" style="margin-top:10px"><p class="doux">Recherche…</p></div>
     <div class="rang" style="margin-top:8px"><button class="btn grandir" id="ecLier" disabled>Lier la sélection</button>${opts.auto ? '<button class="btn sec" id="ecPasser">Plus tard</button>' : ''}</div>`, (c) => {
     let resultats = [];
@@ -199,7 +217,7 @@ export function ouvrirLiaison(articleId, apres, opts = {}) {
     const lancer = async (premier = false) => {
       $('#ecRes', c).innerHTML = '<p class="doux">Recherche…</p>';
       try {
-        resultats = await rechercherSouple($('#ecQ', c).value.trim(), a.format);
+        resultats = premier && opts.essais?.length ? await rechercheMulti(opts.essais, a) : await rechercherSouple($('#ecQ', c).value.trim(), a.format);
         // Couleur par prix au kg / L / unité. Article sans format (saisie libre) : on compare
         // dans l'unité la plus fréquente parmi les résultats (souvent le kg ou le L).
         let base = a.format ? a.uniteRef : null;
@@ -220,7 +238,7 @@ export function ouvrirLiaison(articleId, apres, opts = {}) {
         $('#ecRes', c).innerHTML = resultats.length ? resultats.map((r, i) => {
           const pu = pus[i];
           const coul = pu == null || connus.length < 2 ? '' : pu <= min + 1e-9 ? 'vert' : pu >= max - 1e-9 ? 'rouge' : '';
-          const coche = deja.has(r.id) || (premier && opts.auto && !deja.size && i === 0);
+          const coche = deja.has(r.id) || (premier && opts.auto && !opts.sansCoche && !deja.size && i === 0);
           return `<label class="item ${coul ? 'res-' + coul : ''}" style="cursor:pointer">
             <input type="checkbox" data-i="${i}" ${coche ? 'checked' : ''}>
             ${r.image ? `<img class="vignette" src="${esc(r.image)}" alt="">` : ''}
@@ -237,7 +255,7 @@ export function ouvrirLiaison(articleId, apres, opts = {}) {
     };
     $('#ecGo', c).onclick = () => lancer();
     $('#ecQ', c).onkeydown = (ev) => { if (ev.key === 'Enter') lancer(); };
-    $('#ecPasser', c)?.addEventListener('click', () => { fermerModale(); });
+    $('#ecPasser', c)?.addEventListener('click', () => { if (opts.passer) opts.passer(); else fermerModale(); });
     $('#ecLier', c).onclick = async () => {
       const choisis = $$('[data-i]', c).filter((x) => x.checked).map((x) => resultats[Number(x.dataset.i)]);
       const gardes = (a.liens || []).filter((l) => !resultats.some((r) => r.id === l.id)); // liens hors de cette recherche

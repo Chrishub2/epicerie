@@ -397,9 +397,18 @@ export async function nouveauRecu() {
       const etat = (m) => { $('#rvVerdict', c).innerHTML = `<div class="alerte">⏳ Je remplis ta liste et je complète les fiches… ${esc(m)}</div>`; };
       const bilan = await R.appliquerRecu(id, etat);
       toast(`Reçu enregistré ✓ ${R.texteBilan(bilan)}`);
-      ouvrirDetailRecu(id);
+      apresApplication(id);
     };
   });
+}
+
+/** Après avoir rempli la liste : propose de compléter les fiches sans photo (une à la fois), puis montre le reçu. */
+async function apresApplication(id) {
+  const R = await import('./recu.js');
+  if (navigator.onLine && (await R.aCompleter(id)).length) {
+    toast('Complétons les fiches : touche le bon produit pour chacune (ou « Plus tard »).');
+    R.completerFiches(id, () => ouvrirDetailRecu(id));
+  } else ouvrirDetailRecu(id);
 }
 
 /** Enregistre les photos et le reçu (lu ou non). Retourne son id. */
@@ -421,8 +430,10 @@ async function ouvrirDetailRecu(id) {
   const r = (S.get().recus || []).find((x) => x.id === id);
   if (!r) return;
   const v = r.statut === 'lu' ? R.verifierRecu(r) : null;
+  const nbFiches = (await R.aCompleter(id)).length;
   ouvrirModale('Reçu', `${R.htmlDetail(r)}
     <div class="rang envelopper" style="margin-top:10px">
+      ${nbFiches ? `<button class="btn" id="rcCompleter">🔎 Compléter ${nbFiches} fiche(s) : photo, format, prix des bannières</button>` : ''}
       ${r.statut === 'lu' && !(r.applique && r.bilan?.relies) ? '<button class="btn" id="rcAppliquer">Remplir ma liste avec ce reçu</button>' : ''}
       ${r.statut === 'lu' && (!r.verification || r.source !== 'ia' || (r.applique && !r.bilan?.relies)) ? '<button class="btn sec" id="rcRelire">🔄 Relire avec l\'IA</button>' : ''}
       ${v && !v.ok ? '<button class="btn sec" id="rcRefaire">📷 Reprendre ce reçu</button>' : ''}
@@ -434,7 +445,7 @@ async function ouvrirDetailRecu(id) {
     $('#rcAppliquer', c)?.addEventListener('click', async (ev) => {
       ev.target.disabled = true; ev.target.textContent = '⏳ En cours…';
       const bilan = await R.appliquerRecu(r.id, (m) => { ev.target.textContent = `⏳ ${m}`; });
-      toast(R.texteBilan(bilan)); ouvrirDetailRecu(r.id);
+      toast(R.texteBilan(bilan)); apresApplication(r.id);
     });
     $('#rcRelire', c)?.addEventListener('click', async (ev) => {
       ev.target.disabled = true; ev.target.textContent = '⏳ Lecture par l\'IA… (20 à 40 s)';
@@ -442,9 +453,10 @@ async function ouvrirDetailRecu(id) {
         await R.relireRecu(r.id);
         const bilan = await R.appliquerRecu(r.id, (m) => { ev.target.textContent = `⏳ ${m}`; });
         toast(R.texteBilan(bilan));
-      } catch (err) { toast(err.message); }
-      ouvrirDetailRecu(r.id);
+        apresApplication(r.id);
+      } catch (err) { toast(err.message); ouvrirDetailRecu(r.id); }
     });
+    $('#rcCompleter', c)?.addEventListener('click', () => R.completerFiches(r.id, () => ouvrirDetailRecu(r.id)));
     $('#rcRefaire', c)?.addEventListener('click', () => nouveauRecu());
     $('#supRecu', c).onclick = () => { if (confirm('Supprimer ce reçu ?')) { S.maj((x) => { x.recus = x.recus.filter((y) => y.id !== r.id); }); fermerModale(); } };
   });
