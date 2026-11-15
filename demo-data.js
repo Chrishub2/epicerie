@@ -17,7 +17,11 @@ export const BANNIERES = {
   maxi: { nom: 'Maxi', couleur: '#ffcc00' },
   costco: { nom: 'Costco', couleur: '#005daa' },
   jean_coutu: { nom: 'Jean Coutu', couleur: '#0072ce' },
+  // Commande en ligne seulement (épicerie en ligne d'IGA) : pas de succursale, pas dans les comparaisons en magasin.
+  voila: { nom: 'Voilà (IGA en ligne)', couleur: '#6a1b9a', enLigneSeulement: true },
 };
+/** Bannières avec des succursales (exclut Voilà). */
+export const BANNIERES_MAGASIN = Object.keys(BANNIERES).filter((k) => !BANNIERES[k].enLigneSeulement);
 
 export const PROGRAMMES = {
   pc_optimum: 'PC Optimum (Maxi)',

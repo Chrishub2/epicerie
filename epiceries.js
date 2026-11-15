@@ -6,7 +6,7 @@
 // Ne couvre PAS Costco ni Jean Coutu → photo, saisie, reçus.
 // =====================================================================
 import * as S from './store.js';
-import { $, $$, esc, argent, ouvrirModale, toast, nomBanniere, puce } from './ui.js';
+import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, nomBanniere, puce } from './ui.js';
 import { normaliser, analyserFormat, formatLisible } from './normalise.js';
 
 const API = 'https://epiceries.ca/api';
@@ -76,27 +76,85 @@ export function puDepuisEC(u) {
   return null;
 }
 
+// ---------------------------------------------------------------------
+// Catégories épiceries.ca → nos rayons (seulement si le rayon n'a pas été choisi à la main)
+// ---------------------------------------------------------------------
+let categories = null;
+async function nomCategorie(id) {
+  if (!id) return null;
+  if (!categories) {
+    try { categories = JSON.parse(localStorage.getItem('ec-categories') || 'null'); } catch { categories = null; }
+    if (!categories) {
+      try {
+        const d = await appel({ endpoint: 'categories' });
+        categories = Object.fromEntries(d.categories.map((c) => [c.id, c.name]));
+        try { localStorage.setItem('ec-categories', JSON.stringify(categories)); } catch { /* plein */ }
+      } catch { categories = {}; }
+    }
+  }
+  return categories[id] || null;
+}
+
+// Ordre important : « surgelés » avant tout (ex. « Viande et fruits de mer surgelés »).
+// Couvre les 71 catégories d'épiceries.ca (liste lue le 2026-11-15).
+const REGLES_RAYON = [
+  [/surgel|crème glacée/i, 'Surgelés'],
+  [/légume|legume|fruit(?!s de mer)|salade|fines herbes|noix/i, 'Fruits et légumes'],
+  [/poulet|dinde|boeuf|bœuf|porc|jambon|bacon|saucisse|viande|poisson|fruits de mer|substituts de viande/i, 'Viandes et poissons'],
+  [/biscuit|craquelin|croustille|chips|bonbon|chocolat/i, 'Collations et biscuits'],
+  [/soins|hygi|beauté|bébé|bebe/i, 'Hygiène et pharmacie'],
+  [/ménager|menager|détergent|detergent|lessive|vaisselle/i, "Produits d'entretien"],
+  [/lait|crème|creme|oeuf|œuf|beurre|fromage|yogourt|^désserts|trempette/i, 'Produits laitiers et œufs'],
+  [/pain|bagel|croissant|muffins anglais|tortilla|gâteau/i, 'Boulangerie'],
+  [/céréale|cereale|déjeuner|dejeuner|miel|sirop|tartinade/i, 'Céréales et déjeuner'],
+  [/\bjus\b|café|cafe|\bthés?\b|boisson|\beaux?\b|bière|\bvins?\b/i, 'Boissons'],
+  [/pâte|nouille|riz|couscous|haricot|lentille|conserve|cuisson|mets|huile|vinaigre|condiment|sauce|épice|assaisonnement|soupe/i, 'Épicerie (conserves, pâtes, riz)'],
+];
+export function rayonPourCategorie(nom) {
+  if (!nom) return null;
+  const e = S.get();
+  for (const [re, rayon] of REGLES_RAYON) {
+    if (re.test(nom)) return e.rayons.find((r) => r.nom === rayon)?.id || null;
+  }
+  return null;
+}
+
+/** Prix régulier = dernier prix SANS rabais observé dans ce magasin (historique). */
+async function prixReguliers(id) {
+  const out = {};
+  try {
+    const h = await appel({ endpoint: 'history', id, limit: 60 });
+    for (const p of h.history || []) if (!p.discounted) out[p.store] = p.price; // du plus ancien au plus récent
+  } catch { /* pas d'historique */ }
+  return out;
+}
+
 /** Remplace les prix épiceries.ca (et les prix de démo) d'un article par les prix actuels. */
 export async function actualiserArticle(articleId, { force = false } = {}) {
   const a = S.get().articles.find((x) => x.id === articleId);
   if (!a?.liens?.length) return 0;
   if (!force && a.majPrix && Date.now() - new Date(a.majPrix).getTime() < DELAI_MAJ_MS) return 0;
   const nouveaux = [];
-  let image = null;
+  let image = null, categorie = null;
   for (const lien of a.liens) {
     try {
       const d = await produit(lien.id);
       image ||= d.image;
+      categorie ||= d.category;
+      const enRabais = (d.prices || []).some((p) => p.discounted);
+      const reguliers = enRabais ? (await pause(PAUSE_MS), await prixReguliers(d.id)) : {};
       for (const p of d.prices || []) {
         const ban = MAGASINS_EC[p.store];
         if (!ban) continue;
-        nouveaux.push({ articleId, banniere: ban, offre: prixTexte(p.price), format: p.size || d.size || null,
+        nouveaux.push({ articleId, banniere: ban, offre: prixTexte(p.price), prixNum: p.price,
+          prixRegulier: p.discounted ? reguliers[p.store] || null : null, format: p.size || d.size || null,
           type: p.discounted ? 'circulaire' : 'regulier', fin: null, source: 'epiceries_ca', observeLe: (p.date || '').slice(0, 10),
           lienId: d.id, nomProduit: [d.brand, d.name].filter(Boolean).join(' '), uniteSource: puDepuisEC(p.unitPrice), url: d.url, lienMarchand: p.link });
       }
     } catch { /* produit retiré ou réseau : on garde les anciens prix de ce lien */ }
     await pause(PAUSE_MS);
   }
+  const rayonAuto = rayonPourCategorie(await nomCategorie(categorie));
   S.maj((e) => {
     const ar = e.articles.find((x) => x.id === articleId);
     if (!ar) return;
@@ -105,6 +163,7 @@ export async function actualiserArticle(articleId, { force = false } = {}) {
     e.prix.push(...nouveaux);
     ar.majPrix = new Date().toISOString();
     if (image && !ar.imageUrl) ar.imageUrl = image;
+    if (rayonAuto && !ar.rayonManuel) ar.rayonId = rayonAuto; // un rayon choisi à la main n'est jamais modifié
   });
   return nouveaux.length;
 }
@@ -120,34 +179,65 @@ export async function actualiserTout() {
 // ---------------------------------------------------------------------
 // Liaison : article générique ↔ un ou plusieurs produits réels
 // ---------------------------------------------------------------------
-export function ouvrirLiaison(articleId, apres) {
+/**
+ * opts.auto : ouverte automatiquement après un ajout par texte → le résultat
+ * le plus pertinent est présélectionné ; un toucher sur « Lier » suffit.
+ */
+export function ouvrirLiaison(articleId, apres, opts = {}) {
   const a = S.get().articles.find((x) => x.id === articleId);
+  if (a.exclusif && !Object.values(MAGASINS_EC).includes(a.exclusif)) { // ex. Costco : pas couvert par épiceries.ca
+    toast(`${a.nom} est vendu seulement chez ${nomBanniere(a.exclusif)} : pas de prix en ligne pour cette bannière.`);
+    return;
+  }
   ouvrirModale(`Vrais prix — ${a.nom}`, `
-    <p class="doux">Choisis le ou les produits qui correspondent à « ${esc(a.nom)} ». Coche-en un par magasin si les marques diffèrent (ex. Natrel chez IGA, Québon chez Maxi) : l'app comparera au même format. Source : épiceries.ca (Maxi, IGA, Super C, Metro).</p>
+    <p class="doux">${opts.auto ? 'Voici les produits trouvés pour ta saisie. ' : ''}Coche le ou les produits qui correspondent (un par magasin si les marques diffèrent, ex. Natrel chez IGA, Québon chez Maxi). <span style="color:var(--vert)">Vert</span> = le moins cher au kg/L, <span style="color:var(--rouge)">rouge</span> = le plus cher. Source : épiceries.ca (Maxi, IGA, Super C, Metro).</p>
     <div class="rang"><input id="ecQ" class="grandir" value="${esc(a.nom)}${a.marque ? ' ' + esc(a.marque) : ''}"><button class="btn" id="ecGo">Chercher</button></div>
     <div id="ecRes" style="margin-top:10px"><p class="doux">Recherche…</p></div>
-    <button class="btn" id="ecLier" style="width:100%;margin-top:8px" disabled>Lier la sélection</button>`, (c) => {
+    <div class="rang" style="margin-top:8px"><button class="btn grandir" id="ecLier" disabled>Lier la sélection</button>${opts.auto ? '<button class="btn sec" id="ecPasser">Plus tard</button>' : ''}</div>`, (c) => {
     let resultats = [];
     const deja = new Set((a.liens || []).map((l) => l.id));
-    const lancer = async () => {
+    const lancer = async (premier = false) => {
       $('#ecRes', c).innerHTML = '<p class="doux">Recherche…</p>';
       try {
         resultats = await rechercherSouple($('#ecQ', c).value.trim(), a.format);
-        $('#ecRes', c).innerHTML = resultats.length ? resultats.map((r, i) => `
-          <label class="item" style="cursor:pointer">
-            <input type="checkbox" data-i="${i}" ${deja.has(r.id) ? 'checked' : ''}>
+        // Couleur par prix au kg / L / unité. Article sans format (saisie libre) : on compare
+        // dans l'unité la plus fréquente parmi les résultats (souvent le kg ou le L).
+        let base = a.format ? a.uniteRef : null;
+        if (!base) {
+          const n = { kg: 0, l: 0, unite: 0 };
+          resultats.forEach((r) => { const f = analyserFormat(r.size); if (f) n[f.base]++; });
+          base = Object.entries(n).sort((x, y) => y[1] - x[1])[0][1] ? Object.entries(n).sort((x, y) => y[1] - x[1])[0][0] : 'unite';
+        }
+        const pus = resultats.map((r) => {
+          const n = normaliser(r.price, r.size, base);
+          if (n.prixUnitaire != null) return n.prixUnitaire;
+          const u = puDepuisEC(r.unitPrice);
+          return u && u.unite === base ? u.pu : null;
+        });
+        const connus = pus.filter((x) => x != null);
+        const min = Math.min(...connus), max = Math.max(...connus);
+        const ref = base === 'kg' ? '$/kg' : base === 'l' ? '$/L' : '$/unité';
+        $('#ecRes', c).innerHTML = resultats.length ? resultats.map((r, i) => {
+          const pu = pus[i];
+          const coul = pu == null || connus.length < 2 ? '' : pu <= min + 1e-9 ? 'vert' : pu >= max - 1e-9 ? 'rouge' : '';
+          const coche = deja.has(r.id) || (premier && opts.auto && !deja.size && i === 0);
+          return `<label class="item ${coul ? 'res-' + coul : ''}" style="cursor:pointer">
+            <input type="checkbox" data-i="${i}" ${coche ? 'checked' : ''}>
             ${r.image ? `<img class="vignette" src="${esc(r.image)}" alt="">` : ''}
             <div class="grandir"><div class="nom" style="font-weight:500">${esc(r.name)}</div>
               <div class="info">${esc(r.brand || '')}${r.size ? ` · ${esc(formatLisible(r.size))}` : ''}</div>
               <div class="info">${MAGASINS_EC[r.store] ? puce(MAGASINS_EC[r.store]) : ''}moins cher : ${esc(nomMagasinEC(r.store))} ${argent(r.price)}${r.discounted ? ' · <span class="pastille ambre">rabais</span>' : ''}</div></div>
-          </label>`).join('') : '<p class="doux">Aucun résultat. Essaie un mot plus simple (ex. « beurre » au lieu de « beurre salé 454 g »).</p>';
+            ${pu != null ? `<div class="pu-res ${coul}">${pu.toLocaleString('fr-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<br><span class="doux">${ref}</span></div>` : ''}
+          </label>`;
+        }).join('') : '<p class="doux">Aucun résultat. Essaie un mot plus simple (ex. « beurre » au lieu de « beurre salé 454 g »).</p>';
         $('#ecLier', c).disabled = !resultats.length;
       } catch {
         $('#ecRes', c).innerHTML = '<p class="doux">épiceries.ca ne répond pas (hors ligne ?). Réessaie plus tard.</p>';
       }
     };
-    $('#ecGo', c).onclick = lancer;
+    $('#ecGo', c).onclick = () => lancer();
     $('#ecQ', c).onkeydown = (ev) => { if (ev.key === 'Enter') lancer(); };
+    $('#ecPasser', c)?.addEventListener('click', () => { fermerModale(); });
     $('#ecLier', c).onclick = async () => {
       const choisis = $$('[data-i]', c).filter((x) => x.checked).map((x) => resultats[Number(x.dataset.i)]);
       const gardes = (a.liens || []).filter((l) => !resultats.some((r) => r.id === l.id)); // liens hors de cette recherche
@@ -156,13 +246,14 @@ export function ouvrirLiaison(articleId, apres) {
         ar.liens = [...gardes, ...choisis.map((r) => ({ id: r.id, nom: [r.brand, r.name].filter(Boolean).join(' '), size: r.size, image: r.image }))];
         e.prix = e.prix.filter((p) => !(p.articleId === articleId && p.source === 'epiceries_ca' && !ar.liens.some((l) => l.id === p.lienId)));
         if (!ar.imageUrl && choisis[0]?.image) ar.imageUrl = choisis[0].image;
+        if (!ar.format && choisis[0]?.size) { ar.format = formatLisible(choisis[0].size); const f = analyserFormat(choisis[0].size); if (f) ar.uniteRef = f.base; }
       });
       $('#ecLier', c).disabled = true; $('#ecLier', c).textContent = 'Récupération des prix…';
       const n = await actualiserArticle(articleId, { force: true });
-      toast(n ? `${n} prix récupérés` : 'Aucun prix dans tes 4 bannières pour ces produits');
-      apres?.();
+      toast(n ? `${n} prix récupérés` : 'Aucun prix dans tes bannières pour ces produits');
+      if (apres) apres(); else fermerModale();
     };
-    lancer();
+    lancer(true);
   });
 }
 

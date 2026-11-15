@@ -34,12 +34,35 @@ export function libelleFin(fin) {
 export function nomBanniere(b) { return BANNIERES[b]?.nom || b; }
 export function puce(b) { return `<i class="ban" style="background:${BANNIERES[b]?.couleur || '#999'}"></i>`; }
 
+/** Ville d'une succursale (champ ville, sinon tirée de l'adresse « …, Ville, QC … »). */
+export function villeMagasin(m) {
+  if (m.ville) return m.ville;
+  const parts = String(m.adresse || '').split(',').map((s) => s.trim());
+  const i = parts.findIndex((p) => /^QC\b/i.test(p));
+  return i > 0 ? parts[i - 1] : '';
+}
+
+/** Succursales actives (cochées « à considérer ») d'une bannière. */
+export function magasinsActifs(banniere) {
+  return get().magasins.filter((m) => m.banniere === banniere && m.actif !== false);
+}
+
+/** « IGA · Beloeil » ou « IGA · Beloeil, Varennes » (plusieurs succursales actives). */
+export function nomBanniereVille(b) {
+  const villes = [...new Set(magasinsActifs(b).map(villeMagasin).filter(Boolean))];
+  return villes.length ? `${nomBanniere(b)} · ${villes.join(', ')}` : nomBanniere(b);
+}
+
+/** Une bannière est considérée si au moins une de ses succursales est active. */
+export function banniereActive(b) { return magasinsActifs(b).length > 0; }
+
 // ---------------------------------------------------------------------
 // Fenêtre modale
 // ---------------------------------------------------------------------
 const dlg = () => $('#modale');
-export function ouvrirModale(titre, html, apres) {
-  $('#modaleTitre').textContent = titre;
+/** opts.image : URL d'une image affichée devant le titre. */
+export function ouvrirModale(titre, html, apres, opts = {}) {
+  $('#modaleTitre').innerHTML = `${opts.image ? `<img src="${esc(opts.image)}" alt="" class="vignette" style="vertical-align:middle;margin-right:8px">` : ''}${esc(titre)}`;
   $('#modaleCorps').innerHTML = html;
   if (!dlg().open) dlg().showModal();
   apres?.($('#modaleCorps'));
@@ -62,23 +85,29 @@ function rabaisPersoActifs() {
 
 /**
  * Toutes les offres d'un article, normalisées et triées du moins cher au plus cher.
- * Ajoute une ligne « prix effectif » pour chaque magasin avec un rabais perso actif.
+ * - seulement les bannières dont au moins une succursale est « à considérer » ;
+ * - si l'article est exclusif à une bannière (ex. Kirkland → Costco), seulement celle-là ;
+ * - ajoute une ligne « prix effectif » pour chaque magasin avec un rabais perso actif ;
+ * - economie = prix régulier − prix courant quand le produit est en rabais.
  */
 export function offresArticle(article) {
   const e = get();
   const lignes = [];
   for (const p of e.prix.filter((x) => x.articleId === article.id)) {
     if (p.fin && joursRestants(p.fin) < 0) continue;
+    if (!banniereActive(p.banniere)) continue;
+    if (article.exclusif && p.banniere !== article.exclusif) continue;
     let n = normaliser(p.offre, p.format || article.format, article.uniteRef);
     // Format illisible mais prix unitaire fourni par la source (épiceries.ca) dans la bonne unité
     if (n.erreur && p.uniteSource && p.uniteSource.unite === article.uniteRef) {
       n = { prixUnitaire: p.uniteSource.pu, uniteRef: article.uniteRef, prixArticle: null };
     }
-    lignes.push({ ...p, pu: n.prixUnitaire ?? null, prixArticle: n.prixArticle ?? null, uniteRef: n.uniteRef || article.uniteRef, erreur: n.erreur });
+    const economie = p.prixRegulier && p.prixNum && p.prixRegulier > p.prixNum + 0.004 ? p.prixRegulier - p.prixNum : null;
+    lignes.push({ ...p, pu: n.prixUnitaire ?? null, prixArticle: n.prixArticle ?? null, uniteRef: n.uniteRef || article.uniteRef, erreur: n.erreur, economie });
   }
   for (const r of rabaisPersoActifs()) {
     const m = e.magasins.find((x) => x.id === r.magasinId);
-    if (!m) continue;
+    if (!m || m.actif === false) continue;
     const base = lignes.filter((l) => l.banniere === m.banniere && !l.perso && l.pu != null).sort((a, b) => a.pu - b.pu)[0];
     if (!base) continue;
     const k = 1 - r.pct / 100;
@@ -86,12 +115,20 @@ export function offresArticle(article) {
       rabaisTexte: `−${r.pct} % perso${r.plafond ? ` (sur ${r.plafond} $)` : ''}` });
   }
   lignes.sort((a, b) => (a.pu ?? Infinity) - (b.pu ?? Infinity));
-  const meilleur = lignes.find((l) => l.pu != null)?.pu ?? null;
-  lignes.forEach((l) => { l.classe = classer(l.pu, meilleur); });
+  const avecPrix = lignes.filter((l) => l.pu != null);
+  const meilleur = avecPrix[0]?.pu ?? null;
+  const pire = avecPrix.length > 1 ? avecPrix[avecPrix.length - 1].pu : null;
+  lignes.forEach((l) => {
+    l.classe = classer(l.pu, meilleur);
+    if (pire != null && l.pu === pire && pire > meilleur) l.classe = 'cher'; // rouge = le plus cher
+  });
   return lignes;
 }
 
 export function meilleureOffre(article) { return offresArticle(article).find((l) => l.pu != null) || null; }
+
+/** Nom affiché d'une offre : « IGA Extra Varennes » (rabais perso) ou « IGA · Beloeil ». */
+export function nomOffre(o) { return o.magasinNom || nomBanniereVille(o.banniere); }
 
 export { libelleUnitaire };
 

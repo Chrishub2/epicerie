@@ -1,58 +1,63 @@
 // =====================================================================
-// Onglet COMPARER : vue cartes, vue tableau (aliments × bannières),
-// création de listes « le moins cher en N arrêts max », commande en ligne.
+// Onglet COMPARER : vue tableau (aliments × bannières), vue détail,
+// « Créer mes listes » (le moins cher en N arrêts max, avec bannières
+// forcées ou ignorées) et préparation des paniers en ligne.
 // =====================================================================
 import * as S from './store.js';
-import { $, $$, esc, argent, offresArticle, libelleUnitaire, libelleFin, joursRestants, nomBanniere, puce, toast } from './ui.js';
-import { BANNIERES } from './demo-data.js';
+import { $, $$, esc, argent, offresArticle, libelleUnitaire, libelleFin, joursRestants, nomBanniere, nomBanniereVille,
+  banniereActive, nomOffre, puce, toast } from './ui.js';
+import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserFormat, formatLisible } from './normalise.js';
 
 let vue = 'tableau';      // 'tableau' | 'cartes'
 let portee = 'liste';     // 'liste' | 'tout'
 let maxArrets = 2;
-let banniereEnLigne = 'maxi';
+let nbSitesEnLigne = 1;
 
-// Commande en ligne. Les liens https ouvrent l'app de la bannière si elle est
-// installée et prend ces liens en charge ; sinon, le site. Liens à valider.
+// ---------------------------------------------------------------------
+// Commande en ligne (liens vérifiés le 2026-11-15 dans un vrai navigateur).
+// Un lien https ouvre l'app du magasin si elle est installée et prend ces liens en charge.
+// `prixDe` : bannière dont on utilise les prix pour ce site.
+// ---------------------------------------------------------------------
 export const EN_LIGNE = {
-  iga: { site: 'https://www.iga.net/fr', recherche: (q) => `https://www.iga.net/fr/search?k=${encodeURIComponent(q)}`, note: 'App IGA' },
-  metro: { site: 'https://www.metro.ca/epicerie-en-ligne', recherche: (q) => `https://www.metro.ca/epicerie-en-ligne/recherche?filter=${encodeURIComponent(q)}`, note: 'App Metro' },
-  maxi: { site: 'https://www.maxi.ca/fr', recherche: (q) => `https://www.maxi.ca/fr/search?search-bar=${encodeURIComponent(q)}`, note: 'App PC Express' },
-  costco: { site: 'https://www.costco.ca/?lang=fr-CA', recherche: (q) => `https://www.costco.ca/CatalogSearch?keyword=${encodeURIComponent(q)}&lang=fr-CA`, note: 'Épicerie le jour même via Instacart' },
-  jean_coutu: { site: 'https://www.jeancoutu.com', recherche: (q) => `https://www.jeancoutu.com/recherche/?k=${encodeURIComponent(q)}`, note: 'Boutique en ligne (choix limité)' },
-  super_c: { site: 'https://www.superc.ca', recherche: (q) => `https://www.superc.ca/recherche?filter=${encodeURIComponent(q)}`, note: 'Pas de commande en ligne connue (à vérifier)', sansCommande: true },
-  instacart: { site: 'https://www.instacart.ca', recherche: (q) => `https://www.instacart.ca/store/s?k=${encodeURIComponent(q)}`, note: '⚠️ Prix souvent plus élevés qu\'en magasin + frais' },
+  voila: { nom: 'Voilà (IGA)', prixDe: 'iga', site: 'https://voila.ca/', recherche: (q) => `https://voila.ca/search?q=${encodeURIComponent(q)}`, note: 'Épicerie en ligne d\'IGA. Prix d\'IGA en magasin à titre indicatif.' },
+  metro: { nom: 'Metro', prixDe: 'metro', site: 'https://www.metro.ca/epicerie-en-ligne', recherche: (q) => `https://www.metro.ca/epicerie-en-ligne/recherche?filter=${encodeURIComponent(q)}`, note: 'App Metro.' },
+  maxi: { nom: 'Maxi (PC Express)', prixDe: 'maxi', site: 'https://www.maxi.ca/fr', recherche: (q) => `https://www.maxi.ca/fr/search?search-bar=${encodeURIComponent(q)}`, note: 'App PC Express.' },
+  costco: { nom: 'Costco', prixDe: 'costco', site: 'https://www.costco.ca/?lang=fr-CA', recherche: (q) => `https://www.costco.ca/s?keyword=${encodeURIComponent(q)}&lang=fr-CA`, note: 'Épicerie le jour même via Instacart : prix plus élevés qu\'en entrepôt.' },
+  jean_coutu: { nom: 'Jean Coutu', prixDe: 'jean_coutu', site: 'https://www.jeancoutu.com/', recherche: (q) => `https://www.jeancoutu.com/magasiner/recherche?filter=${encodeURIComponent(q)}`, note: 'Boutique en ligne (choix limité).' },
+  instacart: { nom: 'Instacart', prixDe: null, site: 'https://www.instacart.ca/', recherche: (q) => `https://www.instacart.ca/store/s?k=${encodeURIComponent(q)}`, note: '⚠️ Prix souvent plus élevés qu\'en magasin + frais.' },
 };
+const SITE_DE_BANNIERE = Object.fromEntries(Object.entries(EN_LIGNE).filter(([, s]) => s.prixDe).map(([k, s]) => [s.prixDe, k]));
 
 /** Clé d'un « arrêt » : bannière, ou magasin précis quand un rabais perso s'applique. */
 export const cleOffre = (o) => (o.perso ? 'perso:' + o.magasinNom : o.banniere);
-export const nomCle = (k) => (k.startsWith('perso:') ? k.slice(6) : nomBanniere(k));
+export const nomCle = (k) => (k.startsWith('perso:') ? k.slice(6) : nomBanniereVille(k));
 const banniereDeCle = (k) => {
   if (!k.startsWith('perso:')) return k;
   return S.get().magasins.find((m) => m.nom === k.slice(6))?.banniere || 'iga';
 };
 
 // ---------------------------------------------------------------------
-// Tableau des offres d'un article (fiche + vue cartes)
+// Tableau des offres d'un article (fiche + vue détail)
 // ---------------------------------------------------------------------
 export function tableauOffres(a, { avecManquants = false } = {}) {
   const lignes = offresArticle(a);
   const presentes = new Set(lignes.map((l) => l.banniere));
-  const manquantes = avecManquants ? Object.keys(BANNIERES).filter((b) => !presentes.has(b)) : [];
+  const manquantes = avecManquants ? BANNIERES_MAGASIN.filter((b) => !presentes.has(b) && banniereActive(b) && (!a.exclusif || a.exclusif === b)) : [];
   if (!lignes.length && !manquantes.length) return `<p class="doux">Aucun prix connu pour l'instant.</p>`;
   return `<table class="comp">${lignes.map((l) => `
     <tr class="${l.classe}">
-      <td>${puce(l.banniere)}<b>${esc(l.magasinNom || nomBanniere(l.banniere))}</b>
-        <div class="doux">${esc(l.offre)}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
-        <div>${l.type === 'circulaire' ? '<span class="pastille ambre">circulaire</span>' : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.local ? '<span class="pastille">🍁 local</span>' : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}</div>
+      <td>${puce(l.banniere)}<b>${esc(nomOffre(l))}</b>
+        <div class="doux">${esc(l.offre)}${l.economie ? ` <b style="color:var(--vert)">(−${argent(l.economie)})</b>` : ''}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
+        <div>${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
         ${l.erreur ? `<div class="doux" style="color:var(--rouge)">${esc(l.erreur)}</div>` : ''}
       </td>
       <td class="pu">${puHtml(l)}${l.prixArticle != null ? `<div class="doux">${argent(l.prixArticle)} / article</div>` : ''}</td>
     </tr>`).join('')}
-    ${manquantes.map((b) => `<tr><td>${puce(b)}<b>${esc(nomBanniere(b))}</b><div class="doux">Prix inconnu</div></td>
+    ${manquantes.map((b) => `<tr><td>${puce(b)}<b>${esc(nomBanniereVille(b))}</b><div class="doux">Prix inconnu</div></td>
       <td class="pu"><button class="btn sec" data-ajprix="${b}" style="padding:4px 10px">+ prix</button></td></tr>`).join('')}
   </table>
-  <p class="doux">Vert = meilleur prix · ambre = moins de 5 % d'écart. Prix ramenés à la même unité.</p>`;
+  <p class="doux">Vert = le moins cher · rouge = le plus cher · ambre = moins de 5 % d'écart. (−x $) = économie sur le prix régulier.</p>`;
 }
 
 function puHtml(l) {
@@ -69,16 +74,17 @@ function lignesListe() {
 }
 
 /** Pour chaque ligne : coût par arrêt (prix unitaire × quantité voulue). */
-function options() {
+function options(cleAutorisee = () => true) {
   return lignesListe().map(({ l, a }) => {
     const f = analyserFormat(a.format);
     const besoin = f && f.base === a.uniteRef ? f.total * l.quantite : null;
     const parCle = {};
     for (const o of offresArticle(a)) {
       if (o.pu == null) continue;
+      const k = cleOffre(o);
+      if (!cleAutorisee(k)) continue;
       const cout = besoin != null ? o.pu * besoin : (o.prixArticle != null ? o.prixArticle * l.quantite : null);
       if (cout == null) continue;
-      const k = cleOffre(o);
       if (!(k in parCle) || cout < parCle[k].cout) parCle[k] = { cout, offre: o };
     }
     return { l, a, parCle };
@@ -91,15 +97,21 @@ function combinaisons(cles, k, debut = 0, acc = [], out = []) {
   return out;
 }
 
-/** Meilleure combinaison de magasins pour chaque nombre d'arrêts de 1 à max. */
-export function optimiser(max) {
-  const opts = options();
+/**
+ * Meilleure combinaison de magasins pour chaque nombre d'arrêts jusqu'à max.
+ * forcees : arrêts obligatoires ; ignorees : arrêts exclus de ce calcul.
+ */
+export function optimiser(max, { forcees = [], ignorees = [], cleAutorisee } = {}) {
+  const opts = options((k) => !ignorees.includes(k) && (!cleAutorisee || cleAutorisee(k)));
   const cles = [...new Set(opts.flatMap((o) => Object.keys(o.parCle)))];
+  const forcesValides = forcees.filter((k) => !ignorees.includes(k) && (!cleAutorisee || cleAutorisee(k)));
+  const libres = cles.filter((k) => !forcesValides.includes(k));
   const sansPrix = opts.filter((o) => !Object.keys(o.parCle).length);
   const resultats = [];
-  for (let k = 1; k <= Math.min(max, cles.length); k++) {
+  for (let k = Math.max(1, forcesValides.length); k <= Math.min(max, libres.length + forcesValides.length); k++) {
     let meilleur = null;
-    for (const combo of combinaisons(cles, k)) {
+    for (const reste of combinaisons(libres, k - forcesValides.length)) {
+      const combo = [...forcesValides, ...reste];
       let total = 0, manquants = 0; const affect = [];
       for (const o of opts) {
         if (!Object.keys(o.parCle).length) continue;
@@ -107,16 +119,16 @@ export function optimiser(max) {
         for (const c of combo) if (o.parCle[c] && (!best || o.parCle[c].cout < best.cout)) best = { cle: c, ...o.parCle[c] };
         if (best) { total += best.cout; affect.push({ ...o, choix: best }); } else manquants++;
       }
-      // un arrêt inutilisé ne compte pas : on l'ignore
+      // Un arrêt choisi librement mais inutile ne compte pas (un arrêt forcé, lui, est gardé).
       const utilises = new Set(affect.map((x) => x.choix.cle));
-      if (utilises.size < k) continue;
+      if (reste.some((c) => !utilises.has(c))) continue;
       if (!meilleur || manquants < meilleur.manquants || (manquants === meilleur.manquants && total < meilleur.total - 1e-9)) {
         meilleur = { arrets: k, combo, total, manquants, affect };
       }
     }
     if (meilleur) resultats.push(meilleur);
   }
-  return { resultats, sansPrix, nb: opts.length };
+  return { resultats, sansPrix, nb: opts.length, cles };
 }
 
 function appliquer(res) {
@@ -128,8 +140,22 @@ function appliquer(res) {
     }
   });
   // On ouvre la liste filtrée sur le 1er magasin, dans l'ordre de ses rayons.
-  import('./app.js').then((m) => m.allerOnglet('liste', { filtre: res.combo[0] }));
+  import('./app.js').then((m) => m.allerOnglet('liste', { filtre: res.affect[0]?.choix.cle || res.combo[0] }));
   toast(`Liste répartie sur ${res.arrets} magasin(s). Touche un magasin en haut de la liste pour voir sa partie.`);
+}
+
+function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
+  const eco = un && r !== un ? un.total - r.total : 0;
+  const parMag = {};
+  r.affect.forEach((x) => (parMag[x.choix.cle] ??= []).push(x));
+  return `<div class="carte" style="margin:10px 0 0;background:var(--gris-fond)">
+    <div class="total"><span>${r.arrets} arrêt${r.arrets > 1 ? 's' : ''} : ${r.combo.map((k) => esc(nomCle(k))).join(' + ')}</span><span>${argent(r.total)}</span></div>
+    ${eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
+    ${r.manquants ? `<div class="doux" style="color:var(--ambre)">${r.manquants} article(s) sans prix dans ces magasins</div>` : ''}
+    ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:6px">${puce(banniereDeCle(k))}<b>${esc(nomCle(k))}</b> — ${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}
+      <ul class="liste-arret">${xs.map((x) => `<li><span>${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
+        <span class="doux">${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
+    ${avecBouton ? `<button class="btn" ${attr}="${r.arrets}" style="margin-top:8px">Utiliser cette répartition</button>` : ''}</div>`;
 }
 
 // ---------------------------------------------------------------------
@@ -137,6 +163,7 @@ function appliquer(res) {
 // ---------------------------------------------------------------------
 export function vueComparaison(v, rendre) {
   const e = S.get();
+  e.optim ||= { forcees: [], ignorees: [] };
   const articles = portee === 'liste'
     ? [...new Set(lignesListe().map((x) => x.a.id))].map((id) => e.articles.find((a) => a.id === id))
     : [...e.articles].sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
@@ -149,26 +176,22 @@ export function vueComparaison(v, rendre) {
       <button class="btn ${vue === 'cartes' ? '' : 'sec'}" data-vue="cartes">☰ Détail</button></div>`;
 
   // --- Créer mes listes ---
-  const opt = optimiser(maxArrets);
+  const { forcees, ignorees } = e.optim;
+  const opt = optimiser(maxArrets, { forcees, ignorees });
+  const toutesCles = [...new Set([...optimiser(1).cles, ...forcees, ...ignorees])];
   if (opt.nb) {
-    const un = opt.resultats[0];
     html += `<div class="carte"><h2>Créer mes listes : le moins cher</h2>
       <div class="rang"><label class="doux grandir">Nombre d'arrêts maximum</label>
         <select id="maxArrets" style="width:auto">${[1, 2, 3, 4].map((n) => `<option ${n === maxArrets ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-      ${opt.resultats.map((r) => {
-        const eco = un && r !== un ? un.total - r.total : 0;
-        const parMag = {};
-        r.affect.forEach((x) => (parMag[x.choix.cle] ??= []).push(x));
-        return `<div class="carte" style="margin:10px 0 0;background:var(--gris-fond)">
-          <div class="total"><span>${r.arrets} arrêt${r.arrets > 1 ? 's' : ''} : ${r.combo.map((k) => esc(nomCle(k))).join(' + ')}</span><span>${argent(r.total)}</span></div>
-          ${eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
-          ${r.manquants ? `<div class="doux" style="color:var(--ambre)">${r.manquants} article(s) sans prix dans ces magasins</div>` : ''}
-          ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:6px">${puce(banniereDeCle(k))}<b>${esc(nomCle(k))}</b> — ${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}
-            <ul class="liste-arret">${xs.map((x) => `<li><span>${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
-              <span class="doux">${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
-          <button class="btn" data-appliquer="${r.arrets}" style="margin-top:8px">Utiliser cette répartition</button></div>`;
-      }).join('')}
-      ${opt.sansPrix.length ? `<p class="doux">Sans prix connu : ${opt.sansPrix.map((o) => esc(o.a.nom)).join(', ')}. Touche l'article pour ajouter un prix vu.</p>` : ''}
+      <div class="doux" style="margin:8px 0 4px">Touche une bannière : <b>★ forcée</b> (toujours un arrêt) → <b>✕ ignorée</b> → normale.</div>
+      <div class="rang envelopper">${toutesCles.map((k) => {
+        const etat = forcees.includes(k) ? 'forcee' : ignorees.includes(k) ? 'ignoree' : '';
+        return `<button class="puce-ban ${etat}" data-cle="${esc(k)}">${etat === 'forcee' ? '★ ' : etat === 'ignoree' ? '✕ ' : ''}${esc(nomCle(k))}</button>`;
+      }).join('')}</div>
+      <button class="btn sec" id="recalculer" style="margin-top:8px">🔄 Refaire l'optimisation</button>
+      ${opt.resultats.length ? opt.resultats.map((r) => blocResultat(r, opt.resultats[0], true)).join('')
+        : '<p class="doux">Aucune combinaison possible avec ces choix (trop de bannières forcées pour le nombre d\'arrêts ?).</p>'}
+      ${opt.sansPrix.length ? `<p class="doux">Sans prix connu : ${opt.sansPrix.map((o) => esc(o.a.nom)).join(', ')}. Touche l'article pour trouver ses prix.</p>` : ''}
       <p class="doux">Coût = prix unitaire × ta quantité habituelle (les gros formats Costco sont ramenés à ton format), avant taxes. Le plafond du rabais perso n'est pas suivi article par article.</p></div>`;
   }
 
@@ -186,12 +209,23 @@ export function vueComparaison(v, rendre) {
   $$('[data-portee]', v).forEach((b) => b.onclick = () => { portee = b.dataset.portee; rendre(); });
   $$('[data-vue]', v).forEach((b) => b.onclick = () => { vue = b.dataset.vue; rendre(); });
   $('#maxArrets', v)?.addEventListener('change', (ev) => { maxArrets = Number(ev.target.value); rendre(); });
+  $$('[data-cle]', v).forEach((b) => b.onclick = () => S.maj((x) => {
+    const k = b.dataset.cle; const o = (x.optim ||= { forcees: [], ignorees: [] });
+    if (o.forcees.includes(k)) { o.forcees = o.forcees.filter((y) => y !== k); o.ignorees.push(k); }
+    else if (o.ignorees.includes(k)) o.ignorees = o.ignorees.filter((y) => y !== k);
+    else o.forcees.push(k);
+  }));
+  $('#recalculer', v)?.addEventListener('click', async () => {
+    toast('Mise à jour des prix et nouveau calcul…');
+    const m = await import('./epiceries.js'); await m.actualiserTout().catch(() => {});
+    rendre();
+  });
   $$('[data-appliquer]', v).forEach((b) => b.onclick = () => appliquer(opt.resultats.find((r) => r.arrets === Number(b.dataset.appliquer))));
   $$('[data-art]', v).forEach((el) => el.onclick = () => import('./app.js').then((m) => m.ficheArticle(el.dataset.art)));
   brancherEnLigne(v, rendre);
 }
 
-/** Tableau : une ligne par aliment, une colonne par bannière, le moins cher en surbrillance. */
+/** Tableau : une ligne par aliment, une colonne par bannière ; vert = moins cher, rouge = plus cher. */
 function matrice(articles) {
   const offres = articles.map((a) => ({ a, os: offresArticle(a) }));
   const cles = [...new Set(offres.flatMap(({ os }) => os.filter((o) => o.pu != null).map(cleOffre)))];
@@ -207,36 +241,71 @@ function matrice(articles) {
         if (!o) return '<td class="vide-cel">—</td>';
         const affiche = o.perso && o.prixArticle != null ? argent(o.prixArticle) : o.offre;
         const prix = affiche + (o.format ? ` / ${formatLisible(o.format)}` : '');
-        return `<td class="${o.classe}"><b>${esc(prix)}</b>${o.perso ? `<div class="doux">${esc(o.offre)} ${esc(o.rabaisTexte.split(' (')[0])}</div>` : ''}<div>${esc(libelleUnitaire(o.pu, o.uniteRef).split(' · ')[0])}</div>${o.fin ? `<div class="doux">${libelleFin(o.fin)}</div>` : ''}</td>`;
+        return `<td class="${o.classe}"><b>${esc(prix)}</b>${o.economie ? `<div style="color:var(--vert)">(−${argent(o.economie)})</div>` : ''}${o.perso ? `<div class="doux">${esc(o.offre)} ${esc(o.rabaisTexte.split(' (')[0])}</div>` : ''}<div>${esc(libelleUnitaire(o.pu, o.uniteRef).split(' · ')[0])}</div>${o.fin ? `<div class="doux">${libelleFin(o.fin)}</div>` : ''}</td>`;
       }).join('')}</tr>`;
     }).join('')}</tbody></table></div>
-    <p class="doux">Surligné vert = le moins cher (au même format) · ambre = moins de 5 % d'écart. Glisse le tableau vers la gauche pour voir toutes les bannières. Touche un aliment pour sa fiche.</p>`;
+    <p class="doux">Vert = le moins cher · rouge = le plus cher (au même format) · (−x $) = économie sur le prix régulier. Glisse le tableau vers la gauche pour voir toutes les bannières.</p>`;
+}
+
+// ---------------------------------------------------------------------
+// Paniers en ligne : le moins cher sur 1 à 3 sites, liens exacts, aide au remplissage
+// ---------------------------------------------------------------------
+function lienProduit(siteKey, a) {
+  const site = EN_LIGNE[siteKey];
+  // Lien exact vers la fiche du produit chez le marchand quand on le connaît (sauf IGA : l'ancien site iga.net renvoie 404)
+  const p = site.prixDe && site.prixDe !== 'iga' && S.get().prix.find((x) => x.articleId === a.id && x.banniere === site.prixDe && x.lienMarchand);
+  return p ? { url: p.lienMarchand, exact: true } : { url: site.recherche(`${a.marque ? a.marque + ' ' : ''}${a.nom}`), exact: false };
 }
 
 function blocEnLigne() {
   const e = S.get();
-  const b = EN_LIGNE[banniereEnLigne];
-  const toutes = lignesListe();
-  const assignes = toutes.filter(({ l }) => l.magasinCible && banniereDeCle(l.magasinCible) === banniereEnLigne);
-  const items = assignes.length ? assignes : toutes;
-  return `<div class="carte"><h2>Préparer un panier en ligne</h2>
-    <div class="rang"><select id="bannEnLigne" class="grandir">${Object.keys(EN_LIGNE).map((k) => `<option value="${k}" ${k === banniereEnLigne ? 'selected' : ''}>${k === 'instacart' ? 'Instacart' : esc(nomBanniere(k))}</option>`).join('')}</select>
-      <a class="btn" href="${b.site}" target="_blank" rel="noopener" style="text-decoration:none">Ouvrir l'app / le site</a></div>
-    <p class="doux">${esc(b.note)}. ${assignes.length ? `${assignes.length} article(s) que la répartition a placés ici.` : 'Toute la liste (aucune répartition appliquée pour cette bannière).'} Tu te connectes et tu confirmes toi-même.</p>
-    ${b.sansCommande ? '' : items.map(({ l, a }) => `<div class="rang" style="padding:6px 0;border-top:1px solid var(--ligne)">
-      <span class="grandir une-ligne">${l.quantite} × ${esc(a.nom)}${a.format ? ` <span class="doux">${esc(formatLisible(a.format))}</span>` : ''}</span>
-      <a href="${b.recherche(a.nom)}" target="_blank" rel="noopener" style="white-space:nowrap">Chercher ›</a></div>`).join('')}
-    <button class="btn sec" id="copierListe" style="margin-top:8px">Copier cette liste</button></div>`;
+  const sitesActifs = Object.keys(EN_LIGNE).filter((k) => !EN_LIGNE[k].prixDe || EN_LIGNE[k].prixDe === 'iga' ? true : banniereActive(EN_LIGNE[k].prixDe));
+  const autorisee = (k) => !k.startsWith('perso:') && SITE_DE_BANNIERE[k] && sitesActifs.includes(SITE_DE_BANNIERE[k]) && !(e.optim?.ignorees || []).includes(k);
+  const opt = optimiser(nbSitesEnLigne, { cleAutorisee: autorisee, forcees: (e.optim?.forcees || []).filter(autorisee) });
+  const r = opt.resultats[opt.resultats.length - 1];
+  let html = `<div class="carte"><h2>Préparer mes paniers en ligne</h2>
+    <div class="rang"><label class="doux grandir">Nombre de sites maximum</label>
+      <select id="nbSites" style="width:auto">${[1, 2, 3].map((n) => `<option ${n === nbSitesEnLigne ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <p class="doux">Le moins cher pour ta liste parmi Voilà (IGA), Metro, Maxi, Costco et Jean Coutu, avec les mêmes bannières forcées ou ignorées que plus haut. Super C n'a pas de commande en ligne.</p>`;
+  if (!r) {
+    html += '<p class="doux">Pas assez de prix connus pour proposer des paniers. Lie tes produits aux vrais prix (fiche → 🔎).</p>';
+  } else {
+    html += `<div class="total"><span>Total estimé</span><span>${argent(r.total)}</span></div>`;
+    const parSite = {};
+    r.affect.forEach((x) => (parSite[SITE_DE_BANNIERE[x.choix.cle]] ??= []).push(x));
+    for (const [site, xs] of Object.entries(parSite)) {
+      const s = EN_LIGNE[site];
+      html += `<div class="carte" style="margin:10px 0 0;background:var(--gris-fond)" data-site="${site}">
+        <div class="rang"><b class="grandir">${puce(s.prixDe === 'iga' ? 'voila' : s.prixDe)}${esc(s.nom)} — ${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b>
+          <a class="btn" href="${s.site}" target="_blank" rel="noopener" style="text-decoration:none;padding:6px 10px">Ouvrir</a></div>
+        <div class="doux">${esc(s.note)}</div>
+        ${xs.map((x) => { const lp = lienProduit(site, x.a); return `<div class="rang" style="padding:6px 0;border-top:1px solid var(--ligne)">
+          <span class="grandir une-ligne">${x.l.quantite} × ${esc(x.a.nom)}${x.a.format ? ` <span class="doux">${esc(formatLisible(x.a.format))}</span>` : ''}</span>
+          <a href="${esc(lp.url)}" target="_blank" rel="noopener" style="white-space:nowrap">${lp.exact ? 'Produit ›' : 'Chercher ›'}</a></div>`; }).join('')}
+        <div class="rang envelopper" style="margin-top:8px">
+          <button class="btn sec" data-copier="${site}">Copier la liste</button>
+          <button class="btn sec" data-claude="${site}">🤖 Remplir avec Claude</button></div></div>`;
+    }
+    if (opt.sansPrix.length || r.manquants) html += `<p class="doux">${opt.sansPrix.length + r.manquants} article(s) sans prix en ligne : à chercher toi-même.</p>`;
+  }
+  html += `<p class="doux">🤖 « Remplir avec Claude » copie des instructions : colle-les dans Claude sur ton ordinateur pendant que tu es connecté au site dans Chrome. Claude ajoute les articles au panier et s'arrête <b>avant le paiement</b> ; tu vérifies et tu paies toi-même. Depuis le téléphone, l'app ne peut pas remplir le panier seule (aucun magasin n'offre d'accès pour ça).</p></div>`;
+  return html;
 }
 
 function brancherEnLigne(v, rendre) {
-  const sel = $('#bannEnLigne', v);
-  if (!sel) return;
-  sel.onchange = () => { banniereEnLigne = sel.value; rendre(); };
-  $('#copierListe', v).onclick = async () => {
-    const toutes = lignesListe();
-    const assignes = toutes.filter(({ l }) => l.magasinCible && banniereDeCle(l.magasinCible) === banniereEnLigne);
-    const txt = (assignes.length ? assignes : toutes).map(({ l, a }) => `${l.quantite} × ${a.nom}${a.format ? ` (${formatLisible(a.format)})` : ''}`).join('\n');
-    try { await navigator.clipboard.writeText(txt); toast('Liste copiée — colle-la dans l\'app'); } catch { toast('Copie impossible'); }
-  };
+  $('#nbSites', v)?.addEventListener('change', (ev) => { nbSitesEnLigne = Number(ev.target.value); rendre(); });
+  const itemsDuSite = (site) => [...$$(`[data-site="${site}"] .une-ligne`, v)].map((el) => el.textContent.replace(/\s+/g, ' ').trim());
+  const liensDuSite = (site) => [...$$(`[data-site="${site}"] a[href]`, v)].slice(1).map((a) => a.href);
+  $$('[data-copier]', v).forEach((b) => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(itemsDuSite(b.dataset.copier).join('\n')); toast('Liste copiée'); } catch { toast('Copie impossible'); }
+  });
+  $$('[data-claude]', v).forEach((b) => b.onclick = async () => {
+    const site = b.dataset.claude, s = EN_LIGNE[site];
+    const items = itemsDuSite(site), liens = liensDuSite(site);
+    const txt = `Claude, remplis mon panier sur ${s.nom} (${s.site}). Je suis déjà connecté dans Chrome.\n`
+      + `Ajoute ces articles (même produit et même format si possible ; sinon, propose-moi l'équivalent le moins cher au kg/L) :\n`
+      + items.map((it, i) => `- ${it}${liens[i] ? ` → ${liens[i]}` : ''}`).join('\n')
+      + `\nNe passe PAS la commande et ne paie pas : arrête-toi au panier et fais-moi un résumé (articles, prix, total).`;
+    try { await navigator.clipboard.writeText(txt); toast('Instructions copiées — colle-les dans Claude sur ton ordinateur'); } catch { toast('Copie impossible'); }
+  });
 }

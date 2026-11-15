@@ -5,6 +5,7 @@
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, joursRestants, aujourdhui } from './ui.js';
 import { PROGRAMMES } from './demo-data.js';
+import { prendrePhoto, lireTexte, analyserRecu } from './ocr.js';
 
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
@@ -17,8 +18,10 @@ export function vuePlus(v) {
   if (section === 'catalogue') return vueCatalogue(v);
   if (section === 'photos') return vuePhotos(v);
   if (section === 'sauvegarde') return vueSauvegarde(v);
+  if (section === 'recus') return vueRecus(v);
   const e = S.get();
   const menu = [
+    ['recus', '🧾', 'Mes reçus', `${(e.recus || []).length} reçu(s) · prends-les en photo après l'épicerie`],
     ['cartes', '💳', 'Cartes fidélité & points', `${e.cartes.length} carte(s)`],
     ['rabais', '🏷️', 'Mes rabais personnels', `${e.rabaisPerso.filter((r) => r.actif).length} actif(s)`],
     ['catalogue', '📚', 'Catalogue de mes articles', `${e.articles.length} articles`],
@@ -27,7 +30,7 @@ export function vuePlus(v) {
   ];
   v.innerHTML = menu.map(([k, ic, t, s]) => `<button class="carte rang" data-s="${k}" style="width:100%;text-align:left;font:inherit;color:inherit">
     <span style="font-size:24px">${ic}</span><span class="grandir"><b>${t}</b><div class="doux">${s}</div></span><span>›</span></button>`).join('')
-    + `<p class="doux">À venir avec la base partagée : reçus (vérification des prix et des points), économies par bannière/semaine/mois, historique et cycles de rabais, rappels de produits.</p>`;
+    + `<p class="doux">À venir : vérification automatique de chaque ligne de reçu contre les prix attendus, économies par bannière/semaine/mois, cycles de rabais, rappels de produits.</p>`;
   $$('[data-s]', v).forEach((b) => b.onclick = () => { section = b.dataset.s; vuePlus(v); });
 }
 
@@ -158,6 +161,55 @@ function vuePhotos(v) {
     afficherPhoto({ ...p, note: a ? `${a.nom}${p.note ? ' · ' + p.note : ''}` : p.note }, g);
   });
 }
+
+// --- Reçus ------------------------------------------------------------
+/** Prend un reçu en photo, le lit (sur le téléphone) et l'enregistre. Exporté pour le bouton de la liste. */
+export async function nouveauRecu() {
+  const blob = await prendrePhoto();
+  if (!blob) return;
+  const photoId = await S.enregistrerPhoto(blob);
+  const id = S.uid('rc');
+  S.maj((x) => {
+    (x.recus ||= []).unshift({ id, photoId, cree: new Date().toISOString(), statut: 'lecture', par: x.utilisateur });
+    x.photos.push({ id: photoId, type: 'recu', articleId: null, date: new Date().toISOString(), prise_par: x.utilisateur, note: 'Reçu' });
+  });
+  toast('Reçu enregistré — lecture en cours…');
+  try {
+    const texte = await lireTexte(blob, () => {});
+    const r = analyserRecu(texte);
+    S.maj((x) => { const rc = x.recus.find((y) => y.id === id); Object.assign(rc, r, { texte, statut: 'lu' }); });
+    toast(`Reçu lu${r.total ? ` : total ${argent(r.total)}` : ''} — vérifie-le dans Plus → Mes reçus`);
+  } catch {
+    S.maj((x) => { const rc = x.recus.find((y) => y.id === id); rc.statut = 'à lire'; });
+    toast('Reçu gardé ; la lecture n\'a pas pu se faire (hors ligne ?)');
+  }
+}
+
+function vueRecus(v) {
+  const e = S.get();
+  const recus = e.recus || [];
+  v.innerHTML = retour() + `<button class="btn" id="nouvRecu" style="width:100%;margin-bottom:10px">📷 Photographier un reçu</button>
+    <p class="doux">Le reçu est lu sur ton téléphone (magasin, date, total, lignes). La lecture peut se tromper : touche un reçu pour voir la photo et le détail. Prochaine étape : comparer chaque ligne aux prix attendus et à ta liste.</p>`
+    + (recus.length ? recus.map((r) => `<div class="carte" data-recu="${r.id}" style="cursor:pointer"><div class="rang">
+        <b class="grandir">${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'} · ${esc(r.date || r.cree.slice(0, 10))}</b><b>${r.total != null ? argent(r.total) : ''}</b></div>
+        <div class="doux">${r.statut === 'lecture' ? 'Lecture en cours…' : r.statut === 'à lire' ? 'Pas encore lu' : `${(r.lignes || []).length} ligne(s) lue(s)`} · par ${esc(r.par || '')}</div></div>`).join('')
+      : '<div class="vide">Aucun reçu. Après l\'épicerie, prends ton reçu en photo.</div>');
+  brancherRetour(v);
+  $('#nouvRecu', v).onclick = nouveauRecu;
+  $$('[data-recu]', v).forEach((el) => el.onclick = () => {
+    const r = recus.find((x) => x.id === el.dataset.recu);
+    ouvrirModale('Reçu', `<div id="rcPhoto" class="vignettes" style="grid-template-columns:1fr"></div>
+      <table class="comp">${(r.lignes || []).map((l) => `<tr><td>${esc(l.libelle)}</td><td class="pu">${argent(l.prix)}</td></tr>`).join('') || '<tr><td class="doux">Aucune ligne reconnue.</td></tr>'}
+      ${r.total != null ? `<tr><td><b>Total</b></td><td class="pu">${argent(r.total)}</td></tr>` : ''}</table>
+      <details style="margin-top:8px"><summary class="doux">Texte lu</summary><pre style="white-space:pre-wrap;font-size:12px">${esc(r.texte || '')}</pre></details>
+      <button class="btn danger" id="supRecu" style="margin-top:10px">Supprimer ce reçu</button>`, (c) => {
+      afficherPhoto({ id: r.photoId, type: 'recu', note: 'Touche pour partager' }, $('#rcPhoto', c), true);
+      $('#supRecu', c).onclick = () => { if (confirm('Supprimer ce reçu ?')) { S.maj((x) => { x.recus = x.recus.filter((y) => y.id !== r.id); }); fermerModale(); } };
+    });
+  });
+}
+
+const PROGRAMMES_NOMS = { iga: 'IGA', super_c: 'Super C', metro: 'Metro', maxi: 'Maxi', costco: 'Costco', jean_coutu: 'Jean Coutu' };
 
 // --- Sauvegarde -------------------------------------------------------
 function vueSauvegarde(v) {

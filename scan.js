@@ -152,6 +152,7 @@ async function rechercher(code, zone, surArticle, enRafale) {
       const ar = x.articles.find((i) => i.id === a.id);
       ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
       if (image && !ar.imageUrl) ar.imageUrl = image; // photo officielle du produit
+      if (/kirkland/i.test(`${ar.marque || ''} ${ar.nom}`) && !ar.exclusif) ar.exclusif = 'costco'; // Kirkland = Costco seulement
       if (ecp && !(ar.liens || []).some((l) => l.id === ec.id)) {
         ar.liens = [...(ar.liens || []), { id: ec.id, nom: [ecp.brand, ecp.name].filter(Boolean).join(' '), size: ecp.size, image: ecp.image }];
       }
