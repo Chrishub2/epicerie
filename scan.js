@@ -133,7 +133,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId) {
   const nomPropose = p ? (p.product_name_fr || p.product_name || '') : (ecp?.name || '');
   const fmt = p?.quantity ? normaliserQuantite(p.quantity) : (ecp?.size ? formatLisible(ecp.size) : '');
   const rayonId = p ? devinerRayon(p.categories_tags || []) : rayonParDefaut();
-  const image = p?.image_front_url || p?.image_url || ecp?.image || '';
+  let image = p?.image_front_url || p?.image_url || ecp?.image || '';
   zone.innerHTML = `
     ${ecp ? `<div class="alerte vert">💲 Prix réels trouvés sur épiceries.ca (${esc(argent(ecp.price))} chez ${esc(MAGASINS_EC[ecp.store] ? nomBanniere(MAGASINS_EC[ecp.store]) : ecp.store)}) — ils seront ajoutés.</div>` : ''}
     ${p || ecp ? `<div class="alerte vert">Trouvé sur ${esc(trouve?.source || 'épiceries.ca')}${p?.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>
@@ -144,6 +144,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId) {
     <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}"></div>
       <div class="champ grandir"><label>Format</label><input id="sFormat" value="${esc(fmt)}" placeholder="454 g"></div></div>
     <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
+    ${image ? '' : '<div id="sPhotos" class="champ"><label>Photo du produit</label><p class="doux">Recherche de photos en ligne…</p></div>'}
     <div class="rang envelopper"><button class="btn" id="sOk">${cibleId ? '✓ Remplir la fiche' : 'Ajouter à la liste'}</button>
       <button class="btn sec" id="sPhoto">📷 Photo du produit</button></div>`;
   zone.querySelector('#sOk').onclick = () => {
@@ -170,6 +171,68 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId) {
     if (!enRafale()) setTimeout(fermerModale, 700);
   };
   zone.querySelector('#sPhoto').onclick = () => { fermerModale(); photoProduit(null, code); };
+
+  // Pas de photo dans les bases : on en cherche en ligne et tu choisis la bonne
+  if (!image) {
+    proposerPhotos(code, nomPropose, zone, (url) => { image = url; });
+  }
+}
+
+/**
+ * Cherche des photos pour un produit sans image :
+ *  ① base de codes-barres UPCitemdb (via la fonction Supabase ; nom et marque utiles, photos parfois fausses)
+ *  ② recherche par nom chez les bannières (épiceries.ca)
+ * Rien n'est choisi automatiquement : tu touches la photo qui correspond.
+ */
+async function proposerPhotos(code, nomPropose, zone, choisir) {
+  const boite = zone.querySelector('#sPhotos');
+  if (!boite) return;
+  if (!navigator.onLine) { boite.querySelector('p').textContent = '📵 Pas de réseau : prends une photo du produit (📷).'; return; }
+  const candidats = [];
+  const Sync = await import('./sync.js');
+  const upc = code ? await Sync.chercherCode(code) : null;
+  if (upc) {
+    // Le nom de la base de codes aide quand Open Food Facts ne connaissait pas le produit
+    const champNom = zone.querySelector('#sNom'), champMarque = zone.querySelector('#sMarque');
+    if (champNom && !champNom.value && upc.titre) champNom.value = upc.titre;
+    if (champMarque && !champMarque.value && upc.marque) champMarque.value = upc.marque;
+    upc.images.forEach((u) => candidats.push({ url: u.replace(/^http:/, 'https:'), source: 'Base de codes-barres' }));
+  }
+  const nom = zone.querySelector('#sNom')?.value || nomPropose || upc?.titre;
+  if (nom) {
+    try {
+      const { rechercherSouple } = await import('./epiceries.js');
+      const vues = new Set(candidats.map((c) => c.url));
+      (await rechercherSouple(nom)).filter((r) => r.image && !vues.has(r.image) && vues.add(r.image)).slice(0, 6)
+        .forEach((r) => candidats.push({ url: r.image, source: [r.brand, r.name].filter(Boolean).join(' ') }));
+    } catch { /* recherche indisponible */ }
+  }
+  // Relancer avec le nom tapé (utile si le nom était vide ou mal deviné)
+  const relancer = '<button class="btn sec" id="sRelance">🔎 Chercher des photos avec ce nom</button>';
+  const brancherRelance = () => {
+    const b = boite.querySelector('#sRelance');
+    if (b) b.onclick = (ev) => {
+      ev.preventDefault();
+      boite.innerHTML = '<label>Photo du produit</label><p class="doux">Recherche de photos en ligne…</p>';
+      choisir('');
+      proposerPhotos(null, '', zone, choisir);
+    };
+  };
+  if (!candidats.length) {
+    boite.innerHTML = `<label>Photo du produit</label><p class="doux">Aucune photo trouvée en ligne. Corrige le nom puis relance, ou prends-en une avec 📷.</p>${relancer}`;
+    brancherRelance();
+    return;
+  }
+  boite.innerHTML = `<label>Photo du produit — touche celle qui correspond</label>
+    <div class="grille-photos">${candidats.map((c, i) => `<button class="choix-photo" data-i="${i}" title="${esc(c.source)}">
+      <img src="${esc(c.url)}" alt="" loading="lazy" onerror="this.closest('button').remove()"><span class="une-ligne">${esc(c.source)}</span></button>`).join('')}</div>
+    <p class="doux">Vérifie bien : les photos trouvées en ligne ne sont pas toujours le bon produit. Sans choix, aucune photo n'est ajoutée.</p>${relancer}`;
+  brancherRelance();
+  boite.querySelectorAll('[data-i]').forEach((b) => b.onclick = (ev) => {
+    ev.preventDefault();
+    boite.querySelectorAll('[data-i]').forEach((x) => x.classList.toggle('actif', x === b));
+    choisir(candidats[Number(b.dataset.i)].url);
+  });
 }
 
 /** Remplit un article existant avec tout ce que le code-barres a permis de trouver. */

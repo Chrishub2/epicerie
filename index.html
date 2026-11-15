@@ -173,6 +173,10 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
   font: inherit; font-size: 13px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; align-items: center; }
 .choix-photo img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
 .choix-photo.actif { border-color: var(--accent); background: var(--accent-doux); font-weight: 700; }
+.grille-photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.grille-photos .choix-photo { font-size: 11px; font-weight: 400; min-width: 0; overflow: hidden; }
+.grille-photos .choix-photo span { display: block; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grille-photos .choix-photo img { background: #fff; object-fit: contain; }
 /* Sous-onglets de Comparer : Tableau · Détails · Online · Écono */
 .sous-onglets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .sous-onglets button { font: inherit; font-size: 14px; font-weight: 600; padding: 8px 4px; border-radius: 10px; border: 1px solid var(--ligne);

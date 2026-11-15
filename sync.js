@@ -312,4 +312,13 @@ export async function lireAvecIA(type, blobs) {
   }
 }
 
+/** Nom, marque et photos d'un code-barres (base UPCitemdb, via la fonction). null si indisponible. */
+export async function chercherCode(code) {
+  if (!sb || !session || !navigator.onLine) return null;
+  try {
+    const { data, error } = await sb.functions.invoke('lire-photo', { body: { type: 'code', code } });
+    return error || !data?.ok ? null : data.data;
+  } catch { return null; }
+}
+
 export function synchroniserMaintenant() { return tirer().then(pousser); }
