@@ -248,7 +248,7 @@ function htmlItem(l, a) {
     <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
       <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''}</div>
       <div class="info">${meilleur}</div>
-      <div class="info">${esc(formatLisible(a.format) || '')}${l.recettes?.length ? ` · 🍲 ${l.recettes.length} recette(s)` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</div>
+      <div class="info">${esc(formatLisible(a.format) || '')}${l.note ? ` · ${esc(l.note)}` : ''}</div>
     </div>
     ${!m && !a.liens?.length && !l.coche ? `<button class="icone photo-mag" data-photomag="${a.id}" title="Identifier ce produit (code-barres, photo)" aria-label="Identifier le produit">🔎</button>` : ''}
     <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
