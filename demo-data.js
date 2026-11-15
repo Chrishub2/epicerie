@@ -27,6 +27,25 @@ export const PROGRAMMES = {
   costco: 'Costco (abonnement)',
 };
 
+// Succursales réelles du secteur (source : OpenStreetMap, 2026-11-15 — à confirmer par Chris).
+// Beloeil = J3G, Mont-Saint-Hilaire = J3H, Varennes = J3X, Boucherville = J4B.
+export const CODES_POSTAUX_REELS = [
+  { code: 'J3H', libelle: 'Mont-Saint-Hilaire' },
+  { code: 'J3G', libelle: 'Beloeil' },
+  { code: 'J3X', libelle: 'Varennes' },
+  { code: 'J4B', libelle: 'Boucherville' },
+];
+export const MAGASINS_REELS = [
+  { id: 'm1', banniere: 'iga', nom: 'IGA Beloeil', codePostal: 'J3G', adresse: "825, boul. Yvon-L'Heureux Nord, Beloeil, QC J3G 6P5", lat: 45.57807, lng: -73.21527 },
+  { id: 'm2', banniere: 'super_c', nom: 'Super C Beloeil', codePostal: 'J3G', adresse: 'Rue Duvernay, Beloeil, QC J3G 2M2', lat: 45.56337, lng: -73.20837 },
+  { id: 'm3', banniere: 'metro', nom: 'Metro Plus Riendeau Mont-Saint-Hilaire', codePostal: 'J3H', adresse: '345, boul. Honorius-Charbonneau, Mont-Saint-Hilaire, QC J3H 5H6', lat: 45.56351, lng: -73.18843 },
+  { id: 'm4', banniere: 'maxi', nom: 'Maxi Beloeil', codePostal: 'J3G', adresse: 'Boul. Sir-Wilfrid-Laurier, Beloeil, QC J3G 4G3', lat: 45.55197, lng: -73.21432 },
+  { id: 'm5', banniere: 'jean_coutu', nom: 'Jean Coutu Mont-Saint-Hilaire', codePostal: 'J3H', adresse: '257, boul. Sir-Wilfrid-Laurier, Mont-Saint-Hilaire, QC J3H 3N8', lat: 45.56259, lng: -73.19049 },
+  { id: 'm6', banniere: 'costco', nom: 'Costco Boucherville', codePostal: 'J4B', adresse: '635, chemin de Touraine, Boucherville, QC J4B 5E4', lat: 45.57691, lng: -73.40578 },
+  { id: 'm7', banniere: 'iga', nom: 'IGA Extra Varennes', codePostal: 'J3X', adresse: '1777, route 132, Varennes, QC J3X 1P5', lat: 45.66903, lng: -73.43091 },
+  { id: 'm8', banniere: 'metro', nom: 'Metro Beloeil', codePostal: 'J3G', adresse: "Boul. Yvon-L'Heureux Nord, Beloeil, QC J3G 6P5", lat: 45.57962, lng: -73.21452 },
+];
+
 export function etatDemo() {
   const rayons = [
     'Fruits et légumes', 'Boulangerie', 'Viandes et poissons', 'Produits laitiers et œufs',
@@ -80,26 +99,16 @@ export function etatDemo() {
     P('a12', 'iga', '2,99 $', '1,36 kg'), P('a12', 'super_c', '2,49 $', '1,36 kg'), P('a12', 'maxi', '2,79 $', '1,36 kg'),
   ];
 
-  const magasins = [
-    { id: 'm1', banniere: 'iga', nom: 'IGA Beloeil', codePostal: 'J3H', adresse: '' },
-    { id: 'm2', banniere: 'super_c', nom: 'Super C Beloeil', codePostal: 'J3H', adresse: '' },
-    { id: 'm3', banniere: 'metro', nom: 'Metro Mont-Saint-Hilaire', codePostal: 'J3H', adresse: '' },
-    { id: 'm4', banniere: 'maxi', nom: 'Maxi Beloeil', codePostal: 'J3H', adresse: '' },
-    { id: 'm5', banniere: 'jean_coutu', nom: 'Jean Coutu Beloeil', codePostal: 'J3H', adresse: '' },
-    { id: 'm6', banniere: 'costco', nom: 'Costco Boucherville', codePostal: 'J3H', adresse: '' },
-    { id: 'm7', banniere: 'iga', nom: 'IGA Varennes', codePostal: 'Varennes', adresse: '' },
-  ];
+  const magasins = MAGASINS_REELS.map((m) => ({ ...m }));
 
   return {
-    version: 1,
     demo: true,
     utilisateur: 'Chris',
     membres: ['Chris', 'Partenaire'],
     magasinCourant: 'defaut',
-    codesPostaux: [
-      { code: 'J3H', libelle: 'Beloeil / Mont-Saint-Hilaire' },
-      { code: 'Varennes', libelle: 'Varennes (code postal à confirmer)' },
-    ],
+    version: 2,
+    codesPostaux: CODES_POSTAUX_REELS.map((c) => ({ ...c })),
+    alertesMasquees: [],
     magasins,
     rayons,
     ordreRayons: {},

@@ -69,7 +69,11 @@ export function offresArticle(article) {
   const lignes = [];
   for (const p of e.prix.filter((x) => x.articleId === article.id)) {
     if (p.fin && joursRestants(p.fin) < 0) continue;
-    const n = normaliser(p.offre, p.format || article.format, article.uniteRef);
+    let n = normaliser(p.offre, p.format || article.format, article.uniteRef);
+    // Format illisible mais prix unitaire fourni par la source (épiceries.ca) dans la bonne unité
+    if (n.erreur && p.uniteSource && p.uniteSource.unite === article.uniteRef) {
+      n = { prixUnitaire: p.uniteSource.pu, uniteRef: article.uniteRef, prixArticle: null };
+    }
     lignes.push({ ...p, pu: n.prixUnitaire ?? null, prixArticle: n.prixArticle ?? null, uniteRef: n.uniteRef || article.uniteRef, erreur: n.erreur });
   }
   for (const r of rabaisPersoActifs()) {

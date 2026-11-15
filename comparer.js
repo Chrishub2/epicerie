@@ -127,7 +127,9 @@ function appliquer(res) {
       if (l) l.magasinCible = x.choix.cle;
     }
   });
-  toast(`Liste répartie sur ${res.arrets} arrêt(s) — filtre par magasin dans l'onglet Liste`);
+  // On ouvre la liste filtrée sur le 1er magasin, dans l'ordre de ses rayons.
+  import('./app.js').then((m) => m.allerOnglet('liste', { filtre: res.combo[0] }));
+  toast(`Liste répartie sur ${res.arrets} magasin(s). Touche un magasin en haut de la liste pour voir sa partie.`);
 }
 
 // ---------------------------------------------------------------------
@@ -174,7 +176,7 @@ export function vueComparaison(v, rendre) {
   if (!articles.length) html += `<div class="vide">Rien à comparer.</div>`;
   else if (vue === 'tableau') html += matrice(articles);
   else for (const a of articles) {
-    html += `<div class="carte" data-art="${a.id}" style="cursor:pointer"><h3>${esc(a.nom)} ${a.local ? '🍁' : ''} <span class="doux">· comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef === 'kg' ? 'kilo' : 'litre'}</span></h3>${tableauOffres(a)}</div>`;
+    html += `<div class="carte" data-art="${a.id}" style="cursor:pointer"><h3 class="rang">${a.imageUrl ? `<img class="vignette" src="${esc(a.imageUrl)}" alt="">` : ''}<span class="grandir">${esc(a.nom)} ${a.local ? '🍁' : ''} <span class="doux">· comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef === 'kg' ? 'kilo' : 'litre'}</span></span></h3>${tableauOffres(a)}</div>`;
   }
 
   // --- Commande en ligne ---
@@ -200,7 +202,7 @@ function matrice(articles) {
     <tbody>${offres.map(({ a, os }) => {
       const parCle = {};
       for (const o of os) { if (o.pu == null) continue; const k = cleOffre(o); if (!parCle[k] || o.pu < parCle[k].pu) parCle[k] = o; }
-      return `<tr><th data-art="${a.id}">${esc(a.nom)}${a.local ? ' 🍁' : ''}<div class="doux">${esc(formatLisible(a.format) || '')}</div></th>${cles.map((k) => {
+      return `<tr><th data-art="${a.id}">${a.imageUrl ? `<img class="vignette petite" src="${esc(a.imageUrl)}" alt="" style="float:right;margin-left:4px">` : ''}${esc(a.nom)}${a.local ? ' 🍁' : ''}<div class="doux">${esc(formatLisible(a.format) || '')}</div></th>${cles.map((k) => {
         const o = parCle[k];
         if (!o) return '<td class="vide-cel">—</td>';
         const affiche = o.perso && o.prixArticle != null ? argent(o.prixArticle) : o.offre;
@@ -221,9 +223,9 @@ function blocEnLigne() {
     <div class="rang"><select id="bannEnLigne" class="grandir">${Object.keys(EN_LIGNE).map((k) => `<option value="${k}" ${k === banniereEnLigne ? 'selected' : ''}>${k === 'instacart' ? 'Instacart' : esc(nomBanniere(k))}</option>`).join('')}</select>
       <a class="btn" href="${b.site}" target="_blank" rel="noopener" style="text-decoration:none">Ouvrir l'app / le site</a></div>
     <p class="doux">${esc(b.note)}. ${assignes.length ? `${assignes.length} article(s) que la répartition a placés ici.` : 'Toute la liste (aucune répartition appliquée pour cette bannière).'} Tu te connectes et tu confirmes toi-même.</p>
-    ${b.sansCommande ? '' : items.map(({ l, a }) => `<div class="rang" style="padding:4px 0;border-top:1px solid var(--ligne)">
-      <span class="grandir">${l.quantite} × ${esc(a.nom)}${a.format ? ` <span class="doux">(${esc(formatLisible(a.format))})</span>` : ''}</span>
-      <a href="${b.recherche(a.nom)}" target="_blank" rel="noopener">Chercher ›</a></div>`).join('')}
+    ${b.sansCommande ? '' : items.map(({ l, a }) => `<div class="rang" style="padding:6px 0;border-top:1px solid var(--ligne)">
+      <span class="grandir une-ligne">${l.quantite} × ${esc(a.nom)}${a.format ? ` <span class="doux">${esc(formatLisible(a.format))}</span>` : ''}</span>
+      <a href="${b.recherche(a.nom)}" target="_blank" rel="noopener" style="white-space:nowrap">Chercher ›</a></div>`).join('')}
     <button class="btn sec" id="copierListe" style="margin-top:8px">Copier cette liste</button></div>`;
 }
 

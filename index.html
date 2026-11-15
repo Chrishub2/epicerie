@@ -31,8 +31,8 @@ html, body { margin: 0; background: var(--fond); color: var(--texte);
 body { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
 /* L'en-tête défile avec la page ; les barres d'outils de chaque onglet restent collées en haut. */
 header { background: #1f7a4d; color: #fff;
-  padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; gap: 10px; }
-header h1 { font-size: 18px; margin: 0; flex: 1; }
+  padding: calc(6px + env(safe-area-inset-top)) 16px 6px; display: flex; align-items: center; gap: 10px; }
+header h1 { font-size: 17px; margin: 0; flex: 1; }
 header select { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.35);
   border-radius: 8px; padding: 4px 6px; font-size: 14px; }
 header select option { color: #000; }
@@ -72,6 +72,11 @@ button.icone { font-size: 20px; width: 44px; height: 44px; border-radius: 10px; 
 .alerte.ambre { background: var(--ambre-fond); color: var(--ambre); }
 .alerte.rouge { background: var(--rouge-fond); color: var(--rouge); }
 .alerte.vert { background: var(--vert-fond); color: var(--vert); }
+.alerte-action { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.fermer-alerte { flex: none; border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1;
+  padding: 2px 4px; margin: -2px -4px 0 0; opacity: .75; cursor: pointer; }
+.une-ligne { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vignette.petite { width: 32px; height: 32px; }
 .rayon { margin-bottom: 10px; }
 .rayon > h3 { display: flex; align-items: center; gap: 6px; color: var(--doux); font-size: 13px;
   text-transform: uppercase; letter-spacing: .03em; margin: 12px 2px 6px; }
@@ -139,7 +144,7 @@ a { color: var(--accent); }
 </head>
 <body>
 <header>
-  <h1>🛒 Épicerie</h1>
+  <h1>Épicerie</h1>
   <select id="choixMembre" aria-label="Qui utilise l'app"></select>
 </header>
 <div class="bandeau-demo" id="bandeauDemo">Mode démo : prix fictifs, données gardées sur ce téléphone seulement (pas encore partagées).</div>

@@ -4,7 +4,25 @@
 // Photos : IndexedDB. À la phase « Supabase », seul ce fichier change :
 // mêmes fonctions, mais lecture/écriture dans la base partagée + temps réel.
 // =====================================================================
-import { etatDemo } from './demo-data.js';
+import { etatDemo, MAGASINS_REELS, CODES_POSTAUX_REELS } from './demo-data.js';
+
+/** Met à niveau des données enregistrées par une version précédente, sans rien perdre. */
+function migrer(e) {
+  if ((e.version || 1) < 2) {
+    // v2 : vraies adresses des succursales et bons codes postaux (Beloeil = J3G, Varennes = J3X).
+    for (const r of MAGASINS_REELS) {
+      const m = e.magasins.find((x) => x.id === r.id);
+      if (m && !m.adresse) Object.assign(m, { nom: r.nom, adresse: r.adresse, lat: r.lat, lng: r.lng, codePostal: r.codePostal });
+      if (!m && !e.magasins.some((x) => x.nom === r.nom)) e.magasins.push({ ...r });
+    }
+    for (const c of CODES_POSTAUX_REELS) if (!e.codesPostaux.some((x) => x.code === c.code)) e.codesPostaux.push({ ...c });
+    e.codesPostaux = e.codesPostaux.filter((c) => c.code !== 'Varennes' || e.magasins.some((m) => m.codePostal === 'Varennes'));
+    const j3h = e.codesPostaux.find((c) => c.code === 'J3H'); if (j3h) j3h.libelle = 'Mont-Saint-Hilaire';
+    e.alertesMasquees ||= [];
+    e.version = 2;
+  }
+  return e;
+}
 
 const CLE = 'epicerie-demo-v1';
 let etat = null;
@@ -13,7 +31,7 @@ const abonnes = new Set();
 export function charger() {
   try {
     const brut = localStorage.getItem(CLE);
-    etat = brut ? JSON.parse(brut) : etatDemo();
+    etat = brut ? migrer(JSON.parse(brut)) : etatDemo();
   } catch {
     etat = etatDemo();
   }

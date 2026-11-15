@@ -9,6 +9,7 @@ import { PROGRAMMES } from './demo-data.js';
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
 let section = null;
+export function allerASection(s) { section = s; }
 
 export function vuePlus(v) {
   if (section === 'cartes') return vueCartes(v);

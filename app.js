@@ -8,8 +8,9 @@ import { BANNIERES } from './demo-data.js';
 import { analyserOffre, formatLisible } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
-import { vuePlus, afficherPhoto } from './plus.js';
+import { vuePlus, afficherPhoto, allerASection } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle } from './comparer.js';
+import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -26,6 +27,7 @@ choix.onchange = () => S.maj((e) => { e.utilisateur = choix.value; });
 $$('#onglets button').forEach((b) => b.onclick = () => { onglet = b.dataset.onglet; rendre(); });
 S.abonner(() => rendre());
 queueMicrotask(rendre); // après l'évaluation complète du module
+setTimeout(() => actualiserTout().catch(() => {}), 1500); // vrais prix des produits liés (max 1 fois / 12 h)
 
 export function rendre() {
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
@@ -80,9 +82,9 @@ export function ajouterALaListe(articleId, quantite = 1, extra = {}) {
   return fusion;
 }
 
-function ordreRayons() {
+function ordreRayons(magasinId = S.get().magasinCourant) {
   const e = S.get();
-  const sauve = e.ordreRayons[e.magasinCourant] || e.rayons.map((r) => r.id);
+  const sauve = e.ordreRayons[magasinId] || e.rayons.map((r) => r.id);
   const ids = sauve.filter((id) => e.rayons.some((r) => r.id === id));
   e.rayons.forEach((r) => { if (!ids.includes(r.id)) ids.push(r.id); });
   return ids.map((id) => e.rayons.find((r) => r.id === id));
@@ -91,8 +93,14 @@ function ordreRayons() {
 // ---------------------------------------------------------------------
 // Onglet LISTE
 // ---------------------------------------------------------------------
+/**
+ * Alertes de la liste. Chacune a :
+ *  - une clé (pour le « x » : masquée tant que la situation ne change pas) ;
+ *  - une action (toucher l'alerte amène à l'endroit où agir).
+ */
 function alertesListe() {
   const e = S.get();
+  const masquees = new Set(e.alertesMasquees || []);
   const out = [];
   for (const l of e.liste.filter((x) => !x.coche)) {
     const a = e.articles.find((x) => x.id === l.articleId);
@@ -100,22 +108,59 @@ function alertesListe() {
     const m = meilleureOffre(a);
     const j = joursRestants(m?.fin);
     if (m && m.type !== 'regulier' && j != null && j <= 2 && j >= 0) {
-      out.push(`<div class="alerte ambre">⏰ <b>${esc(a.nom)}</b> : rabais ${esc(m.magasinNom || nomBanniere(m.banniere))} ${libelleFin(m.fin)} (${esc(m.offre)}).</div>`);
+      out.push({ cle: `fin:${a.id}:${m.banniere}:${m.fin}`, classe: 'ambre', action: `fiche:${a.id}:${l.id}`,
+        html: `⏰ <b>${esc(a.nom)}</b> : rabais ${esc(m.magasinNom || nomBanniere(m.banniere))} ${libelleFin(m.fin)} (${esc(m.offre)}).` });
     }
   }
   for (const r of e.rabaisPerso.filter((x) => x.actif)) {
     const mag = e.magasins.find((m) => m.id === r.magasinId);
     const j = joursRestants(r.expiration);
-    if (!r.expiration) out.push(`<div class="alerte ambre">📅 Entre la date d'expiration du rabais <b>${esc(mag?.nom || '')}</b> (${esc(r.description)}) dans Plus → Rabais.</div>`);
-    else if (j < 0) out.push(`<div class="alerte rouge">Le rabais ${esc(mag?.nom || '')} est expiré.</div>`);
-    else if (j <= 7) out.push(`<div class="alerte ambre">📅 Rabais ${esc(mag?.nom || '')} (${esc(r.description)}) : expire dans ${j} j.</div>`);
+    const action = `rabais:${r.id}`;
+    if (!r.expiration) out.push({ cle: `rpdate:${r.id}`, classe: 'ambre', action, html: `📅 Entre la date d'expiration du rabais <b>${esc(mag?.nom || '')}</b> (${esc(r.description)}).` });
+    else if (j < 0) out.push({ cle: `rpexp:${r.id}:${r.expiration}`, classe: 'rouge', action, html: `Le rabais ${esc(mag?.nom || '')} est expiré.` });
+    else if (j <= 7) out.push({ cle: `rp7:${r.id}:${r.expiration}`, classe: 'ambre', action, html: `📅 Rabais ${esc(mag?.nom || '')} (${esc(r.description)}) : expire dans ${j} j.` });
   }
-  return out.join('');
+  return out.filter((x) => !masquees.has(x.cle)).map((x) =>
+    `<div class="alerte ${x.classe} alerte-action" data-action="${esc(x.action)}" role="link" tabindex="0">
+       <span class="grandir">${x.html}</span><button class="fermer-alerte" data-masquer="${esc(x.cle)}" aria-label="Masquer">✕</button></div>`).join('');
+}
+
+/** Exécute l'action d'une alerte. */
+function agir(action) {
+  const [type, id, extra] = action.split(':');
+  if (type === 'fiche') ficheArticle(id, extra);
+  if (type === 'rabais') {
+    allerOnglet('plus', { section: 'rabais' });
+    requestAnimationFrame(() => {
+      const champ = document.querySelector(`[data-r="${CSS.escape(id)}"] [data-exp]`);
+      if (!champ) return;
+      champ.closest('.carte').scrollIntoView({ block: 'center' });
+      champ.focus();
+      try { champ.showPicker?.(); } catch { /* certains navigateurs refusent sans geste direct */ }
+    });
+  }
+}
+
+/** Change d'onglet depuis un autre module (ex. après une répartition). */
+export function allerOnglet(nom, { section, filtre } = {}) {
+  onglet = nom;
+  if (section) allerASection(section);
+  if (filtre) filtreMagasin = filtre;
+  window.scrollTo(0, 0);
+  rendre();
+}
+
+/** « super_c » ou « perso:IGA Varennes » → la succursale correspondante (celle dont l'ordre est enregistré en priorité). */
+function magasinDeCle(cle) {
+  const e = S.get();
+  if (!cle || cle === 'tous' || cle === 'aucun') return null;
+  if (cle.startsWith('perso:')) return e.magasins.find((m) => m.nom === cle.slice(6)) || null;
+  const mags = e.magasins.filter((m) => m.banniere === cle);
+  return mags.find((m) => e.ordreRayons[m.id]) || mags[0] || null;
 }
 
 function vueListe(v) {
   const e = S.get();
-  const rayons = ordreRayons();
   const tous = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) }));
   // Filtre par magasin (après une répartition « N arrêts »)
   const cibles = {};
@@ -123,6 +168,9 @@ function vueListe(v) {
   const avecCibles = Object.keys(cibles).some((k) => k !== 'aucun');
   if (!avecCibles || (filtreMagasin !== 'tous' && !cibles[filtreMagasin])) filtreMagasin = 'tous';
   const items = filtreMagasin === 'tous' ? tous : tous.filter(({ l }) => (l.magasinCible || 'aucun') === filtreMagasin);
+  // Filtré sur un magasin : on applique l'ordre de rayons enregistré pour ce magasin.
+  const magFiltre = magasinDeCle(filtreMagasin);
+  const rayons = ordreRayons(magFiltre?.id || e.magasinCourant);
   const nbCoches = e.liste.filter((l) => l.coche).length;
   const optionsMag = [`<option value="defaut">Ordre par défaut</option>`]
     .concat(e.magasins.map((m) => `<option value="${m.id}" ${e.magasinCourant === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`)).join('');
@@ -139,7 +187,8 @@ function vueListe(v) {
     </div>
     ${alertesListe()}
     <div class="rang" style="margin:4px 0 6px">
-      <select id="choixMagasin" class="grandir" aria-label="Ordre des rayons pour quel magasin">${optionsMag}</select>
+      ${magFiltre ? `<div class="grandir doux">Rayons dans l'ordre de <b>${esc(magFiltre.nom)}</b></div>`
+        : `<select id="choixMagasin" class="grandir" aria-label="Ordre des rayons pour quel magasin">${optionsMag}</select>`}
       <button class="btn sec" id="btnReorg">↕ Rayons</button>
     </div>
     ${avecCibles ? `<div class="rang envelopper" style="margin-bottom:6px">${[['tous', `Tout (${tous.length})`],
@@ -155,7 +204,7 @@ function vueListe(v) {
     dans.sort((x, y) => x.l.coche - y.l.coche);
     for (const { l, a } of dans) {
       const m = meilleureOffre(a);
-      const meilleur = m ? `${puce(m.banniere)}${esc(m.magasinNom || nomBanniere(m.banniere))} · ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu';
+      const meilleur = m ? `${puce(m.banniere)}${esc(m.magasinNom || nomBanniere(m.banniere))} · ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu — touche pour trouver les vrais prix';
       html += `<div class="item ${l.coche ? 'coche' : ''}" data-id="${l.id}">
         <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
         ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
@@ -177,8 +226,15 @@ function vueListe(v) {
   $('#btnVoix').onclick = dicter;
   $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); });
   $('#btnPhoto').onclick = () => photoProduit();
-  $('#choixMagasin').onchange = (ev) => S.maj((x) => { x.magasinCourant = ev.target.value; });
-  $('#btnReorg').onclick = ouvrirReorg;
+  $('#choixMagasin')?.addEventListener('change', (ev) => S.maj((x) => { x.magasinCourant = ev.target.value; }));
+  $('#btnReorg').onclick = () => ouvrirReorg(magFiltre?.id);
+  $$('[data-action]', v).forEach((al) => {
+    al.onclick = (ev) => { if (!ev.target.closest('[data-masquer]')) agir(al.dataset.action); };
+    al.onkeydown = (ev) => { if (ev.key === 'Enter') agir(al.dataset.action); };
+  });
+  $$('[data-masquer]', v).forEach((b) => b.onclick = () => S.maj((x) => {
+    x.alertesMasquees = [...new Set([...(x.alertesMasquees || []), b.dataset.masquer])].slice(-200);
+  }));
   $('#btnVider')?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !l.coche); }));
   $$('[data-filtre]', v).forEach((b) => b.onclick = () => { filtreMagasin = b.dataset.filtre; rendre(); });
 
@@ -222,17 +278,18 @@ function dicter() {
 }
 
 // --- Réorganiser les rayons (glisser-déposer tactile) -----------------
-function ouvrirReorg() {
+function ouvrirReorg(magId) {
   const e = S.get();
-  const nomMag = e.magasinCourant === 'defaut' ? 'ordre par défaut' : e.magasins.find((m) => m.id === e.magasinCourant)?.nom;
-  const rendreListe = () => ordreRayons().map((r) =>
+  const cible = magId || e.magasinCourant; // l'ordre est enregistré pour CE magasin et réutilisé à chaque visite
+  const nomMag = cible === 'defaut' ? 'ordre par défaut' : e.magasins.find((m) => m.id === cible)?.nom;
+  const rendreListe = () => ordreRayons(cible).map((r) =>
     `<li data-r="${r.id}"><span class="poignee" aria-hidden="true">≡</span><span class="grandir">${esc(r.nom)}</span>
      <button class="icone" data-mv="-1" aria-label="Monter">▲</button><button class="icone" data-mv="1" aria-label="Descendre">▼</button></li>`).join('');
   ouvrirModale('Ordre des rayons', `<p class="doux">Pour : <b>${esc(nomMag)}</b>. Glisse la poignée ≡ (ou utilise ▲▼) pour suivre ton parcours en magasin.</p>
     <ul class="reorg" id="reorg">${rendreListe()}</ul>
     <div class="rang" style="margin-top:10px"><input id="nouveauRayon" placeholder="Nouveau rayon"><button class="btn sec" id="ajRayon">Ajouter</button></div>`, (c) => {
     const ul = $('#reorg', c);
-    const sauver = () => S.maj((x) => { x.ordreRayons[x.magasinCourant] = $$('li', ul).map((li) => li.dataset.r); });
+    const sauver = () => S.maj((x) => { x.ordreRayons[cible] = $$('li', ul).map((li) => li.dataset.r); });
     const brancher = () => {
       $$('[data-mv]', ul).forEach((b) => b.onclick = () => {
         const li = b.closest('li'); const d = Number(b.dataset.mv);
@@ -272,6 +329,14 @@ export function ficheArticle(articleId, ligneId) {
     ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="Photo du produit" style="display:block;max-height:180px;max-width:100%;margin:0 auto 10px;border-radius:8px;background:#fff">` : ''}
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a, { avecManquants: true })}
+    <div class="carte" style="margin-top:8px;background:var(--gris-fond)">
+      <div class="rang"><b class="grandir">Vrais prix (épiceries.ca)</b>${a.liens?.length ? '<button class="btn sec" id="ecMaj" style="padding:5px 10px">↻</button>' : ''}</div>
+      ${a.liens?.length ? `<ul class="liste-arret">${a.liens.map((li) => `<li><span>${esc(li.nom)}${li.size ? ` <span class="doux">${esc(formatLisible(li.size))}</span>` : ''}</span><a href="#" data-delien="${esc(li.id)}" aria-label="Retirer">✕</a></li>`).join('')}</ul>
+        <div class="doux">Mis à jour : ${a.majPrix ? new Date(a.majPrix).toLocaleString('fr-CA', { dateStyle: 'medium', timeStyle: 'short' }) : 'jamais'} · Maxi, IGA, Super C, Metro. Costco et Jean Coutu : prix vus ou reçus.</div>`
+        : '<p class="doux" style="margin:4px 0">Pas encore lié : les prix affichés sont fictifs (démo) ou saisis.</p>'}
+      <button class="btn" id="ecLiaison" style="margin-top:8px">${a.liens?.length ? '+ Lier un autre produit' : '🔎 Trouver les vrais prix'}</button>
+    </div>
+    <details id="fHisto" style="margin-top:8px"><summary class="btn sec" style="display:inline-block">📈 Historique des prix</summary><div id="histo" style="margin-top:8px"></div></details>
     <details id="fAjPrix" style="margin-top:8px"><summary class="btn sec" style="display:inline-block">+ Ajouter un prix vu</summary>
       <div class="carte" style="margin-top:8px">
         <div class="rang"><div class="champ grandir"><label>Bannière</label><select id="pBan">${Object.entries(BANNIERES).map(([k, b]) => `<option value="${k}">${esc(b.nom)}</option>`).join('')}</select></div>
@@ -304,6 +369,19 @@ export function ficheArticle(articleId, ligneId) {
       ${l ? '<button class="btn danger" id="fRetirer">Retirer de la liste</button>' : '<button class="btn sec" id="fAjouter">+ À la liste</button>'}
     </div>`, (c) => {
     photos.forEach((p) => afficherPhoto(p, $('#fPhotos', c)));
+    const rouvrir = () => ficheArticle(articleId, ligneId);
+    $('#ecLiaison', c).onclick = () => ouvrirLiaison(a.id, rouvrir);
+    $('#ecMaj', c)?.addEventListener('click', async () => { toast('Mise à jour…'); await actualiserArticle(a.id, { force: true }); rouvrir(); });
+    $$('[data-delien]', c).forEach((x) => x.onclick = (ev) => {
+      ev.preventDefault();
+      S.maj((st) => {
+        const ar = st.articles.find((i) => i.id === a.id);
+        ar.liens = ar.liens.filter((li) => li.id !== x.dataset.delien);
+        st.prix = st.prix.filter((p) => !(p.articleId === a.id && p.lienId === x.dataset.delien));
+      });
+      rouvrir();
+    });
+    $('#fHisto', c).ontoggle = () => { if ($('#fHisto', c).open && !$('#histo', c).dataset.ok) { $('#histo', c).dataset.ok = 1; afficherHistorique(a, $('#histo', c)); } };
     $$('[data-ajprix]', c).forEach((b) => b.onclick = () => {
       $('#fAjPrix', c).open = true; $('#pBan', c).value = b.dataset.ajprix; $('#pOffre', c).focus();
     });
@@ -333,7 +411,7 @@ export function ficheArticle(articleId, ligneId) {
 // ---------------------------------------------------------------------
 // Onglet MAGASINS
 // ---------------------------------------------------------------------
-const lienMaps = (m) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(m.adresse || m.nom)}`;
+const lienMaps = (m) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(m.adresse ? `${m.nom}, ${m.adresse}` : m.nom)}`;
 
 function vueMagasins(v) {
   const e = S.get();
@@ -353,13 +431,13 @@ function vueMagasins(v) {
         <div class="rang"><input data-adr="${m.id}" class="grandir" placeholder="Adresse exacte" value="${esc(m.adresse)}"><button class="icone" data-supmag="${m.id}" aria-label="Retirer">🗑</button></div></div>`;
     }
   }
-  html += `<div class="carte"><h2>Ajouter un magasin</h2>
+  html += `<div class="carte"><h2>Trouver une succursale</h2>
+    <p class="doux">Choisis la bannière et la ville (ou le code postal) : je cherche les succursales et leurs adresses (OpenStreetMap).</p>
     <div class="rang envelopper">
-      <select id="mCp" class="grandir">${e.codesPostaux.map((c) => `<option>${esc(c.code)}</option>`).join('')}</select>
-      <select id="mBan" class="grandir">${Object.entries(BANNIERES).map(([k, b]) => `<option value="${k}">${b.nom}</option>`).join('')}</select></div>
-    <div class="champ" style="margin-top:8px"><input id="mNom" placeholder="Nom (ex. IGA Varennes)"></div>
-    <div class="champ"><input id="mAdr" placeholder="Adresse"></div>
-    <button class="btn" id="mAjout">Ajouter</button></div>`;
+      <select id="mBan" class="grandir">${Object.entries(BANNIERES).map(([k, b]) => `<option value="${k}">${b.nom}</option>`).join('')}</select>
+      <input id="mVille" class="grandir" placeholder="Ville ou code postal (ex. Chambly, J3L)"></div>
+    <button class="btn" id="mChercher" style="margin-top:8px">🔎 Chercher</button>
+    <div id="mResultats" style="margin-top:8px"></div></div>`;
   v.innerHTML = html;
 
   $('#cpAjout').onclick = () => {
@@ -379,9 +457,45 @@ function vueMagasins(v) {
     if (!confirm(`Retirer ${m.nom} ?`)) return;
     S.maj((x) => { x.magasins = x.magasins.filter((y) => y.id !== m.id); x.rabaisPerso = x.rabaisPerso.filter((r) => r.magasinId !== m.id); });
   });
-  $('#mAjout').onclick = () => {
-    const nom = $('#mNom').value.trim(); if (!nom) { toast('Donne un nom au magasin'); return; }
-    S.maj((x) => x.magasins.push({ id: S.uid('m'), banniere: $('#mBan').value, nom, codePostal: $('#mCp').value, adresse: $('#mAdr').value.trim() }));
-    toast(`${nom} ajouté`);
+  $('#mChercher').onclick = async () => {
+    const ban = $('#mBan').value, ville = $('#mVille').value.trim();
+    if (!ville) { toast('Entre une ville ou un code postal'); return; }
+    const zone = $('#mResultats');
+    zone.innerHTML = '<p class="doux">Recherche…</p>';
+    let res = [];
+    try { res = await chercherSuccursales(BANNIERES[ban].nom, ville); } catch { /* réseau */ }
+    // Ville demandée (pas un code postal) : on garde celles de cette ville si possible
+    const estCode = /^[a-z]\d[a-z]/i.test(ville);
+    const memeVille = estCode ? res.filter((r) => r.fsa.toUpperCase() === ville.slice(0, 3).toUpperCase())
+      : res.filter((r) => sansAccents(r.ville) === sansAccents(ville));
+    const note = res.length && !memeVille.length ? `<p class="doux">Aucune succursale trouvée exactement à ${esc(ville)} ; voici les résultats proches :</p>` : '';
+    if (memeVille.length) res = memeVille;
+    if (!res.length) { zone.innerHTML = '<p class="doux">Rien trouvé. Essaie une ville voisine ou le nom complet de la ville.</p>'; return; }
+    zone.innerHTML = note + res.map((r, i) => `<div class="item"><div class="grandir"><div class="nom">${esc(r.nom)}</div><div class="info">${esc(r.adresse)}</div></div>
+      <button class="btn sec" data-ajmag="${i}">Ajouter</button></div>`).join('');
+    $$('[data-ajmag]', zone).forEach((b) => b.onclick = () => {
+      const r = res[Number(b.dataset.ajmag)];
+      if (S.get().magasins.some((m) => m.adresse === r.adresse)) { toast('Déjà dans tes magasins'); return; }
+      S.maj((x) => {
+        if (!x.codesPostaux.some((c) => c.code === r.fsa)) x.codesPostaux.push({ code: r.fsa, libelle: r.ville || r.fsa });
+        x.magasins.push({ id: S.uid('m'), banniere: ban, nom: `${BANNIERES[ban].nom} ${r.ville || ''}`.trim(), codePostal: r.fsa, adresse: r.adresse, lat: r.lat, lng: r.lng });
+      });
+      toast('Magasin ajouté');
+    });
   };
+}
+
+/** Succursales d'une bannière près d'une ville / d'un code postal (OpenStreetMap Nominatim, 1 requête). */
+async function chercherSuccursales(nomBanniere, ville) {
+  const p = new URLSearchParams({ q: `${nomBanniere}, ${ville}, Québec`, format: 'jsonv2', addressdetails: 1, limit: 8, countrycodes: 'ca' });
+  const r = await fetch(`https://nominatim.openstreetmap.org/search?${p}`);
+  const j = await r.json();
+  const cle = sansAccents(nomBanniere).replace(/\s/g, '');
+  return j.filter((x) => sansAccents(x.name || x.display_name).replace(/\s/g, '').includes(cle)).map((x) => {
+    const a = x.address || {};
+    const ville2 = a.city || a.town || a.village || a.municipality || '';
+    const cp = (a.postcode || '').toUpperCase();
+    const adresse = [[a.house_number, a.road].filter(Boolean).join(', '), ville2, cp ? `QC ${cp}` : 'QC'].filter(Boolean).join(', ');
+    return { nom: x.name || nomBanniere, adresse, ville: ville2, fsa: cp.slice(0, 3) || ville2 || '?', lat: Number(x.lat), lng: Number(x.lon) };
+  });
 }

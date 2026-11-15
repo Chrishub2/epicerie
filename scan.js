@@ -5,7 +5,8 @@
 //  agents quand la base partagée sera branchée.)
 // =====================================================================
 import * as S from './store.js';
-import { $, esc, ouvrirModale, fermerModale, quandFermee, toast, aujourdhui } from './ui.js';
+import { $, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, aujourdhui, nomBanniere } from './ui.js';
+import { parCodeBarres, actualiserArticle, MAGASINS_EC } from './epiceries.js';
 import { analyserFormat, analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
 
 // Bases ouvertes interrogées dans l'ordre (aliments → beauté/pharmacie → autres produits).
@@ -119,21 +120,23 @@ async function rechercher(code, zone, surArticle, enRafale) {
     return;
   }
   zone.innerHTML = `<p class="doux">Recherche du produit ${esc(code)}${code.length === 14 ? ' (code de caisse, je cherche aussi le produit à l\'unité)' : ''}…</p>`;
-  // ② bases ouvertes
-  const trouve = await chercherEnLigne(variantes);
+  // ② bases ouvertes (fiche produit) + épiceries.ca (vrais prix), en parallèle
+  const [trouve, ec] = await Promise.all([chercherEnLigne(variantes), parCodeBarres(variantes).catch(() => null)]);
   const p = trouve?.p || null;
+  const ecp = ec?.product || null;
 
-  const nomPropose = p ? (p.product_name_fr || p.product_name || '') : '';
-  const fmt = p?.quantity ? normaliserQuantite(p.quantity) : '';
+  const nomPropose = p ? (p.product_name_fr || p.product_name || '') : (ecp?.name || '');
+  const fmt = p?.quantity ? normaliserQuantite(p.quantity) : (ecp?.size ? formatLisible(ecp.size) : '');
   const rayonId = p ? devinerRayon(p.categories_tags || []) : rayonParDefaut();
-  const image = p?.image_front_url || p?.image_url || '';
+  const image = p?.image_front_url || p?.image_url || ecp?.image || '';
   zone.innerHTML = `
-    ${p ? `<div class="alerte vert">Trouvé sur ${esc(trouve.source)}${p.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>
+    ${ecp ? `<div class="alerte vert">💲 Prix réels trouvés sur épiceries.ca (${esc(argent(ecp.price))} chez ${esc(MAGASINS_EC[ecp.store] ? nomBanniere(MAGASINS_EC[ecp.store]) : ecp.store)}) — ils seront ajoutés.</div>` : ''}
+    ${p || ecp ? `<div class="alerte vert">Trouvé sur ${esc(trouve?.source || 'épiceries.ca')}${p?.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>
           ${image ? `<img src="${esc(image)}" alt="" style="display:block;max-height:160px;max-width:100%;margin:0 auto 8px;border-radius:8px;background:#fff">` : ''}`
         : `<div class="alerte ambre">Produit inconnu dans les bases ouvertes (code ${esc(code)}). Fréquent pour les produits Kirkland/Costco. Tape le nom ou prends une photo : le code sera retenu pour la prochaine fois.</div>`}
     <div class="champ"><label>Nom (en français, à ta façon)</label><input id="sNom" value="${esc(nomPropose)}" list="sCat"></div>
     <datalist id="sCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
-    <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || '')}"></div>
+    <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}"></div>
       <div class="champ grandir"><label>Format</label><input id="sFormat" value="${esc(fmt)}" placeholder="454 g"></div></div>
     <p class="doux">Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.</p>
     <div class="rang envelopper"><button class="btn" id="sOk">Ajouter à la liste</button>
@@ -149,7 +152,11 @@ async function rechercher(code, zone, surArticle, enRafale) {
       const ar = x.articles.find((i) => i.id === a.id);
       ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
       if (image && !ar.imageUrl) ar.imageUrl = image; // photo officielle du produit
+      if (ecp && !(ar.liens || []).some((l) => l.id === ec.id)) {
+        ar.liens = [...(ar.liens || []), { id: ec.id, nom: [ecp.brand, ecp.name].filter(Boolean).join(' '), size: ecp.size, image: ecp.image }];
+      }
     });
+    if (ecp) actualiserArticle(a.id, { force: true });
     surArticle(a);
     zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} ajouté${enRafale() ? ' — scanne le suivant' : ''}</div>`;
     if (!enRafale()) setTimeout(fermerModale, 700);
