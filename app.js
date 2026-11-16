@@ -5,7 +5,7 @@ import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
   libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin } from './ui.js';
 import { BANNIERES } from './demo-data.js';
-import { analyserOffre, formatLisible } from './normalise.js';
+import { analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve } from './plus.js';
@@ -244,7 +244,8 @@ function htmlItem(l, a) {
   const m = (k && offresArticle(a).find((o) => o.pu != null && cleOffre(o) === k)) || meilleureOffre(a);
   const meilleur = m ? `${logo(m.banniere)} ${esc(m.magasinNom ? m.magasinNom.replace(/^\S+\s*/, '') : '')} ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu — touche pour trouver les vrais prix';
   const verdict = htmlVerdictListe(l.recu);
-  return `<div class="item item-liste ${l.coche ? 'coche' : ''}" data-id="${l.id}">
+  const teinte = l.recu?.absent ? '' : l.recu?.statut === 'plus' ? 'recu-ecart' : (l.recu?.statut === 'ok' || l.recu?.statut === 'moins') ? 'recu-ok' : '';
+  return `<div class="item item-liste ${teinte} ${l.coche ? 'coche' : ''}" data-id="${l.id}">
     ${verdict ? verdict.replace('class="item-recu', `data-fiche="${a.id}" class="item-recu`) : ''}
     <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
     ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
@@ -643,7 +644,10 @@ export function ficheArticle(articleId, ligneId) {
     ${l ? `
     <div class="champ"><label>Note</label><input id="fNote" value="${esc(l.note || '')}" placeholder="ex. sans lactose, gros format"></div>` : ''}
     ${l ? `<div class="doux">Ajouté à la liste par <b>${esc(l.ajoutePar || '?')}</b>${l.cree ? ` le ${esc(new Date(l.cree).toLocaleDateString('fr-CA'))}` : ''}</div>` : ''}
-    <div class="doux">Codes-barres : ${a.codes?.length ? a.codes.map(esc).join(', ') : 'aucun'}</div>
+    ${a.codes?.length
+      ? `<div class="doux">Codes-barres : ${a.codes.map(esc).join(', ')}${a.codeSource === 'en ligne' ? ' <span class="pastille ambre">trouvé en ligne — vérifie en scannant le produit</span>' : ''}</div>`
+      : `<div class="alerte" style="margin-top:8px">▥ <b>Pas de code-barres pour ce produit.</b> ${a.codesProposes?.length ? 'Codes possibles trouvés en ligne (vérifie la marque et le format) :' : a.codeCherche ? 'Rien de sûr trouvé en ligne.' : ''} Tu peux aussi le scanner (bouton ▥ en haut).
+          ${(a.codesProposes || []).map((h) => `<button class="btn sec" data-code="${esc(h.code)}" style="width:100%;margin-top:6px;text-align:left">+ ${esc(h.code)} — ${esc([h.marque, h.nom, h.format].filter(Boolean).join(' · '))}</button>`).join('')}</div>`}
     <h3 style="margin-top:14px">Photos</h3>
     <div class="vignettes" id="fPhotos">${photos.length ? '' : '<span class="doux">Aucune photo.</span>'}</div>
     <div class="rang envelopper" style="margin-top:12px">
@@ -654,6 +658,10 @@ export function ficheArticle(articleId, ligneId) {
       <button class="btn danger" id="fSupCat">Supprimer du catalogue</button>
     </div>`, (c) => {
     photos.forEach((p) => afficherPhoto(p, $('#fPhotos', c)));
+    $$('[data-code]', c).forEach((b) => b.onclick = () => {
+      S.maj((st) => { const ar = st.articles.find((i) => i.id === a.id); ar.codes = [...new Set([...(ar.codes || []), ...gtinVariantes(b.dataset.code)])]; ar.codeSource = 'choisi'; delete ar.codesProposes; });
+      toast(`Code ${b.dataset.code} ajouté`); ficheArticle(articleId, ligneId);
+    });
     const rouvrir = () => ficheArticle(articleId, ligneId);
     $('#ecLiaison', c).onclick = () => ouvrirLiaison(a.id, rouvrir);
     $('#ecMaj', c)?.addEventListener('click', async () => { toast('Mise à jour…'); await actualiserArticle(a.id, { force: true }); rouvrir(); });

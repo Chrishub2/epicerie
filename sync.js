@@ -312,6 +312,15 @@ export async function lireAvecIA(type, blobs, extra = {}) {
   }
 }
 
+/** Codes-barres possibles d'un produit par marque + nom (Open Food Facts, via la fonction). [] si rien / indisponible. */
+export async function chercherCodesEnLigne(q, marque) {
+  if (!sb || !session || !navigator.onLine) return null;
+  try {
+    const { data, error } = await sb.functions.invoke('lire-photo', { body: { type: 'chercher_code', q, marque } });
+    return error || !data?.ok ? null : data.data;
+  } catch { return null; }
+}
+
 /** Nom, marque et photos d'un code-barres (base UPCitemdb, via la fonction). null si indisponible. */
 export async function chercherCode(code) {
   if (!sb || !session || !navigator.onLine) return null;

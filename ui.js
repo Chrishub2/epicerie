@@ -122,6 +122,7 @@ export function offresArticle(article) {
   for (const p of e.prix.filter((x) => x.articleId === article.id)) {
     if (p.fin && joursRestants(p.fin) < 0) continue;
     if (p.enAttente) continue; // photo pas encore lue (hors ligne)
+    if (p.annule) continue;    // prix d'une association de reçu corrigée
     if (!banniereActive(p.banniere)) continue;
     if (article.exclusif && p.banniere !== article.exclusif) continue;
     let n = normaliser(p.offre, p.format || article.format, article.uniteRef);

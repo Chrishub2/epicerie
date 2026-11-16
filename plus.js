@@ -309,8 +309,8 @@ function vueReleve(v) {
   v.innerHTML = retour() + `<div class="carte"><h2>Relevé de prix</h2>
       <p class="doux">Photographie les étiquettes qui t'intéressent : je lis le prix et le format, tu confirmes le produit. Les prix vont dans ton historique, pas dans ta liste. Sans réseau, les photos sont lues plus tard.</p>
       <div class="champ"><label>Magasin</label><select id="rlMag">${mags.map((m) => `<option value="${m.id}" ${m.id === magasinReleve ? 'selected' : ''}>${esc(m.nom)}</option>`).join('')}</select></div>
-      <div class="rang envelopper"><button class="btn grandir" id="rlPhoto">📷 Photographier une étiquette</button>
-        <button class="btn sec grandir" id="rlScan">▥ Scanner un code-barres</button></div>
+      <button class="btn" id="rlPhoto" style="width:100%;margin-bottom:8px">📷 Photographier une étiquette</button>
+      <button class="btn sec" id="rlScan" style="width:100%">▥ Scanner un code-barres</button>
       ${faits ? `<p class="doux">${faits} prix déjà enregistré(s) par relevé.</p>` : ''}</div>
     <datalist id="rlCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
     ${releves.map((r) => {
@@ -422,6 +422,40 @@ async function apresApplication(id) {
   } else ouvrirDetailRecu(id);
 }
 
+/** Association manuelle : pour chaque ligne du reçu, choisis l'article (catalogue) ou tape un nouveau nom. */
+function associerRecu(id) {
+  const e = S.get();
+  const r = e.recus.find((x) => x.id === id);
+  const nomDe = (aid) => e.articles.find((a) => a.id === aid)?.nom || '';
+  ouvrirModale('Associer les produits', `<p class="doux">Pour chaque ligne de la facture, choisis le produit de ton catalogue (ou tape un nouveau nom pour le créer). Laisse vide si ce n'est pas un produit (sac, consigne…). Je recompare ensuite les prix et je cherche le code-barres en ligne.</p>
+    <datalist id="asCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
+    ${r.lignes.map((l, i) => `<div class="carte" style="padding:8px;margin-bottom:6px">
+      <div class="rang"><b class="grandir">${esc(l.nomClair || l.libelle)}</b><b>${argent(l.prix)}</b></div>
+      <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? ` · code ${esc(l.code)}` : ''}</div>
+      <input data-as="${i}" list="asCat" value="${esc(nomDe(l.articleId))}" placeholder="— aucun produit —" style="margin-top:6px"></div>`).join('')}
+    <button class="btn" id="asOk" style="width:100%;margin-top:6px">✓ Enregistrer les associations</button>`, (c) => {
+    $('#asOk', c).onclick = async (ev) => {
+      const app = await import('./app.js');
+      const choix = {};
+      $$('[data-as]', c).forEach((inp) => {
+        const i = Number(inp.dataset.as), l = r.lignes[i], nom = inp.value.trim();
+        let aid = '';
+        if (nom) {
+          const ex = S.get().articles.find((a) => a.nom.toLowerCase() === nom.toLowerCase());
+          aid = ex ? ex.id : app.assurerArticle(nom, { format: l.format || '', uniteRef: analyserFormat(l.format)?.base || 'unite', marque: l.marque || '' }).id;
+        }
+        if ((l.articleId || '') !== aid || (nom && !l.manuel)) choix[i] = aid;
+      });
+      if (!Object.keys(choix).length) { fermerModale(); ouvrirDetailRecu(id); return; }
+      ev.target.disabled = true;
+      const R = await import('./recu.js');
+      const bilan = await R.associerManuellement(id, choix, (m) => { ev.target.textContent = `⏳ ${m}`; });
+      toast(`Associations enregistrées ✓ ${R.texteBilan(bilan)}`);
+      ouvrirDetailRecu(id);
+    };
+  });
+}
+
 /** Enregistre les photos et le reçu (lu ou non). Retourne son id. */
 async function enregistrerRecu(blobs, lu) {
   const photoIds = [];
@@ -442,13 +476,14 @@ async function ouvrirDetailRecu(id) {
   if (!r) return;
   const v = r.statut === 'lu' ? R.verifierRecu(r) : null;
   const nbFiches = (await R.aCompleter(id)).length;
-  ouvrirModale('Reçu', `${R.htmlDetail(r)}
-    <div class="rang envelopper" style="margin-top:10px">
-      ${nbFiches ? `<button class="btn" id="rcCompleter">🔎 Compléter ${nbFiches} fiche(s) : photo, format, prix des bannières</button>` : ''}
+  ouvrirModale('Reçu', `<div class="rang envelopper" style="margin-bottom:10px">
+      ${r.statut === 'lu' && r.lignes?.length ? '<button class="btn" id="rcAssocier">🔗 Associer les produits à la main</button>' : ''}
+      ${nbFiches ? `<button class="btn sec" id="rcCompleter">🔎 Compléter ${nbFiches} fiche(s) : photo, format, prix</button>` : ''}
       ${r.statut === 'lu' && !(r.applique && r.bilan?.relies) ? '<button class="btn" id="rcAppliquer">Remplir ma liste avec ce reçu</button>' : ''}
       ${r.statut === 'lu' && (!r.verification || r.source !== 'ia' || (r.applique && !r.bilan?.relies)) ? '<button class="btn sec" id="rcRelire">🔄 Relire avec l\'IA</button>' : ''}
-      ${v && !v.ok ? '<button class="btn sec" id="rcRefaire">📷 Reprendre ce reçu</button>' : ''}
-      <button class="btn danger" id="supRecu">Supprimer ce reçu</button></div>`, (c) => {
+      ${v && !v.ok ? '<button class="btn sec" id="rcRefaire">📷 Reprendre ce reçu</button>' : ''}</div>
+    ${R.htmlDetail(r)}
+    <button class="btn danger" id="supRecu" style="margin-top:14px">Supprimer ce reçu</button>`, (c) => {
     const det = $('#rcEntierBloc', c);
     const montrer = () => { if (det.open && !$('#rcEntier', c).childElementCount) R.apercuEntier(r.photoIds || [r.photoId], $('#rcEntier', c)); };
     det.addEventListener('toggle', montrer);
@@ -467,6 +502,7 @@ async function ouvrirDetailRecu(id) {
         apresApplication(r.id);
       } catch (err) { toast(err.message); ouvrirDetailRecu(r.id); }
     });
+    $('#rcAssocier', c)?.addEventListener('click', () => associerRecu(r.id));
     $('#rcCompleter', c)?.addEventListener('click', () => R.completerFiches(r.id, () => ouvrirDetailRecu(r.id)));
     $('#rcRefaire', c)?.addEventListener('click', () => nouveauRecu());
     $('#supRecu', c).onclick = () => { if (confirm('Supprimer ce reçu ?')) { S.maj((x) => { x.recus = x.recus.filter((y) => y.id !== r.id); }); fermerModale(); } };

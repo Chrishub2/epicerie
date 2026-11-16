@@ -159,6 +159,58 @@ function parNom(texte, e) {
   return meilleur;
 }
 
+/**
+ * Cherche le code-barres d'un article par marque + nom (Open Food Facts).
+ * Gardé seulement si UN produit concorde exactement (marque, nom et format) ; sinon les candidats
+ * sont proposés dans la fiche (« Ajouter ce code ») et une mention invite à scanner le produit.
+ */
+export async function trouverCode(articleId, marqueLigne) {
+  const a = S.get().articles.find((x) => x.id === articleId);
+  if (!a || a.codes?.length) return 'deja';
+  const Sync = await import('./sync.js');
+  const marque = marqueLigne || a.marque || '';
+  const mots = (t) => simple(t).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter((m) => m.length >= 3);
+  const motsMarque = new Set(mots(marque));
+  const cle = mots(a.nom).filter((m) => !motsMarque.has(m));
+  const hits = await Sync.chercherCodesEnLigne(cle.join(' ') || a.nom, marque);
+  if (hits == null) return 'indisponible';
+  const nomOk = (h) => { const t = mots(`${h.nom} ${h.marque}`); return !cle.length || cle.filter((m) => t.some((x) => x.startsWith(m) || m.startsWith(x))).length / cle.length >= 0.5; };
+  const marqueOk = (h) => !marque || simple(h.marque).includes(simple(marque));
+  const bons = hits.filter((h) => marqueOk(h) && nomOk(h));
+  const fA = analyserFormat(a.format);
+  const exacts = fA ? bons.filter((h) => { const f = analyserFormat(h.format); return f && f.base === fA.base && Math.abs(f.total - fA.total) / fA.total < 0.03; }) : [];
+  S.maj((x) => {
+    const ar = x.articles.find((y) => y.id === articleId);
+    if (!ar) return;
+    if (exacts.length === 1) {
+      ar.codes = [...new Set([...(ar.codes || []), ...gtinVariantes(exacts[0].code)])];
+      ar.codeSource = 'en ligne'; delete ar.codesProposes;
+    } else {
+      ar.codesProposes = bons.slice(0, 5); ar.codeCherche = new Date().toISOString();
+    }
+  });
+  return exacts.length === 1 ? 'trouve' : 'propose';
+}
+
+/** Associe à la main les lignes d'un reçu : choix = { indexLigne: articleId | '' (aucun) }. Puis recompare et complète. */
+export async function associerManuellement(recuId, choix, etat) {
+  S.maj((x) => {
+    const rc = x.recus.find((y) => y.id === recuId);
+    Object.entries(choix).forEach(([i, id]) => {
+      const ln = rc?.lignes?.[i];
+      if (!ln) return;
+      const ancien = ln.articleId;
+      if (ancien && ancien !== id) {
+        // Mauvaise association corrigée : le prix enregistré pour l'ancien article est annulé (gardé, mais ignoré)
+        x.prix.filter((p) => p.recuId === recuId && p.articleId === ancien).forEach((p) => { p.annule = true; p.annuleRaison = 'association corrigée à la main'; });
+        x.liste.filter((y) => y.articleId === ancien && y.recu?.recuId === recuId).forEach((y) => { delete y.recu; });
+      }
+      ln.articleId = id || null; ln.manuel = true;
+    });
+  });
+  return appliquerRecu(recuId, etat, { force: true });
+}
+
 /** Relit un reçu enregistré avec l'IA (nouvelle lecture : codes, liens avec la liste, vérification). */
 export async function relireRecu(recuId) {
   const { lireRecu, iaDisponible } = await import('./ocr.js');
@@ -188,10 +240,10 @@ function offreLigne(l) {
  * coche l'article acheté et complète les fiches (code, marque, format, photo) par une recherche en ligne.
  * etat(msg) suit l'avancement. Retourne un bilan.
  */
-export async function appliquerRecu(recuId, etat = () => {}) {
+export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   const e = S.get();
   const r = (e.recus || []).find((x) => x.id === recuId);
-  if (!r || (r.applique && r.bilan?.relies)) return null; // déjà appliqué avec succès
+  if (!r || (r.applique && r.bilan?.relies && !opts.force)) return null; // déjà appliqué avec succès
   const mag = e.magasins.find((m) => m.banniere === r.banniere && r.magasin && simple(r.magasin).includes(simple(m.nom).split(' ').pop()))
     || e.magasins.find((m) => m.banniere === r.banniere);
   const date = r.date || r.cree.slice(0, 10);
@@ -205,7 +257,10 @@ export async function appliquerRecu(recuId, etat = () => {}) {
     const codes = variantesRecu(l.code);
     const etatNow = S.get();
     // ① par le nom de la liste (relié par l'IA), ② par code-barres dans tout le catalogue
-    let a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
+    // ⓪ association faite à la main (prioritaire)
+    let a = l.manuel && l.articleId && etatNow.articles.find((x) => x.id === l.articleId);
+    if (l.manuel && !l.articleId) { bilan.nonRelies++; continue; } // « aucun » choisi à la main
+    if (!a) a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
       && etatNow.liste.some((li) => li.articleId === x.id));
     if (!a && codes.length) a = etatNow.articles.find((x) => x.codes?.some((c) => codes.includes(c)));
     // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
@@ -230,6 +285,8 @@ export async function appliquerRecu(recuId, etat = () => {}) {
     const verdict = comparerPrix(l, S.get().articles.find((y) => y.id === a.id) || a, prixAttendu(a, r.banniere), r); // avant d'ajouter le prix payé
     if (verdict.statut === 'ok' || verdict.statut === 'moins') bilan.bonPrix++;
     if (verdict.statut === 'plus') bilan.ecarts++;
+    // Pas de code-barres ni sur la facture ni dans la fiche : recherche en ligne (sinon mention dans la fiche)
+    if (!codes.length && !a.codes?.length && navigator.onLine) { etat(`Code-barres de ${a.nom}…`); await trouverCode(a.id, l.marque); }
     let coche = false, complete = false;
     S.maj((x) => {
       const ar = x.articles.find((y) => y.id === a.id);
