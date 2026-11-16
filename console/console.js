@@ -346,7 +346,8 @@ function vueCatalogue(t) {
       if (a.groupe) return;
       if (ev.target.matches('[data-sel]')) { basculerSel(a.id, ev.shiftKey ? i : null); return; }
       if (ev.target.closest('[data-edit]')) return;
-      tv.focusI = i; ouvrirArticle(a.id);
+      tv.focusI = i;
+      if (ui.articleOuvert === a.id) fermerDetail(); else ouvrirArticle(a.id); // re-cliquer la ligne referme la fiche
     },
     surDouble: (a, i, ev) => {
       const col = ev.target.closest('[data-col]')?.dataset.col;
@@ -629,6 +630,7 @@ function editerChampDetail(el, a) {
     if ((a[champ] ?? '') === v) { rendreDetail(); return; }
     const h = modifier(a.id, champ, v);
     reanalyser(); rendreNav(); majSynchro(); rendreDetail(); ui.remplirCatalogue && ui.vue === 'catalogue' && ui.remplirCatalogue();
+    if (ui.vue === 'boite') vueBoite($('#travail')); // le problème corrigé disparaît de la liste
     note(`${libelleChamp(champ)} modifié`, { libelle: 'Annuler', faire: () => restaurer(h) });
   };
   c.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); valider(); } if (ev.key === 'Escape') { ev.stopPropagation(); fini = true; rendreDetail(); } });
@@ -648,6 +650,7 @@ function carteProbleme(p) {
     ${p.correction ? `<div class="proposition"><span class="badge ia">Proposé</span>${esc(p.correction.texte)}${p.impact ? `<span class="discret" style="margin-left:auto">${esc(p.impact)}</span>` : ''}</div>` : (p.impact ? `<div class="discret" style="font-size:12px;margin-top:4px">${esc(p.impact)}</div>` : '')}
     <div class="actions">
       ${p.correction ? `<button class="btn petit principal" data-act="appliquer">${peutLot ? 'Appliquer' : 'Appliquer quand même'}</button>` : ''}
+      ${!p.correction && CHAMP_A_CORRIGER[p.code] ? '<button class="btn petit" data-act="corriger">✎ Corriger</button>' : ''}
       ${p.cibles.length > 1 ? '<button class="btn petit" data-act="comparer">⇄ Comparer</button>' : ''}
       ${p.code === 'prix_aberrant' ? '<button class="btn petit" data-act="ouvrir">Voir les prix</button>' : ''}
       <button class="btn petit" data-act="ignorer" title="Ne plus afficher ce problème">${p.cibles.length > 1 ? 'Pas des doublons' : 'Pas un problème'}</button>
@@ -677,6 +680,17 @@ function actionProbleme(p, act) {
   } else if (act === 'comparer') {
     ui.comparer = [...p.cibles]; ui.cibleFusion = p.cibles[0]; aller('comparer');
   } else if (act === 'ouvrir') ouvrirArticle(p.cibles[0]);
+  else if (act === 'corriger') corrigerChamp(p.cibles[0], CHAMP_A_CORRIGER[p.code]);
+}
+/** Problèmes qu'on corrige à la main dans la console : règle → champ de la fiche. Les autres (code, photo, prix) se font au téléphone. */
+const CHAMP_A_CORRIGER = { format_manquant: 'format', marque_manquante: 'marque', rayon_divers: 'rayonId', nom_a_normaliser: 'nom', format_unite: 'uniteRef' };
+function corrigerChamp(id, champ) {
+  if (!champ) { ouvrirArticle(id); return; }
+  if (ui.articleOuvert !== id) ouvrirArticle(id);
+  const el = $(`#detailContenu .valeur.editable[data-champ="${champ}"]`);
+  if (!el) return;
+  el.scrollIntoView({ block: 'center' });
+  editerChampDetail(el, ARTS.get(id));
 }
 function appliquerCorrection(p, lot = null) {
   const c = p.correction;
@@ -702,7 +716,7 @@ function vueBoite(t) {
       <div class="liste-problemes">
         <div class="explication"><strong>${esc(r.titre)}.</strong> ${esc(r.explication)}</div>
         <div class="outils">
-          <input class="champ" id="filtreBoite" placeholder="Filtrer ces problèmes…" value="${esc(b.texte)}">
+          <input class="champ" id="filtreBoite" placeholder="Filtrer ces problèmes…" value="${esc(b.texte)}" style="width:180px">
           <button class="puce" id="toutCocher">Cocher les corrections ≥ ${pct(SEUIL_LOT)}</button>
           <span style="flex:1"></span>
           <span class="muet" id="compteSelBoite"></span>
@@ -715,11 +729,11 @@ function vueBoite(t) {
   t.querySelectorAll('[data-regle]').forEach((x) => x.onclick = () => { b.regle = x.dataset.regle; b.selection.clear(); vueBoite(t); });
   const cols = [
     { cle: 'sel', titre: '', largeur: 34, rendu: (p) => `<input type="checkbox" class="case" data-sel ${b.selection.has(p.cle) ? 'checked' : ''} aria-label="Sélectionner">` },
-    { cle: 'prod', titre: 'Produit(s)', largeur: 220, souple: true, rendu: (p) => p.cibles.map((id) => nomCourt(ARTS.get(id))).join(' <span class="discret">·</span> ') },
-    { cle: 'pb', titre: 'Problème', largeur: 300, rendu: (p) => esc(p.probleme) },
-    { cle: 'corr', titre: 'Correction proposée', largeur: 220, rendu: (p) => (p.correction ? `<span class="badge ia">Proposé</span> ${esc(p.correction.texte)}` : `<span class="discret">${p.cibles.length > 1 ? 'À comparer' : 'À faire à la main'}</span>`) },
+    { cle: 'act', titre: 'Action', largeur: 168, rendu: (p) => `${p.correction ? '<button class="btn petit principal" data-act="appliquer" title="Appliquer la correction proposée">✓ Appliquer</button> ' : ''}${!p.correction && CHAMP_A_CORRIGER[p.code] ? '<button class="btn petit" data-act="corriger" title="Ouvrir la fiche sur ce champ">✎ Corriger</button> ' : ''}${p.cibles.length > 1 ? '<button class="btn petit" data-act="comparer" title="Comparer">⇄</button> ' : ''}<button class="btn petit" data-act="ignorer" title="Écarter ce problème">✕</button>` },
+    { cle: 'prod', titre: 'Produit(s)', largeur: 200, souple: true, rendu: (p) => p.cibles.map((id) => nomCourt(ARTS.get(id))).join(' <span class="discret">·</span> ') },
+    { cle: 'pb', titre: 'Problème', largeur: 280, rendu: (p) => esc(p.probleme) },
+    { cle: 'corr', titre: 'Correction proposée', largeur: 200, rendu: (p) => (p.correction ? `<span class="badge ia">Proposé</span> ${esc(p.correction.texte)}` : `<span class="discret">${p.cibles.length > 1 ? 'À comparer' : CHAMP_A_CORRIGER[p.code] ? 'À corriger (✎)' : 'Au téléphone (scan, photo, prix)'}</span>`) },
     { cle: 'conf', titre: 'Confiance', largeur: 100, rendu: (p) => confiance(p.confiance) },
-    { cle: 'act', titre: '', largeur: 170, rendu: (p) => `${p.correction ? '<button class="btn petit principal" data-act="appliquer">Appliquer</button> ' : ''}${p.cibles.length > 1 ? '<button class="btn petit" data-act="comparer">⇄</button> ' : ''}<button class="btn petit" data-act="ignorer" title="Écarter">✕</button>` },
   ];
   const tv = new TableVirtuelle($('#hoteBoite', t), {
     colonnes: cols, cle: (p) => p.cle, vide: 'Aucun problème de ce type. 👍',
@@ -729,7 +743,7 @@ function vueBoite(t) {
       const act = ev.target.closest('[data-act]')?.dataset.act;
       tv.focusI = i;
       if (act) { actionProbleme(p, act); return; }
-      ouvrirArticle(p.cibles[0]);
+      if (ui.articleOuvert === p.cibles[0]) fermerDetail(); else ouvrirArticle(p.cibles[0]); // re-cliquer referme la fiche
     },
   });
   tableCourante = tv;

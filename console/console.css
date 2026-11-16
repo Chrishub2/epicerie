@@ -92,7 +92,11 @@ img.vignette.casse { visibility: hidden; }
 .travail { grid-area: travail; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .entete-vue { display: flex; align-items: center; gap: 14px; padding: 12px 16px 10px; border-bottom: 1px solid var(--trait); flex-wrap: wrap; }
 .entete-vue h1 { margin-right: 8px; }
-.outils { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--trait); flex-wrap: wrap; background: var(--surface); }
+/* Une seule ligne, quelle que soit la largeur : si elle passait sur 2 lignes à l’ouverture de la fiche, tout le tableau
+   descendait sous la souris (le clic suivant tombait sur la ligne d’au-dessus). Trop étroit : défilement horizontal. */
+.outils { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--trait); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; background: var(--surface); flex: none; }
+.outils::-webkit-scrollbar { display: none; }
+.outils > * { flex: none; }
 .champ { height: 28px; padding: 0 9px; border: 1px solid var(--trait); border-radius: var(--rayon); background: var(--surface-2); min-width: 0; }
 .champ:focus { border-color: var(--etiquette); outline: none; }
 input.champ { width: 260px; }
