@@ -246,9 +246,10 @@ function htmlItem(l, a) {
   const meilleur = m ? `${logo(m.banniere)} ${esc(m.magasinNom ? m.magasinNom.replace(/^\S+\s*/, '') : '')} ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}${m.produitOffre ? ` · <b>${esc(m.produitOffre)}</b>` : ''}` : 'Prix inconnu';
   const verdict = htmlVerdictListe(l.recu);
   const teinte = l.recu?.absent ? '' : l.recu?.statut === 'plus' ? 'recu-ecart' : (l.recu?.statut === 'ok' || l.recu?.statut === 'moins') ? 'recu-ok' : '';
-  return `<div class="item item-liste ${teinte} ${l.coche ? 'coche' : ''}" data-id="${l.id}">
+  return `<div class="item item-liste ${teinte} ${l.coche ? 'coche' : ''} ${l.indisponible ? 'indisponible' : ''}" data-id="${l.id}">
+    ${l.indisponible ? `<div class="item-recu doux">🚫 Pas disponible${l.indisponible.le ? ` (${esc(new Date(`${l.indisponible.le}T12:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }))})` : ''} — garde le doigt 3 s pour le remettre</div>` : ''}
     ${verdict ? verdict.replace('class="item-recu', `data-fiche="${a.id}" class="item-recu`) : ''}
-    <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
+    <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Dans le panier">
     ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
     <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
       <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''}</div>
@@ -260,11 +261,65 @@ function htmlItem(l, a) {
   </div>`;
 }
 
+/**
+ * Appui long (3 s) sur une carte de la liste → action(). Une barre se remplit sous la carte pendant l'appui.
+ * Annulé si le doigt bouge (défilement) ou se lève avant. Le toucher qui suit l'appui n'ouvre pas la fiche.
+ */
+const DUREE_APPUI = 3000;
+function brancherAppuiLong(el, action) {
+  let minuterie = null, depart = null, avale = false;
+  const annuler = () => { clearTimeout(minuterie); minuterie = null; el.classList.remove('appui'); };
+  el.addEventListener('pointerdown', (ev) => {
+    if (ev.button > 0 || ev.target.closest('input, button')) return; // case « dans le panier », − / +
+    depart = { x: ev.clientX, y: ev.clientY };
+    el.classList.add('appui');
+    minuterie = setTimeout(() => {
+      minuterie = null; el.classList.remove('appui'); avale = true;
+      navigator.vibrate?.(40);
+      action();
+    }, DUREE_APPUI);
+  });
+  el.addEventListener('pointermove', (ev) => {
+    if (minuterie && depart && Math.hypot(ev.clientX - depart.x, ev.clientY - depart.y) > 10) annuler();
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => el.addEventListener(t, () => { if (minuterie) annuler(); }));
+  el.addEventListener('contextmenu', (ev) => ev.preventDefault()); // pas de menu du navigateur pendant l'appui
+  el.addEventListener('click', (ev) => { if (avale) { avale = false; ev.stopPropagation(); ev.preventDefault(); } }, true);
+}
+
+/** Fenêtre d'options après un appui long : retirer de la liste, pas disponible (ou remettre). */
+function optionsArticleListe(ligneId) {
+  const e = S.get();
+  const l = e.liste.find((x) => x.id === ligneId);
+  const a = l && e.articles.find((x) => x.id === l.articleId);
+  if (!l || !a) return;
+  try { localStorage.setItem('astuce-appui-long', '1'); } catch { /* navigation privée */ }
+  ouvrirModale(a.nom, `
+    ${l.indisponible
+      ? '<button class="btn" id="oRemettre" style="width:100%;margin-bottom:8px">↩︎ Remettre dans la liste (disponible)</button>'
+      : '<button class="btn" id="oIndispo" style="width:100%;margin-bottom:8px">🚫 Pas disponible</button>'}
+    <button class="btn danger" id="oRetirer" style="width:100%;margin-bottom:8px">🗑 Retirer de la liste</button>
+    <button class="btn sec" id="oAnnuler" style="width:100%">Annuler</button>
+    <p class="doux" style="margin-top:8px">« Pas disponible » : l'article reste sur ta liste, regroupé à la fin, pour l'acheter ailleurs ou plus tard.</p>`, (c) => {
+    $('#oIndispo', c)?.addEventListener('click', () => {
+      S.maj((x) => { const li = x.liste.find((y) => y.id === ligneId); if (li) { li.indisponible = { le: new Date().toISOString().slice(0, 10), par: x.utilisateur }; li.coche = false; } });
+      fermerModale(); toast(`${a.nom} : pas disponible`);
+    });
+    $('#oRemettre', c)?.addEventListener('click', () => {
+      S.maj((x) => { const li = x.liste.find((y) => y.id === ligneId); if (li) delete li.indisponible; });
+      fermerModale(); toast(`${a.nom} remis dans la liste`);
+    });
+    $('#oRetirer', c).onclick = () => { S.maj((x) => { x.liste = x.liste.filter((y) => y.id !== ligneId); }); fermerModale(); toast(`${a.nom} retiré de la liste`); };
+    $('#oAnnuler', c).onclick = () => fermerModale();
+  });
+}
+
 /** Sections par rayon (dans l'ordre et les regroupements du magasin). */
 function htmlRayons(items, magId) {
   let html = '';
   for (const g of groupesRayons(magId)) {
-    const dans = items.filter(({ a }) => a && g.ids.includes(a.rayonId));
+    // Les articles « pas disponibles » sont regroupés à la fin de la liste
+    const dans = items.filter(({ l, a }) => a && !l.indisponible && g.ids.includes(a.rayonId));
     if (!dans.length) continue;
     html += `<section class="rayon"><h3>${esc(g.nom)} <span class="doux">(${dans.length})</span></h3>${dans.map(({ l, a }) => htmlItem(l, a)).join('')}</section>`;
   }
@@ -329,6 +384,9 @@ function vueListe(v) {
     const items = filtreMagasin === 'tous' ? tous : cibles[filtreMagasin].items;
     html += htmlRayons(items, magFiltre?.id || e.magasinCourant);
   }
+  const indispos = tous.filter((x) => x.l.indisponible);
+  if (indispos.length) html += `<section class="rayon"><h3>🚫 Pas disponible <span class="doux">(${indispos.length})</span></h3>${indispos.map(({ l, a }) => htmlItem(l, a)).join('')}</section>`;
+  if (tous.length && !indispos.length && !localStorage.getItem('astuce-appui-long')) html += '<p class="doux" style="text-align:center;font-size:12px">Astuce : garde le doigt 3 secondes sur un produit pour le retirer ou le marquer « pas disponible ».</p>';
   if (nbCoches) html += `<button class="btn sec" id="btnVider" style="width:100%;margin-top:8px">Retirer les ${nbCoches} article(s) acheté(s)</button>`;
   html += `<button class="btn sec" id="btnRecu" style="width:100%;margin-top:8px">🧾 Photographier mon reçu</button>`;
   v.innerHTML = html;
@@ -362,6 +420,7 @@ function vueListe(v) {
     const k = b.dataset.replier; replies.has(k) ? replies.delete(k) : replies.add(k); rendre();
   });
 
+  $$('.item-liste', v).forEach((el) => brancherAppuiLong(el, () => optionsArticleListe(el.dataset.id)));
   $$('.item', v).forEach((el) => {
     const id = el.dataset.id;
     el.querySelector('input').onchange = (ev) => S.maj((x) => {
@@ -738,7 +797,7 @@ export function ficheArticle(articleId, ligneId) {
     ${a.exclusif ? `<div class="alerte ambre">Vendu seulement chez <b>${esc(nomBanniere(a.exclusif))}</b> : les autres bannières sont ignorées pour ce produit.</div>` : ''}
     <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres</button>
     <p class="doux" style="margin:-4px 0 10px">Remplit la fiche : nom, marque, format, catégorie, photo et prix.</p>
-    ${htmlDernierAchat(l?.recu?.absent ? null : (l?.recu || a.dernierAchat))}
+    ${htmlDernierAchat(l?.recu?.absent ? null : (l?.recu || a.dernierAchat), a.id)}
     ${l?.recu?.absent ? `<div class="alerte" style="margin-bottom:10px">🧾 Ce produit n'est pas sur la facture du ${esc(l.recu.date || '')}${l.recu.banniere ? ` (${esc(nomBanniere(l.recu.banniere))})` : ''}.</div>` : ''}
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a, { avecManquants: true })}
@@ -794,6 +853,8 @@ export function ficheArticle(articleId, ligneId) {
       <button class="btn danger" id="fSupCat">Supprimer du catalogue</button>
     </div>`, (c) => {
     photos.forEach((p) => afficherPhoto(p, $('#fPhotos', c)));
+    // Preuve d'un écart de caisse : la photo de l'étiquette, en grand
+    $$('[data-preuve-photo]', c).forEach((el) => afficherPhoto({ id: el.dataset.preuvePhoto, type: 'prix', note: 'Étiquette en magasin' }, el, true));
     $$('[data-code]', c).forEach((b) => b.onclick = () => {
       S.maj((st) => { const ar = st.articles.find((i) => i.id === a.id); ar.codes = [...new Set([...(ar.codes || []), ...gtinVariantes(b.dataset.code)])]; ar.codeSource = 'choisi'; delete ar.codesProposes; });
       toast(`Code ${b.dataset.code} ajouté`); ficheArticle(articleId, ligneId);

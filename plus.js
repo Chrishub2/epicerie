@@ -45,6 +45,9 @@ export function vuePlus(v) {
     <span style="font-size:24px">${ic}</span><span class="grandir"><b>${t}</b><div class="doux">${s}</div></span><span>›</span></button>`).join('')
     + `<p class="doux">À venir : vérification automatique de chaque ligne de reçu contre les prix attendus, économies par bannière/semaine/mois, cycles de rabais, rappels de produits.</p>`;
   $$('[data-s]', v).forEach((b) => b.onclick = () => { section = b.dataset.s; vuePlus(v); });
+  // Version installée sur ce téléphone
+  v.insertAdjacentHTML('beforeend', '<p class="doux" id="versionApp" style="text-align:center"></p>');
+  import('./maj.js').then((m) => m.versionActuelle()).then((ver) => { const p = $('#versionApp', v); if (p && ver) p.textContent = `Version de l'app : ${ver}`; });
 }
 
 const retour = () => `<button class="btn sec" id="retour" style="margin-bottom:10px">‹ Retour</button>`;

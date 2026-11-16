@@ -258,6 +258,13 @@ table.comp tr.proche td.pu { color: var(--ambre); }
 .item-liste .qte { flex: none; }
 .item-liste .grandir { min-width: 0; }
 .item.coche .item-recu { text-decoration: none; }
+/* Appui long (3 s) : une barre se remplit sous la carte ; pas de sélection de texte ni de menu */
+.item-liste { position: relative; overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.item-liste.appui::after { content: ''; position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: var(--accent);
+  animation: appui-long 2.7s linear .3s forwards; }
+@keyframes appui-long { from { width: 0; } to { width: 100%; } }
+.item-liste.indisponible { opacity: .65; }
+.item-liste.indisponible .nom { text-decoration: line-through; }
 .tableau-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--ligne); border-radius: 12px;
   background: var(--carte); margin-bottom: 6px; }
 table.matrice { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 100%; }
@@ -270,6 +277,17 @@ table.matrice thead th:first-child { left: 0; z-index: 2; position: sticky; }
 table.matrice td.meilleur { background: var(--vert-fond); color: var(--vert); outline: 2px solid var(--vert); outline-offset: -2px; }
 table.matrice td.proche { background: var(--ambre-fond); color: var(--ambre); }
 table.matrice td.vide-cel { color: var(--doux); text-align: center; }
+/* Comparer : même disposition pour chaque produit et chaque case */
+.cel-produit { display: flex; align-items: flex-start; gap: 8px; }
+.cel-nom { font-weight: 600; line-height: 1.25; }
+.cel-prix { font-size: 12px; color: var(--doux); font-weight: 400; white-space: normal; }
+.cel-pu { font-size: 14px; font-weight: 700; }
+.cel-note { font-size: 11px; min-height: 14px; margin-top: 2px; white-space: normal; }
+.vignette-fixe { flex: none; object-fit: contain; border-radius: 8px; background: #fff; border: 1px solid var(--ligne); }
+.vignette-vide { display: inline-grid; place-items: center; background: var(--gris-fond); color: var(--doux); font-weight: 700; }
+table.matrice td { min-width: 92px; }
+table.matrice td.meilleur .cel-prix, table.matrice td.proche .cel-prix, table.matrice td.cher .cel-prix { color: inherit; opacity: .85; }
+table.matrice tbody th { min-width: 150px; max-width: 170px; }
 details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
 .reorg { list-style: none; padding: 0; margin: 0; }

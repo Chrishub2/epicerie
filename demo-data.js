@@ -10,16 +10,17 @@ const jour = (n) => {
   return d.toISOString().slice(0, 10);
 };
 
+// circulaire : page officielle de la circulaire de la semaine (vérifiées le 2026-11-16), pour montrer un prix à la caisse.
 export const BANNIERES = {
-  iga: { nom: 'IGA', couleur: '#d6001c' },
-  super_c: { nom: 'Super C', couleur: '#e30613' },
-  metro: { nom: 'Metro', couleur: '#003da5' },
-  maxi: { nom: 'Maxi', couleur: '#ffcc00' },
-  costco: { nom: 'Costco', couleur: '#005daa' },
-  jean_coutu: { nom: 'Jean Coutu', couleur: '#0072ce' },
+  iga: { nom: 'IGA', couleur: '#d6001c', circulaire: 'https://www.iga.ca/fr/circulaire' },
+  super_c: { nom: 'Super C', couleur: '#e30613', circulaire: 'https://www.superc.ca/circulaire' },
+  metro: { nom: 'Metro', couleur: '#003da5', circulaire: 'https://www.metro.ca/circulaire' },
+  maxi: { nom: 'Maxi', couleur: '#ffcc00', circulaire: 'https://www.maxi.ca/fr/print-flyer' },
+  costco: { nom: 'Costco', couleur: '#005daa', circulaire: 'https://www.costco.ca/coupons.html' },
+  jean_coutu: { nom: 'Jean Coutu', couleur: '#0072ce', circulaire: 'https://www.jeancoutu.com/circulaire-en-ligne/' },
   // Ajoutés le 2026-11-16 avec l'accord de Chris (prix réels via épiceries.ca)
-  provigo: { nom: 'Provigo', couleur: '#e2231a' },
-  walmart: { nom: 'Walmart', couleur: '#0071ce' },
+  provigo: { nom: 'Provigo', couleur: '#e2231a', circulaire: 'https://www.provigo.ca/fr/print-flyer' },
+  walmart: { nom: 'Walmart', couleur: '#0071ce', circulaire: 'https://www.walmart.ca/fr/flyer' },
   // Commande en ligne seulement (épicerie en ligne d'IGA) : pas de succursale, pas dans les comparaisons en magasin.
   voila: { nom: 'Voilà (IGA en ligne)', couleur: '#6a1b9a', enLigneSeulement: true },
 };

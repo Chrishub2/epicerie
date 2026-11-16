@@ -9,6 +9,7 @@ import * as S from './store.js';
 import { esc, argent, nomBanniere, offresArticle } from './ui.js';
 import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normaliser } from './normalise.js';
 import * as P from './produits.js';
+import { BANNIERES } from './demo-data.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -25,7 +26,15 @@ function prixAttendu(a, banniere, varianteId) {
   const ici = offres.filter((o) => o.banniere === banniere).sort((x, y) => x.pu - y.pu)[0];
   const o = ici || offres[0];
   return o ? { pu: o.pu, uniteRef: o.uniteRef, prixArticle: autreVariante ? null : o.prixArticle, banniere: o.banniere, offre: o.offre, type: o.type,
-    fin: o.fin || null, source: o.source, observeLe: o.observeLe || null, ailleurs: !ici, autreVariante, produitAffiche: o.produitOffre || '' } : null;
+    fin: o.fin || null, source: o.source, observeLe: o.observeLe || null, ailleurs: !ici, autreVariante, produitAffiche: o.produitOffre || '',
+    preuve: preuveDe(o) } : null;
+}
+
+/** Ce qui permet de prouver le prix affiché à la caisse : où il a été vu, lien ou photo. */
+function preuveDe(o) {
+  return { prixId: o.id || null, source: o.source || null, type: o.type || null, fin: o.fin || null, observeLe: o.observeLe || null,
+    banniere: o.banniere, magasinNom: o.magasinNom || null, produit: o.produitOffre || o.nomProduit || null,
+    url: o.url || null, lienMarchand: o.lienMarchand || null, photoId: o.photoId || null, offre: o.offre || null };
 }
 
 /** « Prix affichés dans l'app » envoyés à l'IA pour qu'elle explique les écarts. */
@@ -78,7 +87,7 @@ function comparerPrix(l, ar, att, r) {
     if (att.source === 'demo') raisons.push('Le prix affiché était un prix de démonstration.');
     if (statut === 'plus' && !att.ailleurs) raisons.push('Si le prix à la caisse dépasse le prix affiché en magasin, la Politique d\'exactitude des prix s\'applique : article gratuit jusqu\'à 15 $, sinon 15 $ de rabais. Garde ton reçu.');
   }
-  return { ...base, statut, paye, attendu, ecart, unite, offreAffichee: att.offre, banniereAffichee: att.banniere, explication: raisons };
+  return { ...base, statut, paye, attendu, ecart, unite, offreAffichee: att.offre, banniereAffichee: att.banniere, preuve: att.preuve || null, explication: raisons };
 }
 
 const ECART_MAX = 0.10; // $ d'écart toléré entre la somme des lignes et le sous-total
@@ -407,8 +416,42 @@ export function htmlVerdictListe(v) {
   return `<div class="item-recu doux">🧾 Payé ${v.paye != null ? argent(v.paye) : esc(v.offrePayee || '?')} (${esc(ou)}) — aucun prix affiché pour comparer</div>`;
 }
 
+/**
+ * Preuve du prix affiché, pour la montrer à la caisse : d'où vient ce prix (photo d'étiquette,
+ * circulaire, site de l'enseigne, saisie, démo), avec le lien ou la photo quand on les a.
+ * Les anciens verdicts (sans « preuve ») retrouvent le prix par bannière + offre.
+ */
+function htmlPreuve(v, articleId) {
+  let pr = v.preuve;
+  if (!pr && articleId && v.banniereAffichee) {
+    const p = [...(S.get().prix || [])].reverse().find((x) => x.articleId === articleId && x.banniere === v.banniereAffichee && x.offre === v.offreAffichee);
+    if (p) pr = { prixId: p.id, source: p.source, type: p.type, fin: p.fin, observeLe: p.observeLe, banniere: p.banniere, magasinNom: p.magasinNom,
+      produit: p.nomProduit, url: p.url, lienMarchand: p.lienMarchand, photoId: p.photoId, offre: p.offre };
+  }
+  if (!pr) return '';
+  const ban = nomBanniere(pr.banniere);
+  const quand = pr.observeLe ? ` le ${esc(dateCourte(pr.observeLe))}` : '';
+  const lien = (url, texte) => `<a class="btn sec" href="${esc(url)}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;margin-top:6px">${texte}</a>`;
+  const morceaux = [];
+  if (pr.photoId) morceaux.push(`<p style="margin:4px 0">📷 <b>Photo de l'étiquette</b> prise${quand}${pr.magasinNom ? ` chez ${esc(pr.magasinNom)}` : ''} : c'est ta meilleure preuve à la caisse.</p><div class="vignettes" data-preuve-photo="${esc(pr.photoId)}"></div>`);
+  if (pr.type === 'circulaire') {
+    morceaux.push(`<p style="margin:4px 0">📰 Prix en <b>circulaire</b> chez ${esc(ban)}${pr.fin ? `, valide jusqu'au ${esc(dateCourte(pr.fin))}` : '.'}</p>`);
+    if (BANNIERES[pr.banniere]?.circulaire) morceaux.push(lien(BANNIERES[pr.banniere].circulaire, `📰 Ouvrir la circulaire ${esc(ban)}`));
+  }
+  if (pr.source === 'epiceries_ca') {
+    morceaux.push(`<p style="margin:4px 0">🌐 Prix du <b>site web de ${esc(ban)}</b>${pr.produit ? ` (${esc(pr.produit)})` : ''}, relevé${quand} par épiceries.ca.</p>`);
+    if (pr.lienMarchand) morceaux.push(lien(pr.lienMarchand, `🌐 Voir le produit sur le site de ${esc(ban)}`));
+    if (pr.url) morceaux.push(lien(pr.url, '📈 Fiche et historique sur épiceries.ca'));
+    morceaux.push('<p class="doux" style="margin:4px 0">Attention : la Politique d\'exactitude des prix vise le prix affiché <b>en magasin</b> (étiquette, circulaire). Un prix en ligne peut différer de celui de ta succursale.</p>');
+  }
+  if (pr.source === 'manuel') morceaux.push(`<p style="margin:4px 0">✍️ Prix <b>saisi à la main</b>${quand} — sans photo, ce n'est pas une preuve : vérifie l'étiquette en magasin.</p>`);
+  if (pr.source === 'demo') morceaux.push('<p style="margin:4px 0">🧪 Prix de <b>démonstration</b> : ce n\'est pas une preuve.</p>');
+  if (!morceaux.length) morceaux.push(`<p style="margin:4px 0">Prix vu chez ${esc(ban)}${quand}</p>`);
+  return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--ligne)"><b>🔎 Preuve du prix affiché</b>${morceaux.join('')}</div>`;
+}
+
 /** Bloc de la fiche produit : détail du dernier achat et explication de l'écart. */
-export function htmlDernierAchat(v) {
+export function htmlDernierAchat(v, articleId) {
   if (!v || v.absent) return '';
   const p = (x) => `${argent(x)}${v.unite || ''}`;
   const titre = v.statut === 'plus' ? '⚠️ Payé plus cher que le prix affiché' : v.statut === 'inconnu' ? '🧾 Dernier achat' : '✓ Payé le bon prix';
@@ -423,6 +466,7 @@ export function htmlDernierAchat(v) {
     ${v.explicationIA ? `<p style="margin:6px 0 0">🤖 <b>Explication (IA, d'après la facture)</b> : ${esc(v.explicationIA)}</p>` : ''}
     ${v.explication?.length ? `<ul style="margin:6px 0 0;padding-left:18px">${v.explication.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${v.statut === 'plus' && !v.explicationIA && !v.explication?.length ? '<p class="doux" style="margin:6px 0 0">Aucune explication évidente sur la facture : vérifie l\'étiquette en magasin.</p>' : ''}
+    ${v.statut === 'plus' ? htmlPreuve(v, articleId) : ''}
   </div>`;
 }
 

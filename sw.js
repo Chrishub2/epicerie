@@ -7,7 +7,7 @@
 // - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
 // À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
 // =====================================================================
-const CACHE = 'epicerie-v40';
+const CACHE = 'epicerie-v41';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'couverture.js', 'demo-data.js',
   'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
   'retouche.js', 'maj.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg',

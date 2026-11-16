@@ -31,14 +31,37 @@ export function surveillerMisesAJour() {
   });
 }
 
-function proposer(travailleur) {
+/**
+ * Numéro de version d'un service worker (« epicerie-v41 » → « v41 »). Il répond par le message VERSION ;
+ * on reconnaît sa réponse par sa source. null si pas de réponse en 2 s (très vieille version).
+ */
+export function versionDe(travailleur) {
+  if (!travailleur) return Promise.resolve(null);
+  return new Promise((ok) => {
+    const fin = (v) => { navigator.serviceWorker.removeEventListener('message', ecoute); clearTimeout(minuterie); ok(v); };
+    const ecoute = (ev) => { if (ev.data?.type === 'VERSION' && (!ev.source || ev.source === travailleur)) fin(String(ev.data.version || '').replace(/^epicerie-/, '') || null); };
+    const minuterie = setTimeout(() => fin(null), 2000);
+    navigator.serviceWorker.addEventListener('message', ecoute);
+    try { travailleur.postMessage({ type: 'VERSION' }); } catch { fin(null); }
+  });
+}
+
+/** Version en service sur ce téléphone (pour l'afficher dans Plus). */
+export function versionActuelle() {
+  return 'serviceWorker' in navigator ? versionDe(navigator.serviceWorker.controller) : Promise.resolve(null);
+}
+
+async function proposer(travailleur) {
   if (affichee) return;
   affichee = true;
+  const [actuelle, nouvelle] = await Promise.all([versionActuelle(), versionDe(travailleur)]);
+  const versions = nouvelle ? `<p><b>${actuelle ? `${actuelle} → ` : ''}${nouvelle}</b></p>` : '';
   const fond = document.createElement('div');
   fond.className = 'maj-fond';
   fond.innerHTML = `<div class="maj-boite" role="dialog" aria-modal="true" aria-labelledby="majTitre">
       <div style="font-size:30px">🔄</div>
       <h2 id="majTitre">Mise à jour disponible</h2>
+      ${versions}
       <p>Une nouvelle version de l'app est prête. Mettre à jour maintenant ?</p>
       <p class="doux">Tes données restent sur le téléphone et dans ton foyer.</p>
       <div class="rang"><button class="btn grandir" id="majOui">Oui</button><button class="btn sec grandir" id="majNon">Non</button></div>

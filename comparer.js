@@ -201,7 +201,10 @@ export function vueComparaison(v, rendre) {
     if (!articles.length) html += `<div class="vide">Rien à comparer.</div>`;
     else if (vue === 'tableau') html += matrice(articles);
     else for (const a of articles) {
-      html += `<div class="carte" data-art="${a.id}" style="cursor:pointer"><h3 class="rang">${a.imageUrl ? `<img class="vignette" src="${esc(a.imageUrl)}" alt="">` : ''}<span class="grandir">${esc(a.nom)} ${a.local ? '🍁' : ''} <span class="doux">· comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef === 'kg' ? 'kilo' : 'litre'}</span></span></h3>${tableauOffres(a)}</div>`;
+      // En-tête identique pour chaque produit : image · nom · format et unité de comparaison
+      html += `<div class="carte" data-art="${a.id}" style="cursor:pointer"><div class="cel-produit" style="margin-bottom:8px">${vignetteProduit(a, 48)}
+        <div class="grandir"><div class="cel-nom" style="font-size:16px">${esc(a.nom)}${a.local ? ' 🍁' : ''}</div>
+        <div class="cel-prix">${esc(formatLisible(a.format) || 'format ?')} · comparé ${a.uniteRef === 'unite' ? 'à l\'unité' : a.uniteRef === 'kg' ? 'au kilo' : 'au litre'}</div></div></div>${tableauOffres(a)}</div>`;
     }
   }
 
@@ -254,6 +257,20 @@ export function logoCleHtml(k) {
   return logoVille(k);
 }
 
+/** Image du produit, ou sa première lettre dans une case grise (même place pour tous). */
+export function vignetteProduit(a, taille = 40) {
+  return a.imageUrl
+    ? `<img class="vignette-fixe" src="${esc(a.imageUrl)}" alt="" style="width:${taille}px;height:${taille}px" onerror="this.removeAttribute('src');this.classList.add('vignette-vide')">`
+    : `<span class="vignette-fixe vignette-vide" style="width:${taille}px;height:${taille}px">${esc((a.nom || '?')[0].toUpperCase())}</span>`;
+}
+
+/** Colonne « Aliment » : image, nom, puis format et unité de comparaison — toujours au même endroit. */
+function celluleProduit(a) {
+  const unite = a.uniteRef === 'unite' ? 'à l\'unité' : a.uniteRef === 'kg' ? 'au kg' : 'au litre';
+  return `<div class="cel-produit">${vignetteProduit(a, 36)}<div><div class="cel-nom">${esc(a.nom)}${a.local ? ' 🍁' : ''}</div>
+    <div class="cel-prix">${esc(formatLisible(a.format) || 'format ?')} · ${unite}</div></div></div>`;
+}
+
 /** Tableau : une ligne par aliment, une colonne par bannière ; vert = moins cher, rouge = plus cher. */
 function matrice(articles) {
   const offres = articles.map((a) => ({ a, os: offresArticle(a) }));
@@ -265,15 +282,19 @@ function matrice(articles) {
     <tbody>${offres.map(({ a, os }) => {
       const parCle = {};
       for (const o of os) { if (o.pu == null) continue; const k = cleOffre(o); if (!parCle[k] || o.pu < parCle[k].pu) parCle[k] = o; }
-      return `<tr><th data-art="${a.id}">${a.imageUrl ? `<img class="vignette petite" src="${esc(a.imageUrl)}" alt="" style="float:right;margin-left:4px">` : ''}${esc(a.nom)}${a.local ? ' 🍁' : ''}<div class="doux">${esc(formatLisible(a.format) || '')}</div></th>${cles.map((k) => {
+      return `<tr><th data-art="${a.id}">${celluleProduit(a)}</th>${cles.map((k) => {
         const o = parCle[k];
-        if (!o) return '<td class="vide-cel">—</td>';
+        if (!o) return '<td class="vide-cel"><div class="cel-pu">—</div></td>';
+        // Toujours les mêmes 3 lignes, dans le même ordre : ① prix comparable (au kg/L/unité) ② prix payé · format ③ rabais / fin
         const affiche = o.perso && o.prixArticle != null ? argent(o.prixArticle) : o.offre;
-        const prix = affiche + (o.format ? ` / ${formatLisible(o.format)}` : '');
-        return `<td class="${o.classe}"><b>${esc(prix)}</b>${o.economie ? `<div style="color:var(--vert)">(−${argent(o.economie)})</div>` : ''}${o.perso ? `<div class="doux">${esc(o.offre)} ${esc(o.rabaisTexte.split(' (')[0])}</div>` : ''}<div>${esc(libelleUnitaire(o.pu, o.uniteRef).split(' · ')[0])}</div>${o.fin ? `<div class="doux">${libelleFin(o.fin)}</div>` : ''}</td>`;
+        const note = [o.economie ? `−${argent(o.economie)}` : '', o.perso ? o.rabaisTexte.split(' (')[0] : '', o.fin ? libelleFin(o.fin) : ''].filter(Boolean).join(' · ');
+        return `<td class="${o.classe}"><div class="cel-pu">${esc(libelleUnitaire(o.pu, o.uniteRef).split(' · ')[0])}</div>
+          <div class="cel-prix">${esc(affiche)}${o.format ? ` · ${esc(formatLisible(o.format))}` : ''}</div>
+          ${o.produitOffre ? `<div class="cel-prix">${esc(o.produitOffre)}</div>` : ''}
+          <div class="cel-note">${esc(note) || '&nbsp;'}</div></td>`;
       }).join('')}</tr>`;
     }).join('')}</tbody></table></div>
-    <p class="doux">Vert = le moins cher · rouge = le plus cher (au même format) · (−x $) = économie sur le prix régulier. Glisse le tableau vers la gauche pour voir toutes les bannières.</p>`;
+    <p class="doux">Dans chaque case : <b>prix comparable</b> (au kg, au litre ou à l'unité), puis prix et format, puis rabais. Vert = le moins cher · rouge = le plus cher. Glisse le tableau vers la gauche pour voir toutes les bannières.</p>`;
 }
 
 // ---------------------------------------------------------------------
