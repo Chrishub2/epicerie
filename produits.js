@@ -333,13 +333,22 @@ export function varianteDeLAchat(a, { codes = [], banniere, libelle, marque, for
 // ---------------------------------------------------------------------
 // Fiche complète ? (v42 : catalogue)
 // ---------------------------------------------------------------------
+const estPrixReel = (p) => p.source !== 'demo' && !p.annule && !p.enAttente;
+/** Index en une passe : Set des articleId qui ont au moins un vrai prix (pas démo, pas annulé, pas en attente). */
+export function articlesAvecPrixReel(prix) {
+  const s = new Set();
+  for (const p of prix || []) if (estPrixReel(p)) s.add(p.articleId);
+  return s;
+}
 /**
  * Les 6 données de base d'une fiche, et ce qui manque. Une fiche « complète » peut être
  * comparée (format + vrai prix), reconnue au scan et aux reçus (code + marque), et retrouvée (photo, rayon).
  * Retourne { ok, total, manquants:[{cle, icone, texte}], alertes:[texte] }.
+ * opts.prixReels (facultatif) : Set d'articleId ayant un vrai prix, de articlesAvecPrixReel(e.prix).
+ * À passer quand on évalue tout le catalogue : évite de reparcourir tous les prix pour chaque fiche.
  */
-export function completude(a, e) {
-  const prixReel = (e.prix || []).some((p) => p.articleId === a.id && p.source !== 'demo' && !p.annule && !p.enAttente);
+export function completude(a, e, opts = {}) {
+  const prixReel = opts.prixReels ? opts.prixReels.has(a.id) : (e.prix || []).some((p) => p.articleId === a.id && estPrixReel(p));
   const rayon = (e.rayons || []).find((r) => r.id === a.rayonId);
   const f = analyserFormat(a.format);
   const criteres = [
