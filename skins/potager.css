@@ -1,0 +1,56 @@
+/* Skin « Potager » — maquette n° 4 : vert sauge, accent betterave, titres en italique.
+   Clair + sombre. Polices : Fraunces (titres) + Manrope (texte). */
+
+:root[data-skin="potager"] {
+  --fond: #eef3ea; --carte: #ffffff; --texte: #1f3d2b; --doux: #536756; --ligne: #cfdccb;
+  --accent: #8e2c55; --accent-doux: #f6e4ec;
+  --vert: #2f6b3f; --vert-fond: #dcebd8; --ambre: #8a5a00; --ambre-fond: #f7ebcc;
+  --rouge: #a3252b; --rouge-fond: #f8e1df; --gris-fond: #e4ece0;
+  --ombre: none;
+  --skin-entete: #1f3d2b; --skin-entete-texte: #f4f7f1;
+  --police-texte: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-titre: "Fraunces", Georgia, "Times New Roman", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="potager"]:not([data-theme="light"]) {
+    --fond: #111a14; --carte: #18241c; --texte: #e6efe7; --doux: #9fb3a3; --ligne: #2a3a2f;
+    --accent: #e78bb0; --accent-doux: #3a1d2a;
+    --vert: #8fd19e; --vert-fond: #1c3323; --ambre: #e9c46a; --ambre-fond: #3a2f12;
+    --rouge: #ff8f86; --rouge-fond: #3b1d1b; --gris-fond: #1f2c23;
+    --skin-entete: #18241c;
+  }
+}
+/* Sombre choisi dans l'app (Plus → Apparence → Sombre), même si le téléphone est en clair */
+:root[data-skin="potager"][data-theme="dark"] {
+  --fond: #111a14; --carte: #18241c; --texte: #e6efe7; --doux: #9fb3a3; --ligne: #2a3a2f;
+  --accent: #e78bb0; --accent-doux: #3a1d2a;
+  --vert: #8fd19e; --vert-fond: #1c3323; --ambre: #e9c46a; --ambre-fond: #3a2f12;
+  --rouge: #ff8f86; --rouge-fond: #3b1d1b; --gris-fond: #1f2c23;
+  --skin-entete: #18241c;
+  color-scheme: dark;
+}
+
+:root[data-skin="potager"] body { font-family: var(--police-texte); }
+:root[data-skin="potager"] h1,
+:root[data-skin="potager"] h2,
+:root[data-skin="potager"] .total { font-family: var(--police-titre); font-weight: 500; }
+:root[data-skin="potager"] h2 { font-size: 19px; }
+
+:root[data-skin="potager"] header { background: var(--skin-entete); color: var(--skin-entete-texte); padding-bottom: 14px; }
+:root[data-skin="potager"] header h1 { font-style: italic; font-weight: 400; font-size: 24px; }
+:root[data-skin="potager"] header select { width: auto; max-width: 45%; border-radius: 999px; }
+
+/* Liste élégante : filets fins plutôt que boîtes */
+:root[data-skin="potager"] .item { border: 0; border-bottom: 1px solid var(--ligne); border-radius: 0; background: transparent;
+  padding: 12px 4px; margin-bottom: 0; }
+:root[data-skin="potager"] .item .nom { font-weight: 600; }
+:root[data-skin="potager"] .carte { border-radius: 20px; }
+:root[data-skin="potager"] .rayon > h3 { color: var(--accent); font-size: 11px; letter-spacing: 0.12em; }
+:root[data-skin="potager"] .total { font-size: 22px; }
+
+:root[data-skin="potager"] .pastille { background: transparent; border: 1.5px solid currentColor; }
+:root[data-skin="potager"] button.btn { border-radius: 999px; padding: 9px 16px; }
+:root[data-skin="potager"] button.btn.sec { background: transparent; border: 1.5px solid var(--accent); }
+
+:root[data-skin="potager"] nav.onglets button.actif { color: var(--accent); }
+:root[data-skin="potager"] nav.onglets button.actif span { transform: scale(1.1); }

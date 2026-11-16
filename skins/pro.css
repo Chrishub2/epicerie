@@ -1,0 +1,71 @@
+/* Skin « Professionnel » — maquette n° 1.
+   S'active avec <html data-skin="pro">. Ne touche qu'à l'apparence : mêmes classes que index.html.
+   Polices : Inter (texte) + IBM Plex Mono (prix), chargées par skins.js ; repli système hors ligne. */
+
+:root[data-skin="pro"] {
+  --fond: #f4f6f8; --carte: #ffffff; --texte: #12161c; --doux: #5b6472; --ligne: #e2e5ea;
+  --accent: #0e7c66; --accent-doux: #e3f3ef;
+  --vert: #0e7c66; --vert-fond: #e3f3ef; --ambre: #b43c0b; --ambre-fond: #fff0e6;
+  --rouge: #b42318; --rouge-fond: #fdecea; --gris-fond: #eef0f3;
+  --ombre: none;
+  --skin-entete-fond: #ffffff; --skin-entete-texte: #12161c;
+  --police-texte: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-chiffres: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="pro"]:not([data-theme="light"]) {
+    --fond: #0f1216; --carte: #171b21; --texte: #e8ebef; --doux: #98a1ae; --ligne: #262c35;
+    --accent: #3cc2a2; --accent-doux: #13302a;
+    --vert: #3cc2a2; --vert-fond: #13302a; --ambre: #ff9a5c; --ambre-fond: #3a2215;
+    --rouge: #ff7a6b; --rouge-fond: #3b1d19; --gris-fond: #1f242b;
+    --skin-entete-fond: #171b21; --skin-entete-texte: #e8ebef;
+  }
+}
+/* Sombre choisi dans l'app (Plus → Apparence → Sombre), même si le téléphone est en clair */
+:root[data-skin="pro"][data-theme="dark"] {
+  --fond: #0f1216; --carte: #171b21; --texte: #e8ebef; --doux: #98a1ae; --ligne: #262c35;
+  --accent: #3cc2a2; --accent-doux: #13302a;
+  --vert: #3cc2a2; --vert-fond: #13302a; --ambre: #ff9a5c; --ambre-fond: #3a2215;
+  --rouge: #ff7a6b; --rouge-fond: #3b1d19; --gris-fond: #1f242b;
+  --skin-entete-fond: #171b21; --skin-entete-texte: #e8ebef;
+  color-scheme: dark;
+}
+
+:root[data-skin="pro"] body { font-family: var(--police-texte); letter-spacing: -0.005em; }
+
+/* En-tête sobre, blanc, avec filet */
+:root[data-skin="pro"] header { background: var(--skin-entete-fond); color: var(--skin-entete-texte);
+  border-bottom: 1px solid var(--ligne); }
+:root[data-skin="pro"] header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+:root[data-skin="pro"] header select { background: var(--gris-fond); color: var(--texte); border-color: var(--ligne);
+  width: auto; max-width: 45%; }
+:root[data-skin="pro"] .bandeau-demo { font-size: 12px; font-weight: 500; }
+
+/* Titres de section */
+:root[data-skin="pro"] h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+:root[data-skin="pro"] .rayon > h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; }
+
+/* Cartes et articles : bordure fine, pas d'ombre */
+:root[data-skin="pro"] .carte { border-radius: 12px; }
+:root[data-skin="pro"] .item { border-radius: 10px; padding: 11px 14px; }
+:root[data-skin="pro"] .item .nom { font-weight: 600; font-size: 15px; }
+
+/* Les chiffres en monospace alignés (prix, totaux, tableaux) */
+:root[data-skin="pro"] .total,
+:root[data-skin="pro"] table.comp td.pu,
+:root[data-skin="pro"] table.matrice td,
+:root[data-skin="pro"] .qte { font-family: var(--police-chiffres); font-variant-numeric: tabular-nums; }
+:root[data-skin="pro"] .total { font-size: 17px; }
+
+/* Pastilles de rabais : petites étiquettes carrées */
+:root[data-skin="pro"] .pastille { border-radius: 4px; font-weight: 600; }
+
+/* Boutons */
+:root[data-skin="pro"] button.btn { border-radius: 8px; font-weight: 600; }
+:root[data-skin="pro"] button.icone { border-radius: 8px; }
+
+/* Barre d'onglets : icônes en gris, l'onglet actif en couleur */
+:root[data-skin="pro"] nav.onglets { border-top-color: var(--ligne); }
+:root[data-skin="pro"] nav.onglets button span { filter: grayscale(1); opacity: 0.55; transition: opacity .15s; }
+:root[data-skin="pro"] nav.onglets button.actif span { filter: none; opacity: 1; }
+:root[data-skin="pro"] nav.onglets button.actif { color: var(--accent); }

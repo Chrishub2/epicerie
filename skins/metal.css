@@ -1,0 +1,52 @@
+/* Skin « Métallisé » — maquette n° 8 : acier brossé, boutons chromés, rabais en cuivre.
+   Sombre seulement (look assumé). Polices : Michroma (titres) + Barlow (texte) + Share Tech Mono (prix). */
+
+:root[data-skin="metal"] {
+  color-scheme: dark;
+  --fond: #1a1d21; --carte: #2a2e34; --texte: #e6e9ed; --doux: #9aa1aa; --ligne: #3a3f46;
+  --accent: #d9dde1; --accent-doux: #353a41;
+  --vert: #9fd8b5; --vert-fond: #23332a; --ambre: #f0c793; --ambre-fond: #4a3220;
+  --rouge: #ff8f86; --rouge-fond: #45201d; --gris-fond: #30353c;
+  --ombre: inset 0 1px 0 rgba(255,255,255,.08);
+  --skin-cuivre: #c98a4b;
+  --skin-chrome: linear-gradient(180deg, #f2f4f6 0%, #b9bec5 50%, #dadde1 100%);
+  --police-texte: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-titre: "Michroma", "Barlow", system-ui, sans-serif;
+  --police-chiffres: "Share Tech Mono", ui-monospace, Consolas, monospace;
+}
+
+:root[data-skin="metal"] body { font-family: var(--police-texte);
+  background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0, rgba(255,255,255,.025) 1px, transparent 1px, transparent 3px); }
+:root[data-skin="metal"] h1,
+:root[data-skin="metal"] h2 { font-family: var(--police-titre); font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; }
+:root[data-skin="metal"] h2 { font-size: 14px; }
+
+:root[data-skin="metal"] header { background: linear-gradient(180deg, #2e3238, #1a1d21); color: #f2f4f6;
+  border-bottom: 1px solid #50565e; }
+:root[data-skin="metal"] header h1 { font-size: 18px; text-shadow: 0 1px 0 #000; }
+:root[data-skin="metal"] header select { background: var(--skin-chrome); color: #1b1e22; border: 1px solid #5a6068;
+  width: auto; max-width: 45%; font-weight: 600; }
+
+:root[data-skin="metal"] .carte,
+:root[data-skin="metal"] .item,
+:root[data-skin="metal"] .reorg li,
+:root[data-skin="metal"] .tableau-wrap { background: linear-gradient(180deg, #2c3036 0%, #23272c 100%); border-radius: 8px; }
+:root[data-skin="metal"] .item .info,
+:root[data-skin="metal"] .total,
+:root[data-skin="metal"] .qte,
+:root[data-skin="metal"] table.comp td.pu,
+:root[data-skin="metal"] table.matrice td { font-family: var(--police-chiffres); }
+:root[data-skin="metal"] .rayon > h3 { font-family: var(--police-chiffres); color: var(--doux); }
+:root[data-skin="metal"] .total { font-size: 19px; }
+
+:root[data-skin="metal"] .pastille.ambre,
+:root[data-skin="metal"] .pastille.rouge { background: linear-gradient(180deg, #f0c793, var(--skin-cuivre)); color: #1b1e22; font-weight: 700; border-radius: 4px; }
+:root[data-skin="metal"] button.btn { background: var(--skin-chrome); color: #1b1e22; border: 1px solid #5a6068;
+  box-shadow: inset 0 1px 0 #fff, 0 4px 10px rgba(0,0,0,.4); font-family: var(--police-titre); font-weight: 400; font-size: 13px; letter-spacing: 0.06em; }
+:root[data-skin="metal"] button.btn.sec { background: #353a41; color: var(--texte); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
+:root[data-skin="metal"] button.btn.danger { background: linear-gradient(180deg, #f0c793, var(--skin-cuivre)); color: #1b1e22; }
+
+:root[data-skin="metal"] nav.onglets { background: linear-gradient(180deg, #2a2e34, #16191c); border-top: 1px solid #50565e; }
+:root[data-skin="metal"] nav.onglets button span { filter: grayscale(1); opacity: 0.6; }
+:root[data-skin="metal"] nav.onglets button.actif { color: #f2f4f6; }
+:root[data-skin="metal"] nav.onglets button.actif span { filter: grayscale(.3); opacity: 1; }

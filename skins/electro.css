@@ -1,0 +1,47 @@
+/* Skin « Électronique » — maquette n° 9 : circuit imprimé vert, puces noires, total sur écran ACL.
+   Sombre seulement (look assumé). Polices : VT323 (écran ACL) + IBM Plex Mono (texte). */
+
+:root[data-skin="electro"] {
+  color-scheme: dark;
+  --fond: #0c3a25; --carte: #141614; --texte: #e7f2ea; --doux: #a9b4ac; --ligne: #1e6b45;
+  --accent: #5dff8f; --accent-doux: #12301f;
+  --vert: #5dff8f; --vert-fond: #12301f; --ambre: #ffb43d; --ambre-fond: #3a2a0c;
+  --rouge: #ff6b5e; --rouge-fond: #3a1714; --gris-fond: #1d211d;
+  --ombre: 0 3px 0 #062416;
+  --skin-acl: #a8c49a; --skin-acl-texte: #1b2a17; --skin-or: #e8c170;
+  --police-texte: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --police-acl: "VT323", "IBM Plex Mono", monospace;
+}
+
+:root[data-skin="electro"] body { font-family: var(--police-texte); font-size: 15px; }
+:root[data-skin="electro"] h1,
+:root[data-skin="electro"] h2 { text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+
+:root[data-skin="electro"] header { background: #082a1a; color: var(--texte); border-bottom: 2px solid var(--ligne); }
+:root[data-skin="electro"] header h1 { font-size: 17px; }
+:root[data-skin="electro"] header select { background: var(--carte); color: var(--texte); border-color: var(--doux);
+  width: auto; max-width: 45%; }
+
+/* Les articles sont des « puces » noires avec des broches en haut et en bas */
+:root[data-skin="electro"] .item,
+:root[data-skin="electro"] .reorg li { background: var(--carte); border: 0; border-radius: 4px;
+  border-top: 4px dotted #b8bcb8; border-bottom: 4px dotted #b8bcb8; }
+:root[data-skin="electro"] .carte,
+:root[data-skin="electro"] .tableau-wrap { border-color: var(--ligne); border-radius: 6px; box-shadow: var(--ombre); }
+:root[data-skin="electro"] .rayon > h3 { color: var(--skin-or); }
+:root[data-skin="electro"] .item input[type=checkbox] { accent-color: var(--accent); }
+
+/* Total : écran ACL de calculatrice */
+:root[data-skin="electro"] .total { background: var(--skin-acl); color: var(--skin-acl-texte); font-family: var(--police-acl);
+  font-size: 26px; font-weight: 400; padding: 4px 12px; border-radius: 6px; box-shadow: inset 0 2px 6px rgba(0,0,0,.35); }
+:root[data-skin="electro"] table.comp td.pu,
+:root[data-skin="electro"] table.matrice td { font-family: var(--police-acl); font-size: 18px; }
+
+:root[data-skin="electro"] .pastille.vert { box-shadow: 0 0 8px var(--vert); }
+:root[data-skin="electro"] .pastille.ambre { box-shadow: 0 0 8px var(--ambre); }
+:root[data-skin="electro"] button.btn { background: var(--accent); color: #082a1a; border-radius: 4px; }
+:root[data-skin="electro"] button.btn.sec { background: var(--accent-doux); color: var(--accent); }
+
+:root[data-skin="electro"] nav.onglets { background: #141614; border-top: 2px solid var(--ligne); }
+:root[data-skin="electro"] nav.onglets button.actif { color: var(--accent); }
+:root[data-skin="electro"] nav.onglets button.actif span { filter: drop-shadow(0 0 6px var(--accent)); }

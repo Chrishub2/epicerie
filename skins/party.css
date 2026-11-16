@@ -1,0 +1,44 @@
+/* Skin « Party » — maquette n° 6 : fond nuit, néons magenta / lime / cyan.
+   Sombre seulement (look assumé). Polices : Bricolage Grotesque + Space Mono. */
+
+:root[data-skin="party"] {
+  color-scheme: dark;
+  --fond: #14061f; --carte: #24102f; --texte: #ffffff; --doux: #c8b6d6; --ligne: #5b3a70;
+  --accent: #ff2e93; --accent-doux: #3a1f4d;
+  --vert: #c6ff3d; --vert-fond: #26331a; --ambre: #ffc83d; --ambre-fond: #3d2a0a;
+  --rouge: #ff6b8e; --rouge-fond: #3f1426; --gris-fond: #2e1840;
+  --ombre: none;
+  --skin-cyan: #29e0ff; --skin-lime: #c6ff3d;
+  --police-texte: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-chiffres: "Space Mono", ui-monospace, Consolas, monospace;
+}
+
+:root[data-skin="party"] body { font-family: var(--police-texte); }
+:root[data-skin="party"] h1,
+:root[data-skin="party"] h2 { font-weight: 800; letter-spacing: -0.02em; }
+
+:root[data-skin="party"] header { background: var(--fond); color: var(--texte); border-bottom: 3px solid var(--accent); }
+:root[data-skin="party"] header h1 { font-size: 26px; color: var(--accent); }
+:root[data-skin="party"] header select { background: var(--skin-cyan); color: #14061f; border: 0; font-weight: 700;
+  width: auto; max-width: 45%; font-family: var(--police-chiffres); }
+:root[data-skin="party"] .bandeau-demo { background: var(--skin-lime); color: #14061f; font-weight: 700; }
+
+:root[data-skin="party"] .item,
+:root[data-skin="party"] .reorg li { border: 1.5px dashed var(--ligne); border-radius: 14px; }
+:root[data-skin="party"] .carte { border: 1.5px solid var(--ligne); border-radius: 16px; }
+:root[data-skin="party"] .item .info,
+:root[data-skin="party"] .doux,
+:root[data-skin="party"] .total,
+:root[data-skin="party"] table.comp td.pu { font-family: var(--police-chiffres); }
+:root[data-skin="party"] .rayon > h3 { color: var(--skin-cyan); font-family: var(--police-chiffres); }
+:root[data-skin="party"] .total { font-size: 18px; color: var(--skin-lime); }
+
+:root[data-skin="party"] .pastille.ambre,
+:root[data-skin="party"] .pastille.rouge { background: var(--accent); color: #14061f; font-weight: 800; transform: rotate(-3deg); }
+:root[data-skin="party"] button.btn { background: var(--accent); color: #14061f; font-weight: 800; border-radius: 14px; }
+:root[data-skin="party"] button.btn.sec { background: var(--accent-doux); color: var(--skin-cyan); }
+:root[data-skin="party"] .item input[type=checkbox] { accent-color: var(--skin-lime); }
+
+:root[data-skin="party"] nav.onglets { background: #1c0a2a; border-top: 1px solid var(--ligne); }
+:root[data-skin="party"] nav.onglets button.actif { color: var(--skin-lime); }
+:root[data-skin="party"] nav.onglets button.actif span { filter: drop-shadow(0 0 6px var(--accent)); }

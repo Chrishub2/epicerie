@@ -1,0 +1,63 @@
+/* Skin « Doux » — maquette n° 5 : pastels lavande et pêche, coins très arrondis, ombres légères.
+   Clair + sombre. Polices : Quicksand (titres) + Nunito Sans (texte). */
+
+:root[data-skin="doux"] {
+  --fond: #f5f1fa; --carte: #ffffff; --texte: #3b3352; --doux: #6a6182; --ligne: #ece5f5;
+  --accent: #7a5cc9; --accent-doux: #ece5fb;
+  --vert: #2f7d63; --vert-fond: #ddf3ea; --ambre: #9a4d2f; --ambre-fond: #ffe7dc;
+  --rouge: #a8324a; --rouge-fond: #fde3ea; --gris-fond: #f1ecf8;
+  --ombre: 0 8px 24px rgba(106, 79, 179, 0.08);
+  --police-texte: "Nunito Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-titre: "Quicksand", "Nunito Sans", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="doux"]:not([data-theme="light"]) {
+    --fond: #1d1a26; --carte: #272335; --texte: #ece6f7; --doux: #b3a9c9; --ligne: #352f47;
+    --accent: #b9a3f2; --accent-doux: #342b4f;
+    --vert: #8ad9bb; --vert-fond: #1f3830; --ambre: #f5b49b; --ambre-fond: #3d2a24;
+    --rouge: #f59ab0; --rouge-fond: #3d2130; --gris-fond: #2e2940;
+    --ombre: 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+}
+/* Sombre choisi dans l'app (Plus → Apparence → Sombre), même si le téléphone est en clair */
+:root[data-skin="doux"][data-theme="dark"] {
+  --fond: #1d1a26; --carte: #272335; --texte: #ece6f7; --doux: #b3a9c9; --ligne: #352f47;
+  --accent: #b9a3f2; --accent-doux: #342b4f;
+  --vert: #8ad9bb; --vert-fond: #1f3830; --ambre: #f5b49b; --ambre-fond: #3d2a24;
+  --rouge: #f59ab0; --rouge-fond: #3d2130; --gris-fond: #2e2940;
+  --ombre: 0 8px 24px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+:root[data-skin="doux"] body { font-family: var(--police-texte); }
+:root[data-skin="doux"] h1,
+:root[data-skin="doux"] h2,
+:root[data-skin="doux"] h3,
+:root[data-skin="doux"] .total { font-family: var(--police-titre); font-weight: 700; }
+
+:root[data-skin="doux"] header { background: var(--fond); color: var(--texte); }
+:root[data-skin="doux"] header h1 { font-size: 24px; }
+:root[data-skin="doux"] header select { background: var(--carte); color: var(--texte); border: 0; border-radius: 999px;
+  box-shadow: var(--ombre); width: auto; max-width: 45%; }
+:root[data-skin="doux"] .bandeau-demo { margin: 0 16px; border-radius: 16px; }
+
+:root[data-skin="doux"] .carte,
+:root[data-skin="doux"] .item,
+:root[data-skin="doux"] .reorg li,
+:root[data-skin="doux"] .tableau-wrap { border: 0; border-radius: 22px; box-shadow: var(--ombre); }
+:root[data-skin="doux"] .item { padding: 12px 14px; margin-bottom: 8px; }
+:root[data-skin="doux"] .alerte { border-radius: 18px; }
+:root[data-skin="doux"] .rayon > h3 { text-transform: none; font-size: 15px; letter-spacing: 0; color: var(--texte); }
+
+:root[data-skin="doux"] .pastille { border-radius: 999px; padding: 2px 9px; }
+:root[data-skin="doux"] button.btn { border-radius: 999px; padding: 10px 18px; }
+:root[data-skin="doux"] button.icone,
+:root[data-skin="doux"] .qte button { border: 0; border-radius: 50%; background: var(--gris-fond); }
+:root[data-skin="doux"] input,
+:root[data-skin="doux"] select,
+:root[data-skin="doux"] textarea { border-radius: 16px; }
+
+:root[data-skin="doux"] nav.onglets { margin: 0 12px calc(10px + env(safe-area-inset-bottom)); left: 0; right: 0; border: 0;
+  border-radius: 999px; box-shadow: var(--ombre); padding: 4px; }
+:root[data-skin="doux"] nav.onglets button { border-radius: 999px; padding: 6px 0 8px; }
+:root[data-skin="doux"] nav.onglets button.actif { background: var(--accent-doux); color: var(--accent); }

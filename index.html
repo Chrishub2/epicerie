@@ -299,7 +299,22 @@ video.scan { width: 100%; border-radius: 10px; background: #000; aspect-ratio: 4
 .total { display: flex; justify-content: space-between; font-weight: 600; padding: 6px 0; }
 a { color: var(--accent); }
 .cache { display: none !important; }
+.cache-radio:focus-visible + .tuile-skin { outline: 3px solid var(--accent); outline-offset: 2px; }
 </style>
+<!-- Skins (apparence) : chaque fichier ne s'applique que si <html data-skin="..."> correspond. -->
+<link rel="stylesheet" href="skins/pro.css">
+<link rel="stylesheet" href="skins/etiquette.css">
+<link rel="stylesheet" href="skins/ludique.css">
+<link rel="stylesheet" href="skins/potager.css">
+<link rel="stylesheet" href="skins/doux.css">
+<link rel="stylesheet" href="skins/party.css">
+<link rel="stylesheet" href="skins/futuriste.css">
+<link rel="stylesheet" href="skins/metal.css">
+<link rel="stylesheet" href="skins/electro.css">
+<link rel="stylesheet" href="skins/musique.css">
+<link rel="stylesheet" href="skins/sport.css">
+<script>/* Pose le skin choisi avant l'affichage, pour éviter un flash de l'apparence d'origine. */
+try { var s = localStorage.getItem('epicerie.skin'); if (s && s !== 'classique') document.documentElement.setAttribute('data-skin', s); } catch (e) {}</script>
 </head>
 <body>
 <header>
@@ -317,5 +332,6 @@ a { color: var(--accent); }
 </nav>
 <dialog id="modale"><div class="tete"><h2 id="modaleTitre"></h2><button class="icone" id="modaleFermer" aria-label="Fermer">✕</button></div><div class="corps" id="modaleCorps"></div></dialog>
 <script type="module" src="app.js"></script>
+<script type="module">import { appliquerSkin, skinActuel } from './skins/skins.js'; appliquerSkin(skinActuel());</script>
 </body>
 </html>

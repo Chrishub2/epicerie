@@ -1,0 +1,58 @@
+/* Skin « Sport » — maquette n° 11 : tableau de pointage marine, rouge d'équipe, titres condensés.
+   Clair + sombre. Polices : Anton (titres, totaux) + Barlow Condensed (texte). */
+
+:root[data-skin="sport"] {
+  --fond: #eef2f6; --carte: #ffffff; --texte: #0b1f3a; --doux: #4e5f78; --ligne: #d3dbe5;
+  --accent: #d7263d; --accent-doux: #fbe3e6;
+  --vert: #157a45; --vert-fond: #dcf2e5; --ambre: #9a5b00; --ambre-fond: #fff0cf;
+  --rouge: #b51c30; --rouge-fond: #fbe3e6; --gris-fond: #e4eaf1;
+  --ombre: none;
+  --skin-marine: #0b1f3a; --skin-or: #ffd23f;
+  --police-texte: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --police-titre: "Anton", "Impact", "Arial Narrow", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="sport"]:not([data-theme="light"]) {
+    --fond: #071426; --carte: #0f2340; --texte: #eef2f6; --doux: #a9b8cc; --ligne: #1d3556;
+    --accent: #ff4d63; --accent-doux: #3a1520;
+    --vert: #5fd99a; --vert-fond: #12301f; --ambre: #ffd23f; --ambre-fond: #3a2f0a;
+    --rouge: #ff6b7d; --rouge-fond: #3a1520; --gris-fond: #142b4c;
+  }
+}
+/* Sombre choisi dans l'app (Plus → Apparence → Sombre), même si le téléphone est en clair */
+:root[data-skin="sport"][data-theme="dark"] {
+  --fond: #071426; --carte: #0f2340; --texte: #eef2f6; --doux: #a9b8cc; --ligne: #1d3556;
+  --accent: #ff4d63; --accent-doux: #3a1520;
+  --vert: #5fd99a; --vert-fond: #12301f; --ambre: #ffd23f; --ambre-fond: #3a2f0a;
+  --rouge: #ff6b7d; --rouge-fond: #3a1520; --gris-fond: #142b4c;
+  color-scheme: dark;
+}
+
+:root[data-skin="sport"] body { font-family: var(--police-texte); font-size: 17px; font-weight: 500; }
+:root[data-skin="sport"] h1,
+:root[data-skin="sport"] h2,
+:root[data-skin="sport"] .total { font-family: var(--police-titre); font-weight: 400; text-transform: uppercase; letter-spacing: 0.01em; }
+:root[data-skin="sport"] h2 { font-size: 20px; }
+
+:root[data-skin="sport"] header { background: var(--skin-marine); color: #ffffff; border-bottom: 6px solid var(--accent); }
+:root[data-skin="sport"] header h1 { font-size: 26px; }
+:root[data-skin="sport"] header select { background: #061428; color: #ffffff; border: 1px solid #a9b8cc;
+  border-radius: 4px; width: auto; max-width: 45%; font-weight: 700; }
+
+:root[data-skin="sport"] .item,
+:root[data-skin="sport"] .reorg li { border: 0; border-left: 5px solid var(--texte); border-radius: 8px; }
+:root[data-skin="sport"] .item .nom { font-weight: 700; font-size: 17px; }
+:root[data-skin="sport"] .carte { border-radius: 10px; }
+:root[data-skin="sport"] .rayon > h3 { font-family: var(--police-titre); font-weight: 400; color: var(--texte); font-size: 16px; letter-spacing: 0.02em; }
+:root[data-skin="sport"] .total { font-size: 24px; color: var(--accent); }
+:root[data-skin="sport"] table.comp td.pu,
+:root[data-skin="sport"] table.matrice td { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+:root[data-skin="sport"] .pastille { border-radius: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+:root[data-skin="sport"] button.btn { border-radius: 6px; font-family: var(--police-titre); font-weight: 400; text-transform: uppercase;
+  letter-spacing: 0.04em; font-size: 16px; }
+:root[data-skin="sport"] button.btn.sec { background: var(--gris-fond); color: var(--texte); }
+
+:root[data-skin="sport"] nav.onglets { background: var(--skin-marine); border-top: 4px solid var(--accent); }
+:root[data-skin="sport"] nav.onglets button { color: #a9b8cc; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+:root[data-skin="sport"] nav.onglets button.actif { color: var(--skin-or); }

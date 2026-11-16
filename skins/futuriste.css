@@ -1,0 +1,49 @@
+/* Skin « Futuriste » — maquette n° 7 : écran de navigation, grille bleutée, coins en équerre.
+   Sombre seulement (look assumé). Polices : Orbitron (titres, prix) + Chakra Petch (texte). */
+
+:root[data-skin="futuriste"] {
+  color-scheme: dark;
+  --fond: #060a18; --carte: #0e1e38; --texte: #ddf7ff; --doux: #8fb4cc; --ligne: #1e3a55;
+  --accent: #5cf2ff; --accent-doux: #0f2f45;
+  --vert: #5cf2ff; --vert-fond: #0f2f45; --ambre: #ff6ad5; --ambre-fond: #33143a;
+  --rouge: #ff6b7d; --rouge-fond: #3a1420; --gris-fond: #12233f;
+  --ombre: none;
+  --police-texte: "Chakra Petch", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-titre: "Orbitron", "Chakra Petch", system-ui, sans-serif;
+}
+
+:root[data-skin="futuriste"] body { font-family: var(--police-texte);
+  background-image: linear-gradient(rgba(92,242,255,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(92,242,255,.06) 1px, transparent 1px);
+  background-size: 26px 26px; }
+:root[data-skin="futuriste"] h1,
+:root[data-skin="futuriste"] h2,
+:root[data-skin="futuriste"] .total,
+:root[data-skin="futuriste"] table.comp td.pu { font-family: var(--police-titre); letter-spacing: 0.04em; }
+:root[data-skin="futuriste"] h2 { font-size: 15px; text-transform: uppercase; }
+
+:root[data-skin="futuriste"] header { background: rgba(6,10,24,.92); color: var(--texte); border-bottom: 1px solid var(--accent); }
+:root[data-skin="futuriste"] header h1 { font-size: 18px; text-transform: uppercase; letter-spacing: 0.08em; }
+:root[data-skin="futuriste"] header select { background: transparent; color: var(--accent); border: 1px solid var(--ligne);
+  border-radius: 0; width: auto; max-width: 45%; }
+:root[data-skin="futuriste"] .bandeau-demo { background: var(--ambre-fond); color: var(--ambre); letter-spacing: 0.04em; }
+
+:root[data-skin="futuriste"] .carte,
+:root[data-skin="futuriste"] .tableau-wrap { border-radius: 0; border: 1px solid var(--ligne); background: rgba(14,30,56,.85); }
+:root[data-skin="futuriste"] .item,
+:root[data-skin="futuriste"] .reorg li { border-radius: 0; border: 0; border-left: 2px solid var(--accent); background: rgba(14,30,56,.85); }
+:root[data-skin="futuriste"] .rayon > h3 { color: var(--accent); letter-spacing: 0.18em; font-size: 11px; }
+:root[data-skin="futuriste"] .total { color: var(--accent); font-size: 18px; }
+
+:root[data-skin="futuriste"] .pastille { border-radius: 0; letter-spacing: 0.06em; }
+:root[data-skin="futuriste"] button.btn { border-radius: 0; background: var(--accent); color: #060a18; text-transform: uppercase; letter-spacing: 0.08em; }
+:root[data-skin="futuriste"] button.btn.sec { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+:root[data-skin="futuriste"] button.icone,
+:root[data-skin="futuriste"] .qte button,
+:root[data-skin="futuriste"] input,
+:root[data-skin="futuriste"] select,
+:root[data-skin="futuriste"] textarea { border-radius: 0; }
+
+:root[data-skin="futuriste"] nav.onglets { background: rgba(6,10,24,.95); border-top: 1px solid var(--accent); }
+:root[data-skin="futuriste"] nav.onglets button { letter-spacing: 0.08em; text-transform: uppercase; font-size: 10px; }
+:root[data-skin="futuriste"] nav.onglets button span { filter: grayscale(1) brightness(1.4); opacity: 0.6; }
+:root[data-skin="futuriste"] nav.onglets button.actif span { filter: drop-shadow(0 0 6px var(--accent)); opacity: 1; }

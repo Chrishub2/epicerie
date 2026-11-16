@@ -1,0 +1,46 @@
+/* Skin « Musique » — maquette n° 10 : la liste comme une playlist, encre bleu-nuit et orange.
+   Sombre seulement (look assumé). Polices : Syne (titres, prix) + Inter (texte). */
+
+:root[data-skin="musique"] {
+  color-scheme: dark;
+  --fond: #0f1e24; --carte: #142830; --texte: #f4ece0; --doux: #9db2b8; --ligne: #1f343c;
+  --accent: #ff7a3d; --accent-doux: #3a2418;
+  --vert: #5be3c2; --vert-fond: #133631; --ambre: #f2d24b; --ambre-fond: #39321a;
+  --rouge: #ff8a80; --rouge-fond: #3d1f1e; --gris-fond: #1a3039;
+  --ombre: none;
+  --police-texte: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-titre: "Syne", "Inter", system-ui, sans-serif;
+}
+
+:root[data-skin="musique"] body { font-family: var(--police-texte); }
+:root[data-skin="musique"] h1,
+:root[data-skin="musique"] h2,
+:root[data-skin="musique"] .total,
+:root[data-skin="musique"] table.comp td.pu { font-family: var(--police-titre); }
+:root[data-skin="musique"] h1,
+:root[data-skin="musique"] h2 { font-weight: 800; }
+
+:root[data-skin="musique"] header { background: var(--fond); color: var(--texte); }
+:root[data-skin="musique"] header h1 { font-size: 24px; }
+:root[data-skin="musique"] header select { background: var(--carte); color: var(--texte); border: 1px solid #3c5560;
+  border-radius: 999px; width: auto; max-width: 45%; }
+
+/* Les articles comme des pistes : lignes simples, numérotées par le rayon */
+:root[data-skin="musique"] .item { background: transparent; border: 0; border-bottom: 1px solid var(--ligne);
+  border-radius: 0; margin-bottom: 0; padding: 12px 2px; }
+:root[data-skin="musique"] .item:hover { background: var(--carte); }
+:root[data-skin="musique"] .item .nom { font-weight: 600; }
+:root[data-skin="musique"] .carte { border-radius: 14px; border-color: var(--ligne); }
+:root[data-skin="musique"] .rayon > h3 { color: var(--accent); }
+:root[data-skin="musique"] .item input[type=checkbox] { accent-color: var(--accent); border-radius: 50%; }
+:root[data-skin="musique"] .total { font-size: 20px; }
+
+:root[data-skin="musique"] .pastille { border-radius: 999px; }
+:root[data-skin="musique"] button.btn { background: var(--accent); color: #0f1e24; border-radius: 999px; font-weight: 700; }
+:root[data-skin="musique"] button.btn.sec { background: var(--carte); color: var(--texte); }
+:root[data-skin="musique"] button.icone,
+:root[data-skin="musique"] .qte button { border-radius: 50%; }
+
+:root[data-skin="musique"] nav.onglets { background: #0b171c; border-top: 0; box-shadow: 0 -1px 0 var(--ligne); }
+:root[data-skin="musique"] nav.onglets button.actif { color: var(--accent); }
+:root[data-skin="musique"] nav.onglets button.actif span { transform: scale(1.12); }

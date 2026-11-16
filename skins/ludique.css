@@ -1,0 +1,90 @@
+/* Skin « Amusant » — maquette n° 3.
+   S'active avec <html data-skin="ludique">. Ne touche qu'à l'apparence : mêmes classes que index.html.
+   Polices : Fredoka (titres, prix) + Nunito (texte), chargées par skins.js ; repli système hors ligne. */
+
+:root[data-skin="ludique"] {
+  --fond: #ffe45c; --carte: #ffffff; --texte: #1a1033; --doux: #4a3f6b; --ligne: #1a1033;
+  --accent: #2f6bff; --accent-doux: #e4ecff;
+  --vert: #127a52; --vert-fond: #c9f2d9; --ambre: #9a3a00; --ambre-fond: #ffd3a8;
+  --rouge: #b3261e; --rouge-fond: #ffd6d1; --gris-fond: #f1ecff;
+  --ombre: 4px 4px 0 #1a1033;
+  --skin-trait: 3px; --skin-orange: #ff5a36; --skin-entete-fond: #ffe45c;
+  --police-texte: "Nunito", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-titre: "Fredoka", "Nunito", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="ludique"]:not([data-theme="light"]) {
+    --fond: #1a1033; --carte: #2a1f4d; --texte: #fff8e1; --doux: #cfc4f0; --ligne: #fff8e1;
+    --accent: #ffe45c; --accent-doux: #3d2f6b;
+    --vert: #6ff0b0; --vert-fond: #173d2e; --ambre: #ffb27a; --ambre-fond: #4a2a14;
+    --rouge: #ff8a7a; --rouge-fond: #4a1d1a; --gris-fond: #352a5e;
+    --ombre: 4px 4px 0 #ffe45c; --skin-entete-fond: #2a1f4d;
+  }
+}
+/* Sombre choisi dans l'app (Plus → Apparence → Sombre), même si le téléphone est en clair */
+:root[data-skin="ludique"][data-theme="dark"] {
+  --fond: #1a1033; --carte: #2a1f4d; --texte: #fff8e1; --doux: #cfc4f0; --ligne: #fff8e1;
+  --accent: #ffe45c; --accent-doux: #3d2f6b;
+  --vert: #6ff0b0; --vert-fond: #173d2e; --ambre: #ffb27a; --ambre-fond: #4a2a14;
+  --rouge: #ff8a7a; --rouge-fond: #4a1d1a; --gris-fond: #352a5e;
+  --ombre: 4px 4px 0 #ffe45c; --skin-entete-fond: #2a1f4d;
+  color-scheme: dark;
+}
+
+:root[data-skin="ludique"] body { font-family: var(--police-texte); font-weight: 600; }
+:root[data-skin="ludique"] h1,
+:root[data-skin="ludique"] h2,
+:root[data-skin="ludique"] h3,
+:root[data-skin="ludique"] .total { font-family: var(--police-titre); }
+
+/* En-tête jaune, gros titre rond, trait épais */
+:root[data-skin="ludique"] header { background: var(--skin-entete-fond); color: var(--texte);
+  border-bottom: var(--skin-trait) solid var(--ligne); }
+:root[data-skin="ludique"] header h1 { font-size: 24px; font-weight: 700; }
+:root[data-skin="ludique"] header select { background: var(--carte); color: var(--texte);
+  border: 2px solid var(--ligne); border-radius: 999px; font-weight: 700; width: auto; max-width: 45%; }
+:root[data-skin="ludique"] .bandeau-demo { font-weight: 700; border-bottom: 2px solid var(--ligne); }
+
+/* Cartes « autocollant » : contour épais + ombre décalée */
+:root[data-skin="ludique"] .carte,
+:root[data-skin="ludique"] .item,
+:root[data-skin="ludique"] .reorg li,
+:root[data-skin="ludique"] .tableau-wrap {
+  border: var(--skin-trait) solid var(--ligne); border-radius: 18px; box-shadow: var(--ombre); }
+:root[data-skin="ludique"] .item { padding: 10px 12px; margin-bottom: 10px; }
+:root[data-skin="ludique"] .item .nom { font-weight: 800; }
+:root[data-skin="ludique"] .item input[type=checkbox] { width: 28px; height: 28px; }
+:root[data-skin="ludique"] .rayon > h3 { color: var(--texte); font-size: 15px; letter-spacing: 0.01em; }
+
+/* Pastilles : petits collants penchés */
+:root[data-skin="ludique"] .pastille { border: 2px solid var(--ligne); font-weight: 800; font-size: 12px; }
+:root[data-skin="ludique"] .pastille.ambre,
+:root[data-skin="ludique"] .pastille.rouge { background: var(--skin-orange); color: #ffffff; transform: rotate(-4deg); }
+
+/* Boutons dodus */
+:root[data-skin="ludique"] button.btn { border: var(--skin-trait) solid var(--ligne); border-radius: 16px;
+  box-shadow: 3px 3px 0 var(--ligne); font-family: var(--police-titre); font-size: 17px; padding: 10px 16px; }
+:root[data-skin="ludique"] button.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ligne); }
+:root[data-skin="ludique"] button.btn.sec { background: var(--carte); color: var(--texte); }
+:root[data-skin="ludique"] button.icone,
+:root[data-skin="ludique"] .qte button { border: 2px solid var(--ligne); border-radius: 12px; }
+:root[data-skin="ludique"] input,
+:root[data-skin="ludique"] select,
+:root[data-skin="ludique"] textarea { border: 2px solid var(--ligne); border-radius: 12px; }
+
+/* Tableaux de comparaison */
+:root[data-skin="ludique"] table.comp td.pu,
+:root[data-skin="ludique"] table.matrice td { font-family: var(--police-titre); font-weight: 600; }
+
+/* Barre d'onglets : l'onglet actif dans une bulle colorée */
+:root[data-skin="ludique"] nav.onglets { border-top: var(--skin-trait) solid var(--ligne); }
+:root[data-skin="ludique"] nav.onglets button { color: var(--texte); font-weight: 800; }
+:root[data-skin="ludique"] nav.onglets button span { width: 40px; height: 32px; display: flex; align-items: center;
+  justify-content: center; border-radius: 999px; transition: transform .15s; }
+:root[data-skin="ludique"] nav.onglets button.actif { color: var(--texte); }
+:root[data-skin="ludique"] nav.onglets button.actif span { background: var(--skin-entete-fond); border: 2px solid var(--ligne);
+  transform: translateY(-2px) rotate(-6deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-skin="ludique"] nav.onglets button span { transition: none; }
+}

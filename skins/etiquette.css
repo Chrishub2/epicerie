@@ -1,0 +1,68 @@
+/* Skin « Étiquette » — maquette n° 2 : étiquettes de tablette jaunes, rabais en rouge.
+   Thème clair seulement (look assumé). Polices : Archivo / Archivo Black / JetBrains Mono. */
+
+:root[data-skin="etiquette"] {
+  color-scheme: light;
+  --fond: #d3d7d0; --carte: #ffffff; --texte: #111111; --doux: #45493f; --ligne: #111111;
+  --accent: #111111; --accent-doux: #ffd60a;
+  --vert: #0b5d2a; --vert-fond: #d9f0dc; --ambre: #ffffff; --ambre-fond: #c8102e;
+  --rouge: #ffffff; --rouge-fond: #c8102e; --gris-fond: #e6e8e3;
+  --ombre: 0 2px 0 rgba(0,0,0,.25);
+  --skin-jaune: #ffd60a;
+  --police-texte: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --police-titre: "Archivo Black", "Archivo", system-ui, sans-serif;
+  --police-chiffres: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+
+:root[data-skin="etiquette"] body { font-family: var(--police-texte); }
+:root[data-skin="etiquette"] h1,
+:root[data-skin="etiquette"] h2 { font-family: var(--police-titre); font-weight: 400; text-transform: uppercase; letter-spacing: 0.01em; }
+
+:root[data-skin="etiquette"] header { background: #111111; color: var(--skin-jaune); }
+:root[data-skin="etiquette"] header h1 { font-size: 22px; }
+:root[data-skin="etiquette"] header select { background: #111111; color: #ffffff; border: 1px solid #c9ccc5;
+  border-radius: 0; width: auto; max-width: 45%; font-family: var(--police-chiffres); }
+:root[data-skin="etiquette"] .bandeau-demo { background: var(--skin-jaune); color: #111111; font-family: var(--police-chiffres); font-size: 12px; }
+
+/* Les articles deviennent des étiquettes de tablette */
+:root[data-skin="etiquette"] .item { background: var(--skin-jaune); border: 0; border-radius: 0; box-shadow: var(--ombre);
+  border-bottom: 6px solid #111111; }
+:root[data-skin="etiquette"] .item .nom { font-weight: 800; text-transform: uppercase; letter-spacing: 0.02em; }
+:root[data-skin="etiquette"] .item .info { color: #2b2b2b; }
+:root[data-skin="etiquette"] .item.coche { background: #ece8c4; }
+:root[data-skin="etiquette"] .carte,
+:root[data-skin="etiquette"] .reorg li,
+:root[data-skin="etiquette"] .tableau-wrap { border: 2px solid #111111; border-radius: 0; box-shadow: none; }
+:root[data-skin="etiquette"] .rayon > h3 { color: #111111; font-family: var(--police-chiffres); }
+
+/* Prix et totaux en monospace, comme une facture */
+:root[data-skin="etiquette"] .total,
+:root[data-skin="etiquette"] table.comp td.pu,
+:root[data-skin="etiquette"] table.matrice td,
+:root[data-skin="etiquette"] .qte { font-family: var(--police-chiffres); font-variant-numeric: tabular-nums; }
+:root[data-skin="etiquette"] .total { font-size: 17px; border-top: 2px dashed #111111; padding-top: 8px; }
+/* Les chiffres monospace sont plus larges : la colonne des prix peut passer à la ligne au lieu de déborder */
+:root[data-skin="etiquette"] table.comp td.pu { white-space: normal; font-size: 13px; }
+:root[data-skin="etiquette"] table.comp { table-layout: fixed; width: 100%; }
+:root[data-skin="etiquette"] table.comp td { overflow-wrap: anywhere; }
+/* Lignes rouges (rabais proche / plus cher) : tout le texte en blanc, sinon le gris disparaît sur le rouge */
+:root[data-skin="etiquette"] table.comp tr.cher td,
+:root[data-skin="etiquette"] table.comp tr.proche td { color: #ffffff; }
+:root[data-skin="etiquette"] table.comp tr.cher .doux,
+:root[data-skin="etiquette"] table.comp tr.proche .doux,
+:root[data-skin="etiquette"] table.comp tr.cher .ville,
+:root[data-skin="etiquette"] table.comp tr.proche .ville { color: #ffe3e7; }
+
+:root[data-skin="etiquette"] .pastille { border-radius: 0; font-weight: 700; font-family: var(--police-chiffres); }
+:root[data-skin="etiquette"] button.btn { border-radius: 0; background: #111111; color: var(--skin-jaune); text-transform: uppercase; }
+:root[data-skin="etiquette"] button.btn.sec { background: var(--skin-jaune); color: #111111; }
+:root[data-skin="etiquette"] button.btn.danger { background: #c8102e; color: #ffffff; }
+:root[data-skin="etiquette"] button.icone,
+:root[data-skin="etiquette"] .qte button,
+:root[data-skin="etiquette"] input,
+:root[data-skin="etiquette"] select,
+:root[data-skin="etiquette"] textarea { border-radius: 0; border-color: #111111; }
+
+:root[data-skin="etiquette"] nav.onglets { background: #111111; border-top: 0; }
+:root[data-skin="etiquette"] nav.onglets button { color: #c9ccc5; font-family: var(--police-chiffres); }
+:root[data-skin="etiquette"] nav.onglets button.actif { color: var(--skin-jaune); }

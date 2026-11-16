@@ -5,6 +5,7 @@
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin, brancherSelecteurProduit } from './ui.js';
 import { PROGRAMMES } from './demo-data.js';
+import { SKINS, skinActuel, htmlChoixSkin, brancherChoixSkin } from './skins/skins.js';
 import { photographierRecu } from './camera.js';
 import { prendrePhoto } from './ocr.js';
 import { analyserOffre, analyserFormat } from './normalise.js';
@@ -37,7 +38,7 @@ export function vuePlus(v) {
     ['rabais', '🏷️', 'Mes rabais personnels', `${e.rabaisPerso.filter((r) => r.actif).length} actif(s)`],
     ['catalogue', '📚', 'Catalogue de mes articles', `${e.articles.length} articles`],
     ['photos', '🖼️', 'Photos', `${e.photos.length} photo(s)`],
-    ['apparence', '🌓', 'Apparence', { auto: 'Selon le téléphone', clair: 'Clair', sombre: 'Sombre' }[themeActuel()]],
+    ['apparence', '🎨', 'Apparence (skins)', `${SKINS.find((s) => s.id === skinActuel())?.nom || 'Classique'} · ${{ auto: 'selon le téléphone', clair: 'clair', sombre: 'sombre' }[themeActuel()]}`],
     ['sauvegarde', '💾', 'Sauvegarde et mode démo', 'Exporter, importer, réinitialiser'],
   ];
   v.innerHTML = menu.map(([k, ic, t, s]) => `<button class="carte rang" data-s="${k}" style="width:100%;text-align:left;font:inherit;color:inherit">
@@ -408,8 +409,10 @@ function vueApparence(v) {
     ${[['auto', 'Selon le téléphone', 'Suit le réglage clair/sombre de ton téléphone'], ['clair', 'Clair', 'Toujours clair'], ['sombre', 'Sombre', 'Toujours sombre']]
       .map(([k, n, d]) => `<label class="item" style="cursor:pointer"><input type="radio" name="theme" value="${k}" ${t === k ? 'checked' : ''}>
         <div class="grandir"><div class="nom">${n}</div><div class="info">${d}</div></div></label>`).join('')}
-    <p class="doux">Réglage propre à cet appareil.</p></div>`;
+    <p class="doux">Réglage propre à cet appareil. Certains skins ont leur propre ambiance (toujours clair ou toujours sombre).</p></div>
+    ${htmlChoixSkin()}`;
   brancherRetour(v);
+  brancherChoixSkin(v);
   $$('input[name=theme]', v).forEach((r) => r.onchange = () => { appliquerTheme(r.value); toast('Apparence changée'); });
 }
 
