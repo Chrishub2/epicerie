@@ -49,6 +49,7 @@ export function tableauOffres(a, { avecManquants = false } = {}) {
   return `<table class="comp">${lignes.map((l) => `
     <tr class="${l.classe}">
       <td>${l.perso ? logoCleHtml(cleOffre(l)) : logoVille(l.banniere)}
+        ${l.produitOffre ? `<div style="font-size:13px"><b>${esc(l.produitOffre)}</b></div>` : ''}
         <div class="doux">${esc(l.offre)}${l.economie ? ` <b style="color:var(--vert)">(−${argent(l.economie)})</b>` : ''}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
         <div>${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.aVerifier ? '<span class="pastille ambre">lu sur photo : à vérifier</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
         ${l.erreur ? `<div class="doux" style="color:var(--rouge)">${esc(l.erreur)}</div>` : ''}

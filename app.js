@@ -19,6 +19,7 @@ surveillerMisesAJour(); // « Mise à jour disponible — Oui / Non »
 import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle, remplacerArticle } from './manuscrit.js';
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat } from './recu.js';
+import * as P from './produits.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -242,7 +243,7 @@ function htmlItem(l, a) {
   // Article placé dans un magasin (répartition) : on montre le prix de CE magasin, sinon le meilleur prix.
   const k = l.magasinCible;
   const m = (k && offresArticle(a).find((o) => o.pu != null && cleOffre(o) === k)) || meilleureOffre(a);
-  const meilleur = m ? `${logo(m.banniere)} ${esc(m.magasinNom ? m.magasinNom.replace(/^\S+\s*/, '') : '')} ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu — touche pour trouver les vrais prix';
+  const meilleur = m ? `${logo(m.banniere)} ${esc(m.magasinNom ? m.magasinNom.replace(/^\S+\s*/, '') : '')} ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}${m.produitOffre ? ` · <b>${esc(m.produitOffre)}</b>` : ''}` : 'Prix inconnu';
   const verdict = htmlVerdictListe(l.recu);
   const teinte = l.recu?.absent ? '' : l.recu?.statut === 'plus' ? 'recu-ecart' : (l.recu?.statut === 'ok' || l.recu?.statut === 'moins') ? 'recu-ok' : '';
   return `<div class="item item-liste ${teinte} ${l.coche ? 'coche' : ''}" data-id="${l.id}">
@@ -252,7 +253,7 @@ function htmlItem(l, a) {
     <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
       <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''}</div>
       <div class="info">${meilleur}</div>
-      <div class="info">${esc(formatLisible(a.format) || '')}${l.note ? ` · ${esc(l.note)}` : ''}</div>
+      ${formatLisible(a.format) ? `<div class="info">${m?.produitOffre ? 'ton habituel : ' : ''}${esc(formatLisible(a.format))}</div>` : ''}
     </div>
     ${!m && !a.liens?.length && !l.coche ? `<button class="icone photo-mag" data-photomag="${a.id}" title="Identifier ce produit (code-barres, photo)" aria-label="Identifier le produit">🔎</button>` : ''}
     <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
@@ -379,22 +380,87 @@ function vueListe(v) {
 // --- Saisie : d'abord ta base (articles déjà achetés / au catalogue) ---
 function masquerSuggestions() { $('#suggestions')?.classList.add('cache'); }
 
+// Idées Open Food Facts pendant la saisie : produits vendus au Canada, regroupés par nom.
+// Limite d'Open Food Facts ≈ 10 recherches/min : attente de 500 ms après la frappe, cache, et 8 appels/min au plus.
+const cacheOFF = new Map();
+const appelsOFF = [];
+let minuterieOFF = null;
+function suggererOFF(q, txt) {
+  clearTimeout(minuterieOFF);
+  minuterieOFF = setTimeout(async () => {
+    if (!navigator.onLine || sansAccents($('#saisie')?.value || '').indexOf(q) < 0) return;
+    let idees = cacheOFF.get(q);
+    if (!idees) {
+      const maintenant = Date.now();
+      while (appelsOFF.length && maintenant - appelsOFF[0] > 60000) appelsOFF.shift();
+      if (appelsOFF.length >= 8) return;
+      appelsOFF.push(maintenant);
+      try {
+        const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&json=1&page_size=20`
+          + '&tagtype_0=countries&tag_contains_0=contains&tag_0=canada&fields=product_name_fr,product_name,brands,quantity,image_front_small_url');
+        const j = await r.json();
+        // Regroupe par nom générique (« Riz basmati ») avec quelques marques/formats en exemple
+        const groupes = new Map();
+        for (const p of j.products || []) {
+          const nom = String(p.product_name_fr || p.product_name || '').trim();
+          if (!nom || !sansAccents(nom).includes(q)) continue;
+          const k = sansAccents(nom);
+          const g = groupes.get(k) || { nom: nom.replace(/^./, (c) => c.toUpperCase()), exemples: [], image: p.image_front_small_url || '' };
+          const ex = [p.brands?.split(',')[0]?.trim(), p.quantity].filter(Boolean).join(' ');
+          if (ex && g.exemples.length < 3 && !g.exemples.includes(ex)) g.exemples.push(ex);
+          groupes.set(k, g);
+        }
+        // On n'affiche pas ce que ton catalogue a déjà
+        idees = [...groupes.values()].filter((g) => !trouverArticle(g.nom)).slice(0, 4);
+        cacheOFF.set(q, idees);
+      } catch { return; }
+    }
+    const boite = $('#suggOFF');
+    if (!boite || !idees.length) return;
+    boite.innerHTML = `<div class="doux" style="font-size:12px;padding:6px 8px 2px">💡 Idées (Open Food Facts, Canada)</div>` + idees.map((g, i) =>
+      `<button class="sugg" data-off="${i}">${g.image ? `<img class="vignette petite" src="${esc(g.image)}" alt="">` : '<span class="vignette petite"></span>'}
+        <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(g.nom)}</span>
+        ${g.exemples.length ? `<span class="doux une-ligne" style="display:block;font-size:12px">ex. ${esc(g.exemples.join(' · '))}</span>` : ''}</span></button>`).join('');
+    $$('[data-off]', boite).forEach((b) => b.onclick = () => {
+      const r = txt.match(/^(\d+(?:[.,]\d+)?)\s*(?:x\s*)?/i);
+      $('#saisie').value = ''; masquerSuggestions();
+      ajouterTexte(`${r ? r[0] : ''}${idees[Number(b.dataset.off)].nom}`, { forcerNouveau: true });
+    });
+  }, 500);
+}
+
 function suggerer(txt) {
   const zone = $('#suggestions');
   const q = sansAccents(txt.replace(/^\d+(?:[.,]\d+)?\s*(?:x\s*)?/i, ''));
   if (!zone || q.length < 2) { masquerSuggestions(); return; }
   const e = S.get();
   const achats = (id) => e.liste.filter((l) => l.articleId === id).length + (e.achats?.filter((x) => x.articleId === id).length || 0);
-  const trouves = e.articles.filter((a) => sansAccents(a.nom).includes(q) || sansAccents(a.marque || '').includes(q))
-    .sort((a, b) => achats(b.id) - achats(a.id) || a.nom.localeCompare(b.nom, 'fr')).slice(0, 6);
+  // Produits d'abord : nom, marque ou n'importe laquelle de leurs marques/formats (taper « tilda » trouve « Riz basmati blanc »)
+  const pertinence = (a) => {
+    const n = sansAccents(a.nom);
+    if (n.startsWith(q)) return 3;
+    if (n.split(/[^a-z0-9]+/).some((m) => m.startsWith(q))) return 2;
+    if (n.includes(q)) return 1;
+    const parVariante = P.variantesActives(a).find((v) => sansAccents(`${v.marque || ''} ${v.nom || ''}`).includes(q));
+    return parVariante || sansAccents(a.marque || '').includes(q) ? 0.5 : 0;
+  };
+  const trouves = e.articles.map((a) => ({ a, p: pertinence(a) })).filter((x) => x.p > 0)
+    .sort((x, y) => y.p - x.p || achats(y.a.id) - achats(x.a.id) || x.a.nom.localeCompare(y.a.nom, 'fr')).slice(0, 6).map((x) => x.a);
   zone.innerHTML = trouves.map((a) => {
     const m = meilleureOffre(a);
+    const nbV = P.variantesActives(a).length;
+    const detail = m
+      ? `${m.produitOffre ? `Moins cher : ${esc(m.produitOffre)}` : esc(formatLisible(a.format) || '')} · ${esc(nomOffre(m))}`
+      : `${esc(formatLisible(a.format) || '')}${nbV > 1 ? ` · ${nbV} marques/formats` : ''}`;
     return `<button class="sugg" data-sugg="${a.id}">${a.imageUrl ? `<img class="vignette petite" src="${esc(a.imageUrl)}" alt="">` : '<span class="vignette petite"></span>'}
-      <span class="grandir une-ligne">${esc(a.nom)}${a.format ? ` <span class="doux">${esc(formatLisible(a.format))}</span>` : ''}</span>
+      <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(a.nom)}</span>
+        ${detail.replace(/^ · /, '') ? `<span class="doux une-ligne" style="display:block;font-size:12px">${detail.replace(/^ · /, '')}</span>` : ''}</span>
       <span class="doux">${m ? esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0]) : ''}</span></button>`;
-  }).join('') + `<button class="sugg" data-nouveau="1"><span class="vignette petite" style="display:grid;place-items:center">＋</span>
+  }).join('') + `<div id="suggOFF"></div><button class="sugg" data-nouveau="1"><span class="vignette petite" style="display:grid;place-items:center">＋</span>
       <span class="grandir une-ligne">Ajouter « ${esc(txt.trim())} » ${trouves.length ? '(autre produit)' : '— je cherche ses prix'}</span></button>`;
   zone.classList.remove('cache');
+  // Peu de résultats dans ton catalogue : idées tirées d'Open Food Facts (produits vendus au Canada)
+  if (trouves.length < 3 && q.length >= 3) suggererOFF(q, txt);
   $$('[data-sugg]', zone).forEach((b) => b.onclick = () => {
     const r = txt.match(/^(\d+(?:[.,]\d+)?)/);
     ajouterALaListe(b.dataset.sugg, r ? Number(r[1].replace(',', '.')) : 1);
@@ -593,6 +659,74 @@ function supprimerCategorie(id, apres) {
   });
 }
 
+// --- Marques et formats (variantes) d'un produit -------------------------
+/** Nombre de vrais codes-barres (un UPC et son EAN « 0… » comptent pour un seul). */
+const nbCodes = (codes) => new Set(codes.map((c) => (c.length === 12 ? '0' + c : c))).size;
+function htmlVariantes(a) {
+  const pref = P.variantePref(a);
+  const offres = offresArticle(a).filter((o) => o.pu != null);
+  const formulaire = (v = {}) => `<div class="carte" style="margin:6px 0;background:var(--gris-fond)">
+    <div class="rang"><div class="champ grandir"><label>Marque</label><input data-vf="marque" value="${esc(v.marque || '')}" placeholder="Tilda"></div>
+      <div class="champ grandir"><label>Format</label><input data-vf="format" value="${esc(v.format || '')}" placeholder="2 kg"></div></div>
+    <div class="champ"><label>Précision (facultatif)</label><input data-vf="nom" value="${esc(v.nom || '')}" placeholder="ex. grains longs, bio"></div>
+    <div class="champ"><label>Code(s)-barres (facultatif, séparés par une virgule)</label><input data-vf="codes" inputmode="numeric" value="${esc((v.codes || []).join(', '))}"></div>
+    <div class="rang"><button class="btn" data-vok>✓ Enregistrer</button><button class="btn sec" data-vannule>Annuler</button></div></div>`;
+  return `<h3 style="margin-top:14px">Marques et formats</h3>
+    <p class="doux" style="margin:0 0 6px">Un même produit peut se vendre en plusieurs marques et formats. ★ = celle que tu achètes d'habitude (son format et sa marque sont ceux de la fiche).</p>
+    ${P.variantesActives(a).map((v) => {
+      const o = offres.find((x) => x.varianteId === v.id);
+      const estPref = v === pref;
+      return `<div class="item" data-v="${v.id}" style="align-items:flex-start">
+        <button class="icone" data-vpref title="${estPref ? 'Variante habituelle' : 'En faire la variante habituelle'}" aria-label="Variante habituelle">${estPref ? '★' : '☆'}</button>
+        <div class="grandir"><div class="nom">${esc(P.libelleVariante(v))}</div>
+          <div class="info">${v.codes?.length ? `▥ ${nbCodes(v.codes)} code(s)-barres` : 'sans code-barres'}${o ? ` · ${esc(libelleUnitaire(o.pu, o.uniteRef).split(' · ')[0])} ${esc(nomOffre(o))}` : ''}</div></div>
+        <button class="icone" data-vmod title="Modifier" aria-label="Modifier">✏️</button>
+        ${!estPref && P.variantesActives(a).length > 1 ? `<button class="icone" data-vsep title="Séparer en produit à part" aria-label="Séparer">↗</button>
+          <button class="icone" data-vsup title="Retirer" aria-label="Retirer">🗑</button>` : ''}
+      </div><div data-vform="${v.id}" hidden>${formulaire(v)}</div>`;
+    }).join('')}
+    <button class="btn sec" id="vAjout" style="width:100%;margin-top:6px">+ Ajouter une marque ou un format</button>
+    <div data-vform="nouveau" hidden>${formulaire()}</div>`;
+}
+
+function brancherVariantes(c, a, rouvrir) {
+  const lire = (f) => ({ marque: $('[data-vf="marque"]', f).value, nom: $('[data-vf="nom"]', f).value, format: $('[data-vf="format"]', f).value,
+    // Chaque code tapé est gardé sous ses formes UPC/EAN, comme au scan
+    codes: [...new Set($('[data-vf="codes"]', f).value.split(/[,;\s]+/).filter(Boolean).flatMap(gtinVariantes))] });
+  const basculer = (id) => $$('[data-vform]', c).forEach((f) => { f.hidden = f.dataset.vform !== id || !f.hidden; });
+  const modifier = (fn, msg) => { S.maj((x) => { const ar = x.articles.find((i) => i.id === a.id); if (ar) fn(ar); }); toast(msg); rouvrir(); };
+  $$('[data-v]', c).forEach((row) => {
+    const vid = row.dataset.v;
+    $('[data-vpref]', row).onclick = () => modifier((ar) => P.choisirPreferee(ar, vid), 'Variante habituelle changée');
+    $('[data-vmod]', row).onclick = () => basculer(vid);
+    $('[data-vsep]', row)?.addEventListener('click', () => {
+      const v = a.variantes.find((x) => x.id === vid);
+      const nom = prompt('Séparer en produit à part (ses prix et codes-barres le suivent). Nom du nouveau produit :', `${a.nom} ${P.libelleVariante(v)}`);
+      if (!nom?.trim()) return;
+      const nid = S.uid('a');
+      S.maj((x) => P.separerVariante(x, a.id, vid, nom, nid));
+      toast(`« ${nom.trim()} » est maintenant un produit à part`);
+      rouvrir();
+    });
+    $('[data-vsup]', row)?.addEventListener('click', () => {
+      if (confirm('Retirer cette marque / ce format ? Ses codes-barres quittent le produit ; ses prix restent dans l\'historique.')) modifier((ar) => P.retirerVariante(ar, vid), 'Variante retirée');
+    });
+  });
+  $('#vAjout', c).onclick = () => basculer('nouveau');
+  $$('[data-vform]', c).forEach((f) => {
+    const vid = f.dataset.vform;
+    $('[data-vannule]', f).onclick = () => { f.hidden = true; };
+    $('[data-vok]', f).onclick = () => {
+      const d = lire(f);
+      if (!d.marque.trim() && !d.format.trim() && !d.codes.length) { toast('Entre au moins une marque, un format ou un code'); return; }
+      const ailleurs = d.codes.map((code) => P.varianteParCode(S.get(), code)).find((r) => r && r.article.id !== a.id);
+      if (ailleurs) { toast(`Ce code appartient déjà à « ${ailleurs.article.nom} »`); return; }
+      if (vid === 'nouveau') modifier((ar) => P.ajouterVariante(ar, d), 'Marque / format ajouté');
+      else modifier((ar) => P.modifierVariante(ar, vid, d), 'Variante modifiée');
+    };
+  });
+}
+
 // --- Fiche article ----------------------------------------------------
 export function ficheArticle(articleId, ligneId) {
   const e = S.get();
@@ -626,7 +760,9 @@ export function ficheArticle(articleId, ligneId) {
           <div class="champ grandir"><label>Format</label><input id="pFormat" value="${esc(a.format || '')}" placeholder="454 g"></div></div>
         <div class="champ"><label>Fin du rabais (facultatif)</label><input id="pFin" type="date"></div>
         <button class="btn" id="pAjout">Ajouter ce prix</button></div></details>
+    ${htmlVariantes(a)}
     <h3 style="margin-top:14px">Fiche</h3>
+    ${a.bio || a.allergenes?.length ? `<p class="doux" style="margin:0 0 8px">${[a.bio && '🌱 Bio', a.allergenes?.length && `⚠️ Allergènes : ${a.allergenes.join(', ')}`].filter(Boolean).map(esc).join(' · ')} <span style="font-size:11px">(Open Food Facts)</span></p>` : ''}
     <div class="champ"><label>Nom</label><input id="fNom" value="${esc(a.nom)}"></div>
     <div class="rang">
       <div class="champ grandir"><label>Catégorie (rayon) ${a.rayonManuel ? '<span class="pastille">choisie par toi</span>' : '<span class="pastille">auto</span>'}</label><div class="rang"><select id="fRayon" class="grandir">${optionsCategories(a.rayonId)}</select><button class="icone" id="fGererCat" title="Gérer les catégories" aria-label="Gérer les catégories">⚙️</button></div></div>
@@ -663,6 +799,7 @@ export function ficheArticle(articleId, ligneId) {
       toast(`Code ${b.dataset.code} ajouté`); ficheArticle(articleId, ligneId);
     });
     const rouvrir = () => ficheArticle(articleId, ligneId);
+    brancherVariantes(c, a, rouvrir);
     $('#ecLiaison', c).onclick = () => ouvrirLiaison(a.id, rouvrir);
     $('#ecMaj', c)?.addEventListener('click', async () => { toast('Mise à jour…'); await actualiserArticle(a.id, { force: true }); rouvrir(); });
     $$('[data-delien]', c).forEach((x) => x.onclick = (ev) => {

@@ -5,6 +5,7 @@
 // mêmes fonctions, mais lecture/écriture dans la base partagée + temps réel.
 // =====================================================================
 import { etatDemo, MAGASINS_REELS, CODES_POSTAUX_REELS } from './demo-data.js';
+import { normaliserProduits, migrerV3 } from './produits.js';
 
 /** Met à niveau des données enregistrées par une version précédente, sans rien perdre. */
 function migrer(e) {
@@ -21,7 +22,23 @@ function migrer(e) {
     e.alertesMasquees ||= [];
     e.version = 2;
   }
+  if (e.version < 3) {
+    // v3 : structure produit → variantes. Copie de sécurité AVANT (bouton « Revenir à avant » dans Sauvegarde).
+    try { localStorage.setItem(CLE_AVANT_V3, JSON.stringify({ date: new Date().toISOString(), etat: e })); } catch { /* espace plein : la migration n'efface rien de toute façon */ }
+    migrerV3(e);
+  }
   return e;
+}
+
+/** Copie des données telles qu'avant la migration v3 (gardée 30 jours). */
+const CLE_AVANT_V3 = 'epicerie-avant-v3';
+export function copieAvantV3() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CLE_AVANT_V3));
+    if (!c?.etat) return null;
+    if (Date.now() - new Date(c.date).getTime() > 30 * 864e5) { localStorage.removeItem(CLE_AVANT_V3); return null; }
+    return c;
+  } catch { return null; }
 }
 
 const CLE = 'epicerie-demo-v1';
@@ -31,16 +48,27 @@ const abonnes = new Set();
 export function charger() {
   try {
     const brut = localStorage.getItem(CLE);
-    etat = brut ? migrer(JSON.parse(brut)) : etatDemo();
+    const lu = brut ? JSON.parse(brut) : null;
+    const versionLue = lu?.version || 1;
+    etat = lu ? migrer(lu) : etatDemo();
+    // Migration faite : on l'enregistre tout de suite (sinon elle serait refaite à chaque ouverture)
+    // (essai séparé : un échec ici ne doit JAMAIS faire tomber dans le cas « données de démo » plus bas)
+    if (lu && etat.version !== versionLue) {
+      try { normaliserProduits(etat); localStorage.setItem(CLE, JSON.stringify(etat)); } catch (err) { console.warn('Migration non enregistrée', err); }
+    }
   } catch {
     etat = etatDemo();
   }
+  try { normaliserProduits(etat); } catch { /* sans effet sur l'affichage en v31 */ }
   return etat;
 }
 
 export function get() { return etat || charger(); }
 
 export function sauver() {
+  // Garde la structure produit → variantes cohérente après chaque modification,
+  // une synchro (téléphone encore en v30), un import ou une réinitialisation.
+  try { normaliserProduits(etat); } catch (e) { console.warn('Variantes', e); }
   try { localStorage.setItem(CLE, JSON.stringify(etat)); } catch (e) { console.warn('Sauvegarde impossible', e); }
   abonnes.forEach((f) => f(etat));
 }

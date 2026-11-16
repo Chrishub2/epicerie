@@ -8,6 +8,7 @@
 import * as S from './store.js';
 import { esc, argent, nomBanniere, offresArticle } from './ui.js';
 import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normaliser } from './normalise.js';
+import * as P from './produits.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -15,12 +16,16 @@ const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
  * Prix affiché dans l'app AVANT l'achat (on ignore les prix venant des reçus) :
  * celui de la bannière du reçu si on l'a, sinon le meilleur ailleurs.
  */
-function prixAttendu(a, banniere) {
-  const offres = offresArticle(a).filter((o) => o.source !== 'recu' && !o.perso && o.pu != null);
+function prixAttendu(a, banniere, varianteId) {
+  const toutes = offresArticle(a).filter((o) => o.source !== 'recu' && !o.perso && o.pu != null);
+  // La même marque/format d'abord ; sinon une autre, comparée seulement au kg / L (pas « par article »)
+  const memes = varianteId ? toutes.filter((o) => o.varianteId === varianteId) : toutes;
+  const autreVariante = !memes.length && !!varianteId;
+  const offres = memes.length ? memes : toutes;
   const ici = offres.filter((o) => o.banniere === banniere).sort((x, y) => x.pu - y.pu)[0];
   const o = ici || offres[0];
-  return o ? { pu: o.pu, uniteRef: o.uniteRef, prixArticle: o.prixArticle, banniere: o.banniere, offre: o.offre, type: o.type,
-    fin: o.fin || null, source: o.source, observeLe: o.observeLe || null, ailleurs: !ici } : null;
+  return o ? { pu: o.pu, uniteRef: o.uniteRef, prixArticle: autreVariante ? null : o.prixArticle, banniere: o.banniere, offre: o.offre, type: o.type,
+    fin: o.fin || null, source: o.source, observeLe: o.observeLe || null, ailleurs: !ici, autreVariante, produitAffiche: o.produitOffre || '' } : null;
 }
 
 /** « Prix affichés dans l'app » envoyés à l'IA pour qu'elle explique les écarts. */
@@ -62,6 +67,7 @@ function comparerPrix(l, ar, att, r) {
   const statut = Math.abs(ecart) <= TOLERANCE ? 'ok' : ecart < 0 ? 'moins' : 'plus';
   const raisons = [];
   if (statut !== 'ok') {
+    if (att.autreVariante) raisons.push(`Aucun prix connu pour cette marque/format : comparé au ${unite.replace('/', '') || 'prix unitaire'} avec ${att.produitAffiche || 'une autre marque/format'}.`);
     if (att.ailleurs) raisons.push(`Le prix affiché vient de ${nomBanniere(att.banniere)}, pas de ${nomBanniere(r.banniere)}.`);
     if (att.type === 'circulaire' && att.fin && att.fin < date) raisons.push(`Le rabais affiché se terminait le ${att.fin}.`);
     else if (att.type === 'circulaire' && statut === 'plus') raisons.push('Le prix affiché était un prix en rabais : il n\'a peut-être pas été appliqué à la caisse.');
@@ -259,12 +265,18 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     // ① par le nom de la liste (relié par l'IA), ② par code-barres dans tout le catalogue
     // ⓪ association faite à la main (prioritaire)
     let a = l.manuel && l.articleId && etatNow.articles.find((x) => x.id === l.articleId);
+    let v = null; // variante exacte (marque + format), quand elle est certaine
     if (l.manuel && !l.articleId) { bilan.nonRelies++; continue; } // « aucun » choisi à la main
+    // ① code-barres → variante exacte ; ② nom déjà vu sur un reçu de cette bannière (appris)
+    if (!a && codes.length) { const t = P.varianteParCode(etatNow, codes); if (t) ({ article: a, variante: v } = t); }
+    if (!a) { const t = P.varianteParAlias(etatNow, r.banniere, l.libelle); if (t) ({ article: a, variante: v } = t); }
+    // ③ nom de la liste (relié par l'IA)
     if (!a) a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
       && etatNow.liste.some((li) => li.articleId === x.id));
-    if (!a && codes.length) a = etatNow.articles.find((x) => x.codes?.some((c) => codes.includes(c)));
     // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
-    if (!a) a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow);
+    // (lien deviné : on ne l'apprend pas comme nom de reçu, pour ne pas répéter une erreur)
+    let devine = false;
+    if (!a) { a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow); devine = !!a; }
     // Recherche en ligne : complète la fiche reliée ou documente la ligne non reliée
     let info = null;
     const manque = a && (!a.imageUrl || !a.format || !a.marque);
@@ -282,7 +294,15 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     bilan.relies++;
     relies.add(a.id);
     const offre = offreLigne(l);
-    const verdict = comparerPrix(l, S.get().articles.find((y) => y.id === a.id) || a, prixAttendu(a, r.banniere), r); // avant d'ajouter le prix payé
+    // Quelle marque/format a été achetée ? (code, nom appris, marque + format… sinon la ★)
+    const fmtLigne = l.format || info?.format, marqueLigne = l.marque || info?.marque;
+    const artNow = S.get().articles.find((y) => y.id === a.id) || a;
+    const choixV = v ? { variante: v } : P.varianteDeLAchat(artNow,
+      { codes, banniere: r.banniere, libelle: l.libelle, marque: marqueLigne, format: fmtLigne ? formatLisible(fmtLigne) || fmtLigne : '' });
+    // Prix payé comparé au prix affiché de la MÊME marque/format (son format à elle), avant d'ajouter le prix payé
+    const vChoisie = choixV.variante;
+    const formatAchat = vChoisie?.format || choixV.nouvelle?.format || artNow.format;
+    const verdict = comparerPrix(l, { ...artNow, format: formatAchat }, prixAttendu(artNow, r.banniere, vChoisie?.id || (choixV.nouvelle ? 'nouvelle' : null)), r);
     if (verdict.statut === 'ok' || verdict.statut === 'moins') bilan.bonPrix++;
     if (verdict.statut === 'plus') bilan.ecarts++;
     // Pas de code-barres ni sur la facture ni dans la fiche : recherche en ligne (sinon mention dans la fiche)
@@ -291,16 +311,30 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     S.maj((x) => {
       const ar = x.articles.find((y) => y.id === a.id);
       if (!ar) return;
-      if (codes.length) ar.codes = [...new Set([...(ar.codes || []), ...codes])];
-      const fmt = l.format || info?.format;
-      if (!ar.format && fmt) { ar.format = formatLisible(fmt) || fmt; const f = analyserFormat(ar.format); if (f) ar.uniteRef = f.base; complete = true; }
-      if (!ar.marque && (l.marque || info?.marque)) { ar.marque = l.marque || info.marque; complete = true; }
-      if (!ar.imageUrl && info?.image) { ar.imageUrl = info.image; complete = true; }
+      let va;
+      if (choixV.nouvelle) { va = P.ajouterVariante(ar, choixV.nouvelle); if (info?.image) va.imageUrl = info.image; complete = true; }
+      else va = ar.variantes?.find((y) => y.id === choixV.variante?.id) || P.variantePref(ar);
+      const estPref = va === P.variantePref(ar);
+      if (codes.length && !choixV.nouvelle) {
+        if (estPref) ar.codes = [...new Set([...(ar.codes || []), ...codes])];
+        else P.modifierVariante(ar, va.id, { codes: [...(va.codes || []), ...codes] });
+      }
+      const fmt = fmtLigne;
+      if (!estPref) { // autre marque/format : on complète la variante, pas la fiche
+        if (!va.format && fmt) { va.format = formatLisible(fmt) || fmt; complete = true; }
+        if (!va.marque && marqueLigne) { va.marque = marqueLigne; complete = true; }
+        if (!va.imageUrl && info?.image) { va.imageUrl = info.image; complete = true; }
+      }
+      if (estPref && !ar.format && fmt) { ar.format = formatLisible(fmt) || fmt; const f = analyserFormat(ar.format); if (f) ar.uniteRef = f.base; complete = true; }
+      if (estPref && !ar.marque && marqueLigne) { ar.marque = marqueLigne; complete = true; }
+      if (estPref && !ar.imageUrl && info?.image) { ar.imageUrl = info.image; complete = true; }
+      if (va && !devine) P.retenirAlias(x, ar.id, va.id, r.banniere, l.libelle); // le prochain reçu se reliera seul
+      if (info?.details) { if (info.details.quebec) ar.local = true; if (info.details.bio) ar.bio = true; if (info.details.allergenes.length && !ar.allergenes?.length) ar.allergenes = info.details.allergenes; }
       if (info?.ecp && !(ar.liens || []).some((k) => k.id === info.ec.id)) {
         ar.liens = [...(ar.liens || []), { id: info.ec.id, nom: [info.ecp.brand, info.ecp.name].filter(Boolean).join(' '), size: info.ecp.size, image: info.ecp.image }];
       }
       if (offre && r.banniere && !x.prix.some((p) => p.recuId === recuId && p.articleId === ar.id)) {
-        x.prix.push({ id: S.uid('p'), articleId: ar.id, banniere: r.banniere, magasinId: mag?.id, offre, format: ar.format,
+        x.prix.push({ id: S.uid('p'), articleId: ar.id, varianteId: va?.id, banniere: r.banniere, magasinId: mag?.id, offre, format: va?.format || ar.format,
           type: l.rabais ? 'circulaire' : 'regulier', fin: null, source: 'recu', recuId, observeLe: date });
       }
       const li = x.liste.find((y) => y.articleId === ar.id && !y.coche);
@@ -308,7 +342,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       x.liste.filter((y) => y.articleId === ar.id && lignesListe.has(y.id)).forEach((y) => { y.recu = verdict; });
       ar.dernierAchat = verdict;
       const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
-      if (ln) ln.articleId = ar.id;
+      if (ln) { ln.articleId = ar.id; if (va) ln.varianteId = va.id; }
     });
     if (offre && r.banniere) bilan.prix++;
     if (coche) bilan.coches++;

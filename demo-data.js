@@ -110,7 +110,7 @@ export function etatDemo() {
     utilisateur: 'Chris',
     membres: ['Chris', 'Partenaire'],
     magasinCourant: 'defaut',
-    version: 2,
+    version: 3,
     codesPostaux: CODES_POSTAUX_REELS.map((c) => ({ ...c })),
     alertesMasquees: [],
     magasins,

@@ -5,7 +5,7 @@
 //  agents quand la base partagée sera branchée.)
 // =====================================================================
 import * as S from './store.js';
-import { $, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, aujourdhui, nomBanniere } from './ui.js';
+import { $, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, aujourdhui, nomBanniere, brancherSelecteurProduit } from './ui.js';
 import { parCodeBarres, actualiserArticle, MAGASINS_EC } from './epiceries.js';
 import { analyserFormat, analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
 
@@ -15,8 +15,48 @@ const BASES = [
   ['Open Beauty Facts', 'https://world.openbeautyfacts.org'],
   ['Open Products Facts', 'https://world.openproductsfacts.org'],
 ];
-const CHAMPS = 'product_name_fr,product_name,brands,quantity,categories_tags,nutriscore_grade,image_front_url,image_url';
-import { assurerArticle, ajouterALaListe, rayonParDefaut } from './app.js';
+const CHAMPS = 'product_name_fr,product_name,brands,quantity,product_quantity,product_quantity_unit,categories_tags,nutriscore_grade,'
+  + 'labels_tags,origins_tags,manufacturing_places,allergens_tags,image_front_url,image_url';
+
+const ALLERGENES_FR = { milk: 'lait', gluten: 'gluten', eggs: 'œufs', nuts: 'noix', peanuts: 'arachides', soybeans: 'soja', fish: 'poisson',
+  crustaceans: 'crustacés', molluscs: 'mollusques', 'sesame-seeds': 'sésame', mustard: 'moutarde', celery: 'céleri',
+  'sulphur-dioxide-and-sulphites': 'sulfites', lupin: 'lupin' };
+
+/** Format d'un produit Open Food Facts : le texte « quantity » s'il est lisible, sinon la quantité chiffrée (product_quantity + unité). */
+function formatOFF(p) {
+  const texte = p?.quantity ? normaliserQuantite(p.quantity) : '';
+  if (texte && analyserFormat(texte)) return texte;
+  const q = Number(p?.product_quantity), u = String(p?.product_quantity_unit || '').toLowerCase();
+  if (q > 0 && /^(g|kg|ml|cl|l)$/.test(u)) return formatLisible(`${q} ${u}`);
+  return texte;
+}
+
+/** Ce qu'Open Food Facts nous dit en plus : produit du Québec, bio, allergènes. */
+function detailsOFF(p) {
+  if (!p) return { quebec: false, bio: false, allergenes: [] };
+  // Les étiquettes arrivent parfois telles que tapées (« en:Aliments du Québec ») : minuscules, sans accents.
+  const simple = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const labels = simple((p.labels_tags || []).join(' '));
+  const quebec = /quebec/.test(`${labels} ${simple((p.origins_tags || []).join(' '))} ${simple(p.manufacturing_places)}`);
+  const bio = /organic|biologique|(^|[:\s-])bio\b|ecocert/.test(labels);
+  const allergenes = [...new Set((p.allergens_tags || []).map((t) => { const k = t.replace(/^\w+:/, ''); return ALLERGENES_FR[k] || k.replace(/-/g, ' '); }))];
+  return { quebec, bio, allergenes };
+}
+
+/** Ligne de résumé pour l'écran du scan. */
+function resumeDetails(d) {
+  const morceaux = [d.quebec && '🍁 Produit du Québec', d.bio && '🌱 Bio', d.allergenes.length && `⚠️ Allergènes : ${d.allergenes.join(', ')}`].filter(Boolean);
+  return morceaux.length ? `<div class="alerte">${morceaux.map(esc).join(' · ')}</div>` : '';
+}
+
+/** Applique ces détails à un article (ne retire jamais un 🍁 mis à la main). */
+function appliquerDetails(ar, d) {
+  if (d.quebec) ar.local = true;
+  if (d.bio) ar.bio = true;
+  if (d.allergenes.length) ar.allergenes = d.allergenes;
+}
+import { assurerArticle, ajouterALaListe, rayonParDefaut, trouverArticle } from './app.js';
+import * as P from './produits.js';
 
 const ZXING_URL = 'https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
 let arret = null;      // fonction qui coupe la caméra
@@ -74,10 +114,11 @@ async function demarrerCamera(video, surCode) {
  * format, catégorie, photo officielle, code, vrais prix) au lieu de créer un autre article.
  */
 export function ouvrirScan(surArticle, opts = {}) {
-  ouvrirModale(opts.cibleId ? 'Scanner pour remplir la fiche' : 'Code-barres', `
+  ouvrirModale(opts.cibleId ? 'Scanner pour remplir la fiche' : opts.inventaire ? 'Scanner mes produits' : 'Code-barres', `
+    ${opts.inventaire ? '<p class="doux" style="margin-top:0">Fais le tour de tes produits : rien n\'est ajouté à ta liste d\'épicerie. Pour un produit inconnu, choisis sa fiche (▾) ou garde le nom proposé pour en créer une.</p>' : ''}
     <video class="scan" id="video" playsinline muted></video>
     <p class="doux" id="etatScan">Démarrage de la caméra…</p>
-    <label class="rang doux"><input type="checkbox" id="rafale" style="width:auto"> Mode rafale (scanner plusieurs produits d'affilée)</label>
+    <label class="rang doux"><input type="checkbox" id="rafale" style="width:auto" ${opts.inventaire ? 'checked' : ''}> Mode rafale (scanner plusieurs produits d'affilée)</label>
     <div class="rang" style="margin-top:8px"><input id="codeManuel" inputmode="numeric" placeholder="ou tape le code (8 à 14 chiffres)"><button class="btn sec" id="okCode">OK</button></div>
     <div id="resultat" style="margin-top:10px"></div>`, async (c) => {
     const etat = $('#etatScan', c);
@@ -91,7 +132,7 @@ export function ouvrirScan(surArticle, opts = {}) {
       rechercher(code, $('#resultat', c), surArticle, () => $('#rafale', c).checked, opts.cibleId, opts.libelleOk);
     };
     $('#okCode', c).onclick = () => traiter($('#codeManuel', c).value);
-    quandFermee(() => { arret?.(); arret = null; });
+    quandFermee(() => { arret?.(); arret = null; opts.surFin?.(); });
     try {
       arret = await demarrerCamera($('#video', c), traiter);
       etat.textContent = 'Vise le code-barres.';
@@ -101,6 +142,52 @@ export function ouvrirScan(surArticle, opts = {}) {
   });
 }
 
+/**
+ * Rafraîchit les fiches qui ont un code-barres avec Open Food Facts : 🍁 Québec, bio, allergènes,
+ * et format / marque / photo / Nutri-Score seulement s'ils manquent (ce que tu as écrit n'est jamais remplacé).
+ * Une fiche vérifiée il y a moins de 30 jours est sautée (sauf opts.tout). Environ 1 requête par seconde
+ * pour rester sous la limite d'Open Food Facts. etat(texte) reçoit la progression.
+ */
+export async function rafraichirFiches(etat = () => {}, opts = {}) {
+  const limite = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const aFaire = S.get().articles.filter((a) => a.codes?.length && (opts.tout || !a.offVerifie || a.offVerifie < limite));
+  const bilan = { verifies: 0, trouves: 0, enrichis: 0, total: aFaire.length };
+  for (const [n, a] of aFaire.entries()) {
+    etat(`${n + 1}/${aFaire.length} · ${a.nom}`);
+    let p = null;
+    // Les codes 12-13 chiffres d'abord (ce qu'Open Food Facts connaît), 4 essais max par fiche
+    const codes = [...a.codes].sort((x, y) => Math.abs(x.length - 13) - Math.abs(y.length - 13)).slice(0, 4);
+    for (const c of codes) {
+      try {
+        const r = await fetch(`${BASES[0][1]}/api/v2/product/${c}.json?fields=${CHAMPS}`);
+        const j = await r.json();
+        if (j.status === 1 && j.product) p = j.product;
+      } catch { /* hors ligne ou limite atteinte : on passe */ }
+      await new Promise((ok) => setTimeout(ok, 700)); // ~85 requêtes/minute max
+      if (p) break;
+    }
+    bilan.verifies++;
+    let change = false;
+    S.maj((x) => {
+      const ar = x.articles.find((i) => i.id === a.id);
+      if (!ar) return;
+      ar.offVerifie = aujourdhui();
+      if (!p) return;
+      bilan.trouves++;
+      const avant = JSON.stringify([ar.local, ar.bio, ar.allergenes, ar.format, ar.marque, ar.imageUrl, ar.nutriscore]);
+      appliquerDetails(ar, detailsOFF(p));
+      const fmt = formatOFF(p);
+      if (!ar.format && fmt) { ar.format = fmt; const f = analyserFormat(fmt); if (f) ar.uniteRef = f.base; }
+      if (!ar.marque && p.brands) ar.marque = p.brands.split(',')[0].trim();
+      if (!ar.imageUrl && (p.image_front_url || p.image_url)) ar.imageUrl = p.image_front_url || p.image_url;
+      if (!ar.nutriscore && p.nutriscore_grade?.length === 1) ar.nutriscore = p.nutriscore_grade;
+      change = avant !== JSON.stringify([ar.local, ar.bio, ar.allergenes, ar.format, ar.marque, ar.imageUrl, ar.nutriscore]);
+    });
+    if (change) bilan.enrichis++;
+  }
+  return bilan;
+}
+
 /** Infos d'un code-barres (bases ouvertes + épiceries.ca), sans interface. null si inconnu. */
 export async function infosCode(code) {
   const variantes = gtinVariantes(code);
@@ -108,8 +195,8 @@ export async function infosCode(code) {
   const p = trouve?.p || null, ecp = ec?.product || null;
   if (!p && !ecp) return null;
   return { nom: p ? (p.product_name_fr || p.product_name || '') : (ecp?.name || ''), marque: p?.brands?.split(',')[0]?.trim() || ecp?.brand || '',
-    format: p?.quantity ? normaliserQuantite(p.quantity) : (ecp?.size ? formatLisible(ecp.size) : ''),
-    image: p?.image_front_url || p?.image_url || ecp?.image || '', ec, ecp, variantes };
+    format: formatOFF(p) || (ecp?.size ? formatLisible(ecp.size) : ''),
+    image: p?.image_front_url || p?.image_url || ecp?.image || '', details: detailsOFF(p), ec, ecp, variantes };
 }
 
 async function chercherEnLigne(variantes) {
@@ -143,43 +230,105 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   const ecp = ec?.product || null;
 
   const nomPropose = p ? (p.product_name_fr || p.product_name || '') : (ecp?.name || '');
-  const fmt = p?.quantity ? normaliserQuantite(p.quantity) : (ecp?.size ? formatLisible(ecp.size) : '');
+  const fmt = formatOFF(p) || (ecp?.size ? formatLisible(ecp.size) : '');
+  const details = detailsOFF(p);
   const rayonId = p ? devinerRayon(p.categories_tags || []) : rayonParDefaut();
   let image = p?.image_front_url || p?.image_url || ecp?.image || '';
   zone.innerHTML = `
     ${ecp ? `<div class="alerte vert">💲 Prix réels trouvés sur épiceries.ca (${esc(argent(ecp.price))} chez ${esc(MAGASINS_EC[ecp.store] ? nomBanniere(MAGASINS_EC[ecp.store]) : ecp.store)}) — ils seront ajoutés.</div>` : ''}
     ${p || ecp ? `<div class="alerte vert">Trouvé sur ${esc(trouve?.source || 'épiceries.ca')}${p?.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>
+          ${resumeDetails(details)}
           ${image ? `<img src="${esc(image)}" alt="" style="display:block;max-height:160px;max-width:100%;margin:0 auto 8px;border-radius:8px;background:#fff">` : ''}`
         : `<div class="alerte ambre">Produit inconnu dans les bases ouvertes (code ${esc(code)}). Fréquent pour les produits Kirkland/Costco. Tape le nom ou prends une photo : le code sera retenu pour la prochaine fois.</div>`}
-    <div class="champ"><label>Nom (en français, à ta façon)</label><input id="sNom" value="${esc(nomPropose)}" list="sCat"></div>
-    <datalist id="sCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
+    <div class="champ"><label>Nom (en français, à ta façon)</label><input id="sNom" value="${esc(nomPropose)}">
+      ${cibleId ? '' : '<button type="button" class="btn sec" id="sChoix" style="width:100%;margin-top:6px;text-align:left">📚 C\'est un produit de ma liste ou de mon catalogue ▾</button><div id="sPanneau" hidden></div>'}</div>
     <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}"></div>
       <div class="champ grandir"><label>Format</label><input id="sFormat" value="${esc(fmt)}" placeholder="454 g"></div></div>
+    <div id="sVar"></div>
     <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
     ${image ? '' : '<div id="sPhotos" class="champ"><label>Photo du produit</label><p class="doux">Recherche de photos en ligne…</p></div>'}
     <div class="rang envelopper"><button class="btn" id="sOk">${cibleId ? '✓ Remplir la fiche' : esc(libelleOk)}</button>
       <button class="btn sec" id="sPhoto">📷 Photo du produit</button></div>`;
+  // Relier à une fiche existante : le nom choisi rattache le code à cette fiche (pas de doublon)
+  // Produit déjà au catalogue : ce code est-il une variante existante ou une nouvelle marque/format ?
+  const val = (id) => zone.querySelector(id).value.trim();
+  const majVar = () => {
+    const boite = zone.querySelector('#sVar');
+    const ex = !cibleId && val('#sNom') ? trouverArticle(val('#sNom')) : null;
+    if (!ex) { boite.innerHTML = ''; return; }
+    const reco = P.varianteDeLAchat(ex, { codes: variantes, marque: val('#sMarque'), format: val('#sFormat') });
+    const coche = reco.nouvelle ? 'nouveau' : reco.variante?.id;
+    const nouveau = [val('#sMarque'), val('#sFormat')].filter(Boolean).join(' · ') || 'à préciser dans la fiche';
+    boite.innerHTML = `<div class="carte" style="padding:8px;margin:0 0 8px"><b>« ${esc(ex.nom)} » est déjà au catalogue.</b> <span class="doux">Ce code-barres est :</span>
+      ${P.variantesActives(ex).map((v) => `<label class="rang" style="margin-top:4px"><input type="radio" name="sVar" value="${v.id}" ${v.id === coche ? 'checked' : ''} style="width:auto">
+        <span>${v === P.variantePref(ex) ? '★ ' : ''}${esc(P.libelleVariante(v))}</span></label>`).join('')}
+      <label class="rang" style="margin-top:4px"><input type="radio" name="sVar" value="nouveau" ${coche === 'nouveau' ? 'checked' : ''} style="width:auto">
+        <span>➕ Une nouvelle marque/format : ${esc(nouveau)}</span></label></div>`;
+  };
+  const choix = zone.querySelector('#sChoix');
+  if (choix) brancherSelecteurProduit(choix, zone.querySelector('#sPanneau'), (nom) => {
+    zone.querySelector('#sNom').value = nom;
+    choix.textContent = `📚 Fiche choisie : ${nom} ▾`;
+    majVar();
+  }, { aucun: false });
+  ['#sNom', '#sMarque', '#sFormat'].forEach((id) => zone.querySelector(id).addEventListener('change', majVar));
+  majVar();
   zone.querySelector('#sOk').onclick = () => {
     const nom = zone.querySelector('#sNom').value.trim();
     if (!nom) { toast('Entre un nom'); return; }
     const format = zone.querySelector('#sFormat').value.trim();
     const f = analyserFormat(format);
-    if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, p, ec, ecp, variantes });
+    if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, p, ec, ecp, variantes, details });
       surArticle(S.get().articles.find((x) => x.id === cibleId)); fermerModale(); return; }
+    const choixVar = zone.querySelector('[name="sVar"]:checked')?.value || null;
     const a = assurerArticle(nom, { rayonId, format, uniteRef: f?.base || 'unite', marque: zone.querySelector('#sMarque').value.trim(),
       nutriscore: p?.nutriscore_grade?.length === 1 ? p.nutriscore_grade : null, imageUrl: image });
-    S.maj((x) => {
-      const ar = x.articles.find((i) => i.id === a.id);
-      ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
-      if (image && !ar.imageUrl) ar.imageUrl = image; // photo officielle du produit
-      if (/kirkland/i.test(`${ar.marque || ''} ${ar.nom}`) && !ar.exclusif) ar.exclusif = 'costco'; // Kirkland = Costco seulement
+    const lierLiens = (ar) => {
       if (ecp && !(ar.liens || []).some((l) => l.id === ec.id)) {
         ar.liens = [...(ar.liens || []), { id: ec.id, nom: [ecp.brand, ecp.name].filter(Boolean).join(' '), size: ecp.size, image: ecp.image }];
       }
+    };
+    // Autre marque/format d'un produit existant (pas sa variante ★) : on range le code dans la bonne variante
+    const pref = P.variantePref(S.get().articles.find((i) => i.id === a.id));
+    if (choixVar && choixVar !== pref?.id) {
+      const marque = zone.querySelector('#sMarque').value.trim();
+      S.maj((x) => {
+        const ar = x.articles.find((i) => i.id === a.id);
+        let v;
+        if (choixVar === 'nouveau') v = P.ajouterVariante(ar, { marque, format, codes: variantes });
+        else {
+          v = ar.variantes.find((i) => i.id === choixVar);
+          P.modifierVariante(ar, v.id, { codes: [...(v.codes || []), ...variantes] });
+          if (!v.format && format) v.format = format;
+          if (!v.marque && marque) v.marque = marque;
+        }
+        if (image && !v.imageUrl) v.imageUrl = image;
+        if (p?.nutriscore_grade?.length === 1 && !v.nutriscore) v.nutriscore = p.nutriscore_grade;
+        appliquerDetails(v, details);
+        appliquerDetails(ar, details);
+        lierLiens(ar);
+      });
+      if (ecp) actualiserArticle(a.id, { force: true });
+      surArticle(a);
+      zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} — ${choixVar === 'nouveau' ? 'nouvelle marque/format ajoutée' : 'code rangé dans sa marque/format'}${enRafale() ? ' — scanne le suivant' : ''}</div>`;
+      if (!enRafale()) setTimeout(fermerModale, 900);
+      return;
+    }
+    S.maj((x) => {
+      const ar = x.articles.find((i) => i.id === a.id);
+      ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
+      appliquerDetails(ar, details); // 🍁 Québec, bio, allergènes (Open Food Facts)
+      if (image && !ar.imageUrl) ar.imageUrl = image; // photo officielle du produit
+      // Fiche existante : on complète seulement ce qui manque
+      if (!ar.format && f) { ar.format = format; ar.uniteRef = f.base; }
+      const marque = zone.querySelector('#sMarque').value.trim();
+      if (!ar.marque && marque) ar.marque = marque;
+      if (/kirkland/i.test(`${ar.marque || ''} ${ar.nom}`) && !ar.exclusif) ar.exclusif = 'costco'; // Kirkland = Costco seulement
+      lierLiens(ar);
     });
     if (ecp) actualiserArticle(a.id, { force: true });
     surArticle(a);
-    zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} ajouté${enRafale() ? ' — scanne le suivant' : ''}</div>`;
+    zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} ${libelleOk === 'Ajouter à la liste' ? 'ajouté' : 'enregistré'}${enRafale() ? ' — scanne le suivant' : ''}</div>`;
     if (!enRafale()) setTimeout(fermerModale, 700);
   };
   zone.querySelector('#sPhoto').onclick = () => { fermerModale(); photoProduit(null, code); };
@@ -248,7 +397,7 @@ async function proposerPhotos(code, nomPropose, zone, choisir) {
 }
 
 /** Remplit un article existant avec tout ce que le code-barres a permis de trouver. */
-function remplirFiche(id, { nom, format, f, marque, image, rayonId, p, ec, ecp, variantes }) {
+function remplirFiche(id, { nom, format, f, marque, image, rayonId, p, ec, ecp, variantes, details }) {
   S.maj((x) => {
     const ar = x.articles.find((i) => i.id === id);
     if (!ar) return;
@@ -257,6 +406,7 @@ function remplirFiche(id, { nom, format, f, marque, image, rayonId, p, ec, ecp, 
     if (format) { ar.format = format; if (f) ar.uniteRef = f.base; }
     if (image) ar.imageUrl = image; // la photo officielle remplace l'ancienne
     if (p?.nutriscore_grade?.length === 1) ar.nutriscore = p.nutriscore_grade;
+    if (details) appliquerDetails(ar, details);
     if (!ar.rayonManuel && p) ar.rayonId = rayonId; // une catégorie choisie à la main n'est jamais changée
     ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
     if (/kirkland/i.test(`${marque || ''} ${nom}`) && !ar.exclusif) ar.exclusif = 'costco';

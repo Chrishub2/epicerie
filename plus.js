@@ -3,13 +3,14 @@
 // sauvegarde.
 // =====================================================================
 import * as S from './store.js';
-import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin } from './ui.js';
+import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin, brancherSelecteurProduit } from './ui.js';
 import { PROGRAMMES } from './demo-data.js';
 import { photographierRecu } from './camera.js';
 import { prendrePhoto } from './ocr.js';
 import { analyserOffre, analyserFormat } from './normalise.js';
 import { ajouterTache } from './attente.js';
 import * as Sync from './sync.js';
+import * as P from './produits.js';
 
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
@@ -127,16 +128,129 @@ function vueRabais(v) {
   };
 }
 
+// --- Fusion des doublons (v33) -----------------------------------------
+/** Écran de fusion : doublons probables, choix libre, puis confirmation avec aperçu. */
+function ouvrirFusion(apres) {
+  const e = S.get();
+  const paires = P.doublonsProbables(e);
+  const tri = [...e.articles].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  ouvrirModale('Fusionner des doublons', `
+    <p class="doux" style="margin-top:0">Fusionner = un seul produit sur ta liste, avec chaque marque/format comme variante. Les prix, reçus et codes-barres suivent. Rien n'est fait sans ta confirmation, et une variante peut être séparée plus tard (fiche → Marques et formats → ↗).</p>
+    ${paires.length ? `<h3>Doublons probables</h3>${paires.map((p, i) => `<div class="carte" style="padding:8px;margin-bottom:6px">
+      <div><b>${esc(p.a.nom)}</b> + <b>${esc(p.b.nom)}</b> <span class="doux">· ${esc(p.raison)}</span></div>
+      <div class="rang" style="margin-top:6px"><button class="btn" data-paire="${i}">🔗 Fusionner…</button><button class="btn sec" data-pasdoublon="${i}">Pas un doublon</button></div></div>`).join('')}`
+      : '<p class="doux">Aucun doublon évident repéré. Tu peux en choisir toi-même ci-dessous.</p>'}
+    <h3>Choisir moi-même</h3>
+    <input id="fuFiltre" placeholder="🔎 Chercher un produit…" style="width:100%">
+    <div id="fuListe" style="max-height:40vh;overflow-y:auto;margin-top:6px">${tri.map((a) => `<label class="item" data-nomf="${esc(a.nom.toLowerCase())}" style="cursor:pointer">
+      <input type="checkbox" data-fu="${a.id}" style="width:auto"><span class="grandir">${esc(a.nom)} <span class="doux">${esc([a.marque, a.format].filter(Boolean).join(' · '))}</span></span></label>`).join('')}</div>
+    <button class="btn" id="fuSuite" style="width:100%;margin-top:8px" disabled>Fusionner la sélection…</button>`, (c) => {
+    const cases = () => $$('[data-fu]:checked', c).map((x) => x.dataset.fu);
+    $('#fuFiltre', c).oninput = (ev) => { const q = ev.target.value.toLowerCase().trim(); $$('[data-nomf]', c).forEach((l) => { l.hidden = q && !l.dataset.nomf.includes(q); }); };
+    $('#fuListe', c).onchange = () => { const n = cases().length; $('#fuSuite', c).disabled = n < 2; $('#fuSuite', c).textContent = n < 2 ? 'Fusionner la sélection…' : `Fusionner ces ${n} produits…`; };
+    $('#fuSuite', c).onclick = () => confirmerFusion(cases(), apres);
+    $$('[data-paire]', c).forEach((b) => b.onclick = () => { const p = paires[Number(b.dataset.paire)]; confirmerFusion([p.a.id, p.b.id], apres); });
+    $$('[data-pasdoublon]', c).forEach((b) => b.onclick = () => {
+      const p = paires[Number(b.dataset.pasdoublon)];
+      S.maj((x) => {
+        const a = x.articles.find((y) => y.id === p.a.id), bb = x.articles.find((y) => y.id === p.b.id);
+        if (a) a.pasDoublon = [...new Set([...(a.pasDoublon || []), p.b.id])];
+        if (bb) bb.pasDoublon = [...new Set([...(bb.pasDoublon || []), p.a.id])];
+      });
+      ouvrirFusion(apres);
+    });
+  });
+}
+
+/** Étape 2 : quel nom garder, aperçu de ce qui bouge, puis fusion. */
+function confirmerFusion(ids, apres) {
+  const e = S.get();
+  const arts = ids.map((id) => e.articles.find((a) => a.id === id)).filter(Boolean);
+  if (arts.length < 2) return;
+  // Par défaut : celui qui est sur la liste, sinon celui qui a le plus de prix
+  const poids = (a) => (e.liste.some((l) => l.articleId === a.id) ? 1000 : 0) + e.prix.filter((p) => p.articleId === a.id).length;
+  const defaut = [...arts].sort((a, b) => poids(b) - poids(a))[0];
+  const texteApercu = (cibleId) => {
+    const autres = arts.filter((a) => a.id !== cibleId);
+    const ap = P.apercuFusion(S.get(), autres.map((a) => a.id));
+    return `${autres.map((a) => `« ${esc(a.nom)} »`).join(', ')} ${autres.length > 1 ? 'deviendront des variantes' : 'deviendra une variante'} de ce produit :
+      ${ap.variantes} marque(s)/format(s), ${ap.prix} prix, ${ap.lignesListe} ligne(s) de liste (additionnées si en double). ${autres.length > 1 ? 'Ces fiches seront retirées' : 'Cette fiche sera retirée'} du catalogue.`;
+  };
+  ouvrirModale('Confirmer la fusion', `
+    <h3 style="margin-top:0">Garder le nom de :</h3>
+    ${arts.map((a) => `<label class="item" style="cursor:pointer"><input type="radio" name="fuCible" value="${a.id}" ${a === defaut ? 'checked' : ''} style="width:auto">
+      <span class="grandir">${esc(a.nom)} <span class="doux">${esc([a.marque, a.format].filter(Boolean).join(' · '))}</span></span></label>`).join('')}
+    <div class="alerte" id="fuApercu" style="margin-top:8px">${texteApercu(defaut.id)}</div>
+    <div class="rang" style="margin-top:8px"><button class="btn" id="fuOk">🔗 Fusionner</button><button class="btn sec" id="fuRetour">‹ Retour</button></div>`, (c) => {
+    const cible = () => $('[name="fuCible"]:checked', c).value;
+    $$('[name="fuCible"]', c).forEach((r) => r.onchange = () => { $('#fuApercu', c).innerHTML = texteApercu(cible()); });
+    $('#fuRetour', c).onclick = () => ouvrirFusion(apres);
+    $('#fuOk', c).onclick = () => {
+      const cid = cible(), nom = arts.find((a) => a.id === cid).nom;
+      S.maj((x) => P.fusionner(x, cid, ids));
+      toast(`Fusionné dans « ${nom} » ✓`);
+      apres?.();
+      ouvrirFusion(apres);
+    };
+  });
+}
+
 // --- Catalogue --------------------------------------------------------
+let offProgres = null; // texte de progression du rafraîchissement (survit aux réaffichages)
 function vueCatalogue(v) {
   const e = S.get();
   const parRayon = e.rayons.map((r) => ({ r, arts: e.articles.filter((a) => a.rayonId === r.id).sort((a, b) => a.nom.localeCompare(b.nom, 'fr')) }))
     .filter((x) => x.arts.length);
-  v.innerHTML = retour() + `<p class="doux">Touche un article pour modifier son nom, son rayon, son unité de comparaison ou son format.</p>`
-    + parRayon.map(({ r, arts }) => `<section class="rayon"><h3>${esc(r.nom)}</h3>${arts.map((a) =>
-      `<div class="item" data-a="${a.id}" style="cursor:pointer"><div class="grandir"><div class="nom">${esc(a.nom)} ${a.local ? '🍁' : ''}</div>
-       <div class="info">${esc(a.format || 'format ?')} · comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef}${a.codes?.length ? ' · ▥' : ''}</div></div></div>`).join('')}</section>`).join('');
+  const avecCode = e.articles.filter((a) => a.codes?.length).length;
+  v.innerHTML = retour() + `<p class="doux">Touche un article pour modifier son nom, son rayon, son unité de comparaison ou son format.</p>
+    <div class="carte"><button class="btn" id="invScan" style="width:100%">▥ Scanner mes produits</button>
+      <p class="doux" style="margin:6px 0 0">Pour bâtir ta base à la maison : scanne tes produits un après l'autre. Rien n'est ajouté à ta liste d'épicerie.</p></div>
+    <div class="carte"><button class="btn sec" id="offMaj" style="width:100%" ${avecCode && !offProgres ? '' : 'disabled'}>🔄 Rafraîchir mes fiches (Open Food Facts)</button>
+      <p class="doux" id="offEtat" style="margin:6px 0 0">${offProgres ? `⏳ ${esc(offProgres)}` : avecCode
+        ? `${avecCode} fiche(s) avec code-barres : j'ajoute 🍁 Québec, 🌱 bio et allergènes, et je complète format, marque et photo s'ils manquent. Ce que tu as écrit n'est jamais remplacé.`
+        : 'Aucune fiche n\'a encore de code-barres : scanne tes produits (▥) pour pouvoir les rafraîchir.'}</p></div>
+    <div class="carte"><button class="btn sec" id="fusion" style="width:100%">🔗 Fusionner des doublons</button>
+      <p class="doux" style="margin:6px 0 0">${(() => { const n = P.doublonsProbables(e).length; return n ? `${n} doublon(s) probable(s) repéré(s). ` : ''; })()}Ex. « Lait 2 % » et « Natrel 2 % » → un seul produit avec deux marques.</p></div>`
+    + parRayon.map(({ r, arts }) => `<section class="rayon"><h3>${esc(r.nom)}</h3>${arts.map((a) => {
+      const nbV = P.variantesActives(a).length;
+      return `<div class="item" data-a="${a.id}" style="cursor:pointer"><div class="grandir"><div class="nom">${esc(a.nom)} ${a.local ? '🍁' : ''}${a.bio ? ' 🌱' : ''}</div>
+       <div class="info">${esc(a.format || 'format ?')} · comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef}${a.codes?.length ? ' · ▥' : ''}${nbV > 1 ? ` · ${nbV} marques/formats` : ''}${a.allergenes?.length ? ` · ⚠️ ${esc(a.allergenes.join(', '))}` : ''}</div></div></div>`;
+    }).join('')}</section>`).join('');
   brancherRetour(v);
+  $('#fusion', v).onclick = () => ouvrirFusion(() => { if (section === 'catalogue') vueCatalogue(v); });
+  $('#invScan', v).onclick = async () => {
+    const { ouvrirScan } = await import('./scan.js');
+    const avant = new Set(S.get().articles.map((a) => a.id));
+    const vus = new Map(); // id → déjà au catalogue avant la session ?
+    ouvrirScan((a) => { if (a) vus.set(a.id, avant.has(a.id)); }, {
+      inventaire: true, libelleOk: '✓ Enregistrer la fiche',
+      surFin: () => {
+        if (vus.size) {
+          const relies = [...vus.values()].filter(Boolean).length;
+          toast(`▥ ${vus.size} produit(s) scanné(s) · ${relies} relié(s) à une fiche · ${vus.size - relies} nouvelle(s) fiche(s)`);
+        }
+        if (section === 'catalogue') vueCatalogue(v);
+      },
+    });
+  };
+  $('#offMaj', v).onclick = async (ev) => {
+    if (!navigator.onLine) { toast('📵 Pas de réseau'); return; }
+    ev.target.disabled = true;
+    // La vue se redessine à chaque fiche enregistrée : on garde la progression dans offProgres
+    const etat = (t) => { offProgres = t; const el = document.getElementById('offEtat'); if (el) el.textContent = `⏳ ${t}`; };
+    etat('Démarrage…');
+    const { rafraichirFiches } = await import('./scan.js');
+    let bilan;
+    try {
+      bilan = await rafraichirFiches(etat);
+      // Tout a été vérifié il y a moins de 30 jours : on offre de forcer
+      if (!bilan.total && confirm('Toutes tes fiches ont été vérifiées dans les 30 derniers jours. Tout revérifier quand même ?')) {
+        bilan = await rafraichirFiches(etat, { tout: true });
+      }
+    } finally { offProgres = null; }
+    toast(bilan.total ? `✓ ${bilan.verifies} fiche(s) vérifiée(s) · ${bilan.trouves} trouvée(s) · ${bilan.enrichis} enrichie(s)` : 'Rien à rafraîchir');
+    vueCatalogue(v);
+  };
   $$('[data-a]', v).forEach((el) => el.onclick = () => import('./app.js').then((m) => m.ficheArticle(el.dataset.a)));
 }
 
@@ -427,18 +541,24 @@ function associerRecu(id) {
   const e = S.get();
   const r = e.recus.find((x) => x.id === id);
   const nomDe = (aid) => e.articles.find((a) => a.id === aid)?.nom || '';
-  ouvrirModale('Associer les produits', `<p class="doux">Pour chaque ligne de la facture, choisis le produit de ton catalogue (ou tape un nouveau nom pour le créer). Laisse vide si ce n'est pas un produit (sac, consigne…). Je recompare ensuite les prix et je cherche le code-barres en ligne.</p>
-    <datalist id="asCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
+  const libelleChoix = (nom) => nom ? `🛒 ${esc(nom)}` : '— aucun produit —';
+  ouvrirModale('Associer les produits', `<p class="doux">Pour chaque ligne de la facture, touche la case pour choisir le produit dans ta liste d'épicerie ou ton catalogue (ou tape un nouveau nom pour le créer). Laisse « aucun produit » si ce n'est pas un produit (sac, consigne…). Je recompare ensuite les prix et je cherche le code-barres en ligne.</p>
     ${r.lignes.map((l, i) => `<div class="carte" style="padding:8px;margin-bottom:6px">
       <div class="rang"><b class="grandir">${esc(l.nomClair || l.libelle)}</b><b>${argent(l.prix)}</b></div>
       <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? ` · code ${esc(l.code)}` : ''}</div>
-      <input data-as="${i}" list="asCat" value="${esc(nomDe(l.articleId))}" placeholder="— aucun produit —" style="margin-top:6px"></div>`).join('')}
+      <button type="button" class="btn sec" data-as="${i}" data-nom="${esc(nomDe(l.articleId))}" style="width:100%;margin-top:6px;text-align:left">${libelleChoix(nomDe(l.articleId))} ▾</button>
+      <div data-panneau="${i}" hidden></div></div>`).join('')}
     <button class="btn" id="asOk" style="width:100%;margin-top:6px">✓ Enregistrer les associations</button>`, (c) => {
+    // Sélecteur commun (ui.js) : liste d'épicerie, puis catalogue, recherche et « Créer »
+    $$('[data-as]', c).forEach((b) => brancherSelecteurProduit(b, $(`[data-panneau="${b.dataset.as}"]`, c), (nom) => {
+      b.dataset.nom = nom;
+      b.innerHTML = `${libelleChoix(nom)} ▾`;
+    }));
     $('#asOk', c).onclick = async (ev) => {
       const app = await import('./app.js');
       const choix = {};
       $$('[data-as]', c).forEach((inp) => {
-        const i = Number(inp.dataset.as), l = r.lignes[i], nom = inp.value.trim();
+        const i = Number(inp.dataset.as), l = r.lignes[i], nom = (inp.dataset.nom || '').trim();
         let aid = '';
         if (nom) {
           const ex = S.get().articles.find((a) => a.nom.toLowerCase() === nom.toLowerCase());
@@ -530,6 +650,9 @@ function vueSauvegarde(v) {
   v.innerHTML = retour() + `<div class="carte"><h2>Exporter / importer</h2>
       <p class="doux">Copie de sécurité de tes données (sans les photos). Elle contient tes numéros de carte : garde-la en lieu sûr.</p>
       <div class="rang envelopper"><button class="btn" id="exp">Exporter</button><button class="btn sec" id="imp">Importer</button></div></div>
+    ${S.copieAvantV3() ? `<div class="carte"><h2>Copie avant la mise à jour des produits</h2>
+      <p class="doux">Faite automatiquement le ${new Date(S.copieAvantV3().date).toLocaleDateString('fr-CA', { dateStyle: 'medium' })}, avant le passage aux variantes (marque + format). Gardée 30 jours. À utiliser seulement si quelque chose semble perdu.</p>
+      <button class="btn sec" id="avantV3">↩︎ Revenir à avant</button></div>` : ''}
     <div class="carte"><h2>Mode démo</h2><p class="doux">Remet les données d'exemple (prix fictifs). Tes ajouts seront effacés de ce téléphone.</p>
       <button class="btn danger" id="reinit">Réinitialiser la démo</button></div>`;
   brancherRetour(v);
@@ -543,5 +666,10 @@ function vueSauvegarde(v) {
     i.onchange = async () => { try { S.importer(await i.files[0].text()); toast('Données importées'); } catch (err) { toast(err.message); } };
     i.click();
   };
+  $('#avantV3', v)?.addEventListener('click', () => {
+    if (!confirm('Remettre tes données telles qu\'avant la mise à jour des produits ? Ce que tu as changé depuis sera perdu sur ce téléphone.')) return;
+    S.importer(JSON.stringify(S.copieAvantV3().etat));
+    toast('Données d\'avant la mise à jour remises');
+  });
   $('#reinit', v).onclick = () => { if (confirm('Effacer tes données de démo sur ce téléphone et remettre les exemples ?')) { S.reinitialiser(); toast('Démo réinitialisée'); } };
 }
