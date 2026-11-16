@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr-CA" data-theme="sombre">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console Épicerie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="console.css">
+<script>
+  // Thème avant l'affichage (évite un flash clair/sombre)
+  try { const p = JSON.parse(localStorage.getItem('console-prefs') || '{}'); if (p.theme) document.documentElement.dataset.theme = p.theme; if (p.densite) document.documentElement.dataset.densite = p.densite; } catch {}
+</script>
+</head>
+<body>
+<div class="coque" id="coque">
+  <header class="barre">
+    <div class="marque"><span class="tag">É</span><span class="nom">Console Épicerie</span></div>
+    <button class="recherche-globale" id="ouvrirPalette" type="button" aria-label="Rechercher partout">
+      <span>⌕</span><span class="lib-r">Produit, code-barres, marque, rayon, problème…</span><span class="espace" style="flex:1"></span><kbd>Ctrl K</kbd>
+    </button>
+    <div class="espace"></div>
+    <div class="synchro" id="synchro" data-etat="fictif" title="Maquette : rien n'est lu ni envoyé à Supabase">
+      <span class="pastille"></span><span class="lib-s" id="synchroTexte">Données fictives · rien n'est envoyé</span>
+    </div>
+    <button class="bouton-icone" id="densite" type="button" title="Densité des lignes">☰</button>
+    <button class="bouton-icone" id="theme" type="button" title="Thème clair / sombre">◐</button>
+    <button class="bouton-icone" id="basculeCopilote" type="button" title="Copilote (])" aria-pressed="false">✦</button>
+    <button class="bouton-icone" id="aide" type="button" title="Raccourcis (?)">?</button>
+  </header>
+  <nav class="nav" id="nav" aria-label="Navigation"></nav>
+  <main class="travail" id="travail"></main>
+  <aside class="detail" id="detail" hidden><div class="poignee-panneau" id="poigneeDetail"></div><div id="detailContenu"></div></aside>
+  <aside class="copilote" id="copilote" hidden></aside>
+</div>
+<div class="notes" id="notes" aria-live="polite"></div>
+<script type="module" src="console.js"></script>
+</body>
+</html>

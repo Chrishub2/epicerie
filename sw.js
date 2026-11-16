@@ -7,7 +7,7 @@
 // - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
 // À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
 // =====================================================================
-const CACHE = 'epicerie-v42';
+const CACHE = 'epicerie-v43';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'couverture.js', 'demo-data.js',
   'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
   'retouche.js', 'maj.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg',
@@ -39,7 +39,8 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
     caches.open(CACHE).then((c) => c.match(e.request, { ignoreSearch: true })
-      .then((trouve) => trouve || (e.request.mode === 'navigate' ? c.match('./') : null))
+      // Page inconnue → l'app (hors ligne), SAUF la console ordinateur (console/), servie par le réseau.
+      .then((trouve) => trouve || (e.request.mode === 'navigate' && !url.pathname.includes('/console/') ? c.match('./') : null))
       .then((trouve) => trouve || fetch(e.request)))
   );
 });
