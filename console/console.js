@@ -9,6 +9,7 @@ import { TableVirtuelle } from './table.js';
 import { gtinValide, formatLisible, libelleUnitaire, analyserFormat } from '../normalise.js';
 import { normaliserProduits, variantesActives, variantePref, completude, codesDe, fusionner, apercuFusion } from '../produits.js';
 import { SourceSupabase, construireEtat, differences, COLLECTIONS } from './source.js';
+import { chercherProduit, besoinsPour } from './recherche.js';
 
 // ---------------------------------------------------------------------
 // Outils
@@ -137,8 +138,11 @@ function restaurer(h) {
   reanalyser(); rendre();
   note(`Valeur restaurée sur « ${esc((ARTS.get(h.articleId)?.nom || h.nom).trim())} »`);
 }
-function libelleChamp(c) { return { nom: 'Nom', marque: 'Marque', format: 'Format', uniteRef: 'Unité de comparaison', rayonId: 'Rayon', code: 'Code-barres', fusion: 'Fusion', pasDoublon: 'Pas un doublon' }[c] || c; }
+function libelleChamp(c) { return { nom: 'Nom', marque: 'Marque', format: 'Format', uniteRef: 'Unité de comparaison', rayonId: 'Rayon', code: 'Code-barres', codes: 'Codes-barres', imageUrl: 'Photo', liens: 'Lien épiceries.ca (prix)', fusion: 'Fusion', pasDoublon: 'Pas un doublon' }[c] || c; }
 function valeurLisible(champ, v) {
+  if (champ === 'imageUrl' && v) return `<img class="vignette image" src="${esc(v)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
+  if (champ === 'codes' && Array.isArray(v)) return v.length ? `<span class="mono">${v.map(esc).join(', ')}</span>` : '<span class="discret">(aucun)</span>';
+  if (champ === 'liens' && Array.isArray(v)) return v.length ? esc(v.map((l) => l.nom).join(' · ')) : '<span class="discret">(aucun)</span>';
   if (v == null || v === '') return '<span class="discret">(vide)</span>';
   if (champ === 'rayonId') return esc(rayonNom(v));
   if (champ === 'uniteRef') return esc(UNITES[v] || v);
@@ -691,6 +695,67 @@ function actionProbleme(p, act) {
   } else if (act === 'ouvrir') ouvrirArticle(p.cibles[0]);
   else if (act === 'corriger') corrigerChamp(p.cibles[0], CHAMP_A_CORRIGER[p.code]);
 }
+// ---------------------------------------------------------------------
+// Recherche automatique (sources gratuites) : épiceries.ca + Open Food Facts → propositions à cocher
+// ---------------------------------------------------------------------
+const MAX_RECHERCHE = 20;
+async function rechercherAuto(problemes, regle) {
+  const ids = [...new Set(problemes.map((p) => p.cibles[0]))].filter((id) => ARTS.get(id)).slice(0, MAX_RECHERCHE);
+  if (!ids.length) { note('Rien à chercher dans cette section.'); return; }
+  const avecOFF = ['code_manquant', 'photo_manquante'].includes(regle);
+  let arret = false;
+  const resultats = [];
+  const m = modale(`✦ Recherche automatique — ${ids.length} produit(s)`, `<p class="muet" id="rechEtat">Préparation…</p><div id="rechResultats"></div>`, [
+    ['Fermer', 'fermer'],
+    ['Appliquer les propositions cochées', 'principal', () => appliquerPropositions(m)],
+  ]);
+  const boutonAppliquer = [...m.querySelectorAll('.pied-m .btn')].pop();
+  boutonAppliquer.disabled = true;
+  const arreter = document.createElement('button'); arreter.className = 'btn'; arreter.textContent = 'Arrêter';
+  arreter.onclick = () => { arret = true; arreter.disabled = true; };
+  m.querySelector('.pied-m').prepend(arreter);
+  for (let i = 0; i < ids.length && !arret && document.body.contains(m); i++) {
+    const a = ARTS.get(ids[i]);
+    m.querySelector('#rechEtat').textContent = `Recherche ${i + 1} / ${ids.length} : ${a.nom.trim()}…`;
+    const besoins = besoinsPour(a, regle);
+    if (!avecOFF) besoins.delete('codes');
+    try { resultats.push({ a, ...(await chercherProduit(a, { rayons: E.rayons, besoins, avecOFF })) }); }
+    catch (err) { resultats.push({ a, candidats: [], propositions: [], notes: [err.message] }); }
+    rendreResultats(m, resultats);
+  }
+  if (!document.body.contains(m)) return;
+  arreter.remove();
+  const n = resultats.reduce((s, r) => s + r.propositions.length, 0);
+  m.querySelector('#rechEtat').innerHTML = `${resultats.length} produit(s) cherché(s) · ${n} proposition(s). Les propositions à 80 % et plus sont cochées ; vérifie les autres. Sources : épiceries.ca${avecOFF ? ', Open Food Facts' : ''}.`;
+  boutonAppliquer.disabled = !n;
+}
+function rendreResultats(m, resultats) {
+  const zone = m.querySelector('#rechResultats');
+  zone.innerHTML = `<table class="mini-table avant-apres">
+    <tr><th></th><th>Champ</th><th>Proposition</th><th>Trouvé</th><th>Confiance</th></tr>
+    ${resultats.map((r, i) => `<tr class="groupe-pc"><td colspan="5">${nomCourt(r.a)}${r.propositions.length ? '' : ' <span class="discret" style="font-weight:400">— rien de fiable trouvé</span>'}${r.notes?.length ? ` <span class="discret" style="font-weight:400">· ${esc(r.notes.join(' · '))}</span>` : ''}</td></tr>`
+      + r.propositions.map((p, j) => `<tr><td><input type="checkbox" class="case" data-prop="${i}:${j}" ${p.confiance >= 0.8 ? 'checked' : ''}></td>
+        <td>${libelleChamp(p.champ)}</td><td class="ap">${p.champ === 'rayonId' || p.champ === 'liens' || p.champ === 'codes' ? esc(p.texte) : valeurLisible(p.champ, p.valeur)}</td>
+        <td><span class="discret">${esc(p.source)}${p.candidat ? ' : ' + esc(p.candidat) : ''}</span>${p.lien ? ` <a href="${esc(p.lien)}" target="_blank" rel="noopener">voir</a>` : ''}</td>
+        <td>${confiance(p.confiance)}</td></tr>`).join('')).join('')}</table>`;
+  m._resultats = resultats;
+}
+function appliquerPropositions(m) {
+  const resultats = m._resultats || [];
+  const choix = [...m.querySelectorAll('[data-prop]:checked')].map((c) => { const [i, j] = c.dataset.prop.split(':').map(Number); return { a: resultats[i].a, p: resultats[i].propositions[j] }; });
+  if (!choix.length) { note('Coche au moins une proposition.'); return false; }
+  const lot = ++nLot;
+  for (const { a, p } of choix) {
+    if (!ARTS.get(a.id)) continue;
+    let valeur = p.valeur;
+    if (p.champ === 'codes') valeur = [...new Set([...(ARTS.get(a.id).codes || []), ...p.valeur])];
+    if (p.champ === 'liens') valeur = [...(ARTS.get(a.id).liens || []).filter((l) => !p.valeur.some((x) => x.id === l.id)), ...p.valeur.filter((x) => !(ARTS.get(a.id).liens || []).some((l) => l.id === x.id))];
+    modifier(a.id, p.champ, valeur, 'console', lot);
+  }
+  reanalyser(); rendre();
+  note(`${choix.length} proposition(s) appliquée(s)`, { libelle: 'Annuler le lot', faire: () => annulerLot(lot) });
+}
+
 /** Problèmes qu'on corrige à la main dans la console : règle → champ de la fiche. Les autres (code, photo, prix) se font au téléphone. */
 const CHAMP_A_CORRIGER = { format_manquant: 'format', marque_manquante: 'marque', rayon_divers: 'rayonId', nom_a_normaliser: 'nom', format_unite: 'uniteRef' };
 function corrigerChamp(id, champ) {
@@ -736,6 +801,7 @@ function vueBoite(t) {
           <button class="puce" id="toutCocher">Cocher les corrections ≥ ${pct(SEUIL_LOT)}</button>
           <span style="flex:1"></span>
           <span class="muet" id="compteSelBoite"></span>
+          <button class="btn ia" id="rechercher" title="Cherche sur épiceries.ca et Open Food Facts (gratuit, sans IA) les infos manquantes des lignes cochées — ou des 20 premières affichées. Tu choisis ensuite quoi appliquer.">✦ Rechercher</button>
           <button class="btn principal" id="appliquerLot" disabled title="Applique les corrections proposées des lignes cochées. Les lignes sans correction (« À vérifier », « À corriger ») ne sont pas concernées.">Appliquer la sélection…</button>
           <button class="btn" id="ignorerLot" disabled>Écarter la sélection</button>
         </div>
@@ -784,6 +850,10 @@ function vueBoite(t) {
     const ok = liste().filter((p) => p.correction && p.confiance >= SEUIL_LOT);
     ok.forEach((p) => b.selection.add(p.cle)); tv.rafraichir(); majBoutons();
     if (!ok.length) note(`Aucune correction de ce type n'atteint ${pct(SEUIL_LOT)} : vérifie-les une à une.`);
+  };
+  $('#rechercher').onclick = () => {
+    const coches = liste().filter((p) => b.selection.has(p.cle));
+    rechercherAuto((coches.length ? coches : liste()).filter((p) => p.cibles.length === 1), b.regle);
   };
   $('#ignorerLot').onclick = () => {
     const sel = liste().filter((p) => b.selection.has(p.cle));
