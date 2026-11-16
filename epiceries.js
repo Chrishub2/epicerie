@@ -17,7 +17,11 @@ const PAUSE_MS = 400;                    // pas de rafales
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function appel(params) {
-  const r = await fetch(`${API}?${new URLSearchParams(params)}`);
+  // Délai maximal : si épiceries.ca ne répond pas, on abandonne au lieu de bloquer le scan ou les reçus
+  const ctrl = new AbortController();
+  const minuterie = setTimeout(() => ctrl.abort(), 12000);
+  let r;
+  try { r = await fetch(`${API}?${new URLSearchParams(params)}`, { signal: ctrl.signal }); } finally { clearTimeout(minuterie); }
   const j = await r.json();
   if (!j.ok) { const e = new Error(j.error?.message || 'Erreur épiceries.ca'); e.code = j.error?.code; throw e; }
   return j.data;

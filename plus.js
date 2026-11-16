@@ -210,13 +210,16 @@ function vueCatalogue(v) {
         ? `${avecCode} fiche(s) avec code-barres : j'ajoute 🍁 Québec, 🌱 bio et allergènes, et je complète format, marque et photo s'ils manquent. Ce que tu as écrit n'est jamais remplacé.`
         : 'Aucune fiche n\'a encore de code-barres : scanne tes produits (▥) pour pouvoir les rafraîchir.'}</p></div>
     <div class="carte"><button class="btn sec" id="fusion" style="width:100%">🔗 Fusionner des doublons</button>
-      <p class="doux" style="margin:6px 0 0">${(() => { const n = P.doublonsProbables(e).length; return n ? `${n} doublon(s) probable(s) repéré(s). ` : ''; })()}Ex. « Lait 2 % » et « Natrel 2 % » → un seul produit avec deux marques.</p></div>`
+      <p class="doux" style="margin:6px 0 0">${(() => { const n = P.doublonsProbables(e).length; return n ? `${n} doublon(s) probable(s) repéré(s). ` : ''; })()}Ex. « Lait 2 % » et « Natrel 2 % » → un seul produit avec deux marques.</p></div>
+    <div class="carte"><button class="btn sec" id="couverture" style="width:100%">📊 Test de couverture des sources</button>
+      <p class="doux" style="margin:6px 0 0">Combien de tes produits scannés sont connus d'Open Food Facts, d'épiceries.ca et d'UPCitemdb, avec la bonne marque et le bon format.</p></div>`
     + parRayon.map(({ r, arts }) => `<section class="rayon"><h3>${esc(r.nom)}</h3>${arts.map((a) => {
       const nbV = P.variantesActives(a).length;
       return `<div class="item" data-a="${a.id}" style="cursor:pointer"><div class="grandir"><div class="nom">${esc(a.nom)} ${a.local ? '🍁' : ''}${a.bio ? ' 🌱' : ''}</div>
        <div class="info">${esc(a.format || 'format ?')} · comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef}${a.codes?.length ? ' · ▥' : ''}${nbV > 1 ? ` · ${nbV} marques/formats` : ''}${a.allergenes?.length ? ` · ⚠️ ${esc(a.allergenes.join(', '))}` : ''}</div></div></div>`;
     }).join('')}</section>`).join('');
   brancherRetour(v);
+  $('#couverture', v).onclick = () => import('./couverture.js').then((m) => m.ouvrirCouverture());
   $('#fusion', v).onclick = () => ouvrirFusion(() => { if (section === 'catalogue') vueCatalogue(v); });
   $('#invScan', v).onclick = async () => {
     const { ouvrirScan } = await import('./scan.js');

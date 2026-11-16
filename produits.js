@@ -302,11 +302,11 @@ export function retenirAlias(e, articleId, vid, banniere, libelle) {
   }
 }
 
-const memeFormat = (f1, f2) => {
+export const memeFormat = (f1, f2) => {
   const a = analyserFormat(f1), b = analyserFormat(f2);
   return !!(a && b && a.base === b.base && Math.abs(a.total - b.total) / Math.max(a.total, b.total) < 0.03);
 };
-const memeMarque = (m1, m2) => {
+export const memeMarque = (m1, m2) => {
   const a = simplifier(m1), b = simplifier(m2);
   return !a || !b || a.includes(b) || b.includes(a);
 };
