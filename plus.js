@@ -646,7 +646,7 @@ function vueRecus(v) {
   $$('[data-recu]', v).forEach((el) => el.onclick = () => ouvrirDetailRecu(el.dataset.recu));
 }
 
-const PROGRAMMES_NOMS = { iga: 'IGA', super_c: 'Super C', metro: 'Metro', maxi: 'Maxi', costco: 'Costco', jean_coutu: 'Jean Coutu' };
+const PROGRAMMES_NOMS = { iga: 'IGA', super_c: 'Super C', metro: 'Metro', maxi: 'Maxi', costco: 'Costco', jean_coutu: 'Jean Coutu', provigo: 'Provigo', walmart: 'Walmart' };
 
 // --- Sauvegarde -------------------------------------------------------
 function vueSauvegarde(v) {

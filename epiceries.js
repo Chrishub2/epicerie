@@ -2,7 +2,7 @@
 // Vrais prix — API publique d'épiceries.ca
 // Doc : https://epiceries.ca/developers — lecture seule, sans clé, CORS ouvert.
 // Conditions : usage raisonnable (cache, pas de rafales), attribuer la source.
-// Couvre Maxi, IGA, Super C, Metro (+ Provigo, Walmart, ignorés : hors mandat).
+// Couvre Maxi, IGA, Super C, Metro, Provigo et Walmart (ajoutés le 2026-11-16 avec l'accord de Chris).
 // Ne couvre PAS Costco ni Jean Coutu → photo, saisie, reçus.
 // =====================================================================
 import * as S from './store.js';
@@ -10,7 +10,7 @@ import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, nomBanniere, puc
 import { normaliser, analyserFormat, formatLisible } from './normalise.js';
 
 const API = 'https://epiceries.ca/api';
-export const MAGASINS_EC = { maxi: 'maxi', iga: 'iga', superc: 'super_c', metro: 'metro' };
+export const MAGASINS_EC = { maxi: 'maxi', iga: 'iga', superc: 'super_c', metro: 'metro', provigo: 'provigo', walmart: 'walmart' };
 const DELAI_MAJ_MS = 12 * 3600 * 1000;  // on ne redemande pas un produit plus d'une fois aux 12 h
 const PAUSE_MS = 400;                    // pas de rafales
 
@@ -212,7 +212,7 @@ export function ouvrirLiaison(articleId, apres, opts = {}) {
   }
   ouvrirModale(`Vrais prix — ${a.nom}`, `
     ${opts.etape ? `<p><b>${esc(opts.etape)}</b></p>` : ''}
-    <p class="doux">${opts.auto ? 'Voici les produits trouvés pour ta saisie. ' : ''}Coche le ou les produits qui correspondent (un par magasin si les marques diffèrent, ex. Natrel chez IGA, Québon chez Maxi). <span style="color:var(--vert)">Vert</span> = le moins cher au kg/L, <span style="color:var(--rouge)">rouge</span> = le plus cher. Source : épiceries.ca (Maxi, IGA, Super C, Metro).</p>
+    <p class="doux">${opts.auto ? 'Voici les produits trouvés pour ta saisie. ' : ''}Coche le ou les produits qui correspondent (un par magasin si les marques diffèrent, ex. Natrel chez IGA, Québon chez Maxi). <span style="color:var(--vert)">Vert</span> = le moins cher au kg/L, <span style="color:var(--rouge)">rouge</span> = le plus cher. Source : épiceries.ca (Maxi, IGA, Super C, Metro, Provigo, Walmart).</p>
     <div class="rang"><input id="ecQ" class="grandir" value="${esc(opts.q || `${a.nom}${a.marque ? ' ' + a.marque : ''}`)}"><button class="btn" id="ecGo">Chercher</button></div>
     <div id="ecRes" style="margin-top:10px"><p class="doux">Recherche…</p></div>
     <div class="rang" style="margin-top:8px"><button class="btn grandir" id="ecLier" disabled>Lier la sélection</button>${opts.auto ? '<button class="btn sec" id="ecPasser">Plus tard</button>' : ''}</div>`, (c) => {
@@ -282,7 +282,7 @@ export function ouvrirLiaison(articleId, apres, opts = {}) {
 // ---------------------------------------------------------------------
 // Historique des prix (graphique SVG, prix ramenés à l'unité de l'article)
 // ---------------------------------------------------------------------
-const COULEURS = { iga: '#d6001c', super_c: '#f08c00', metro: '#1c5fd6', maxi: '#c9a800', costco: '#005daa', jean_coutu: '#6a3fb5' };
+const COULEURS = { iga: '#d6001c', super_c: '#f08c00', metro: '#1c5fd6', maxi: '#c9a800', costco: '#005daa', jean_coutu: '#6a3fb5', provigo: '#e2231a', walmart: '#0071ce' };
 
 export async function afficherHistorique(article, zone) {
   zone.innerHTML = '<p class="doux">Chargement de l\'historique…</p>';

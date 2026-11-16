@@ -17,6 +17,9 @@ export const BANNIERES = {
   maxi: { nom: 'Maxi', couleur: '#ffcc00' },
   costco: { nom: 'Costco', couleur: '#005daa' },
   jean_coutu: { nom: 'Jean Coutu', couleur: '#0072ce' },
+  // Ajoutés le 2026-11-16 avec l'accord de Chris (prix réels via épiceries.ca)
+  provigo: { nom: 'Provigo', couleur: '#e2231a' },
+  walmart: { nom: 'Walmart', couleur: '#0071ce' },
   // Commande en ligne seulement (épicerie en ligne d'IGA) : pas de succursale, pas dans les comparaisons en magasin.
   voila: { nom: 'Voilà (IGA en ligne)', couleur: '#6a1b9a', enLigneSeulement: true },
 };
@@ -24,7 +27,7 @@ export const BANNIERES = {
 export const BANNIERES_MAGASIN = Object.keys(BANNIERES).filter((k) => !BANNIERES[k].enLigneSeulement);
 
 export const PROGRAMMES = {
-  pc_optimum: 'PC Optimum (Maxi)',
+  pc_optimum: 'PC Optimum (Maxi, Provigo)',
   metro_moi: 'Metro & moi (Metro, Super C)',
   scene_plus: 'Scène+ (IGA)',
   jean_coutu: 'Jean Coutu',
@@ -38,6 +41,7 @@ export const CODES_POSTAUX_REELS = [
   { code: 'J3G', libelle: 'Beloeil' },
   { code: 'J3X', libelle: 'Varennes' },
   { code: 'J4B', libelle: 'Boucherville' },
+  { code: 'J3V', libelle: 'Saint-Bruno-de-Montarville' },
 ];
 export const MAGASINS_REELS = [
   { id: 'm1', banniere: 'iga', nom: 'IGA Beloeil', codePostal: 'J3G', adresse: "825, boul. Yvon-L'Heureux Nord, Beloeil, QC J3G 6P5", lat: 45.57807, lng: -73.21527 },
@@ -48,6 +52,9 @@ export const MAGASINS_REELS = [
   { id: 'm6', banniere: 'costco', nom: 'Costco Boucherville', codePostal: 'J4B', adresse: '635, chemin de Touraine, Boucherville, QC J4B 5E4', lat: 45.57691, lng: -73.40578 },
   { id: 'm7', banniere: 'iga', nom: 'IGA Extra Varennes', codePostal: 'J3X', adresse: '1777, route 132, Varennes, QC J3X 1P5', lat: 45.66903, lng: -73.43091 },
   { id: 'm8', banniere: 'metro', nom: 'Metro Beloeil', codePostal: 'J3G', adresse: "Boul. Yvon-L'Heureux Nord, Beloeil, QC J3G 6P5", lat: 45.57962, lng: -73.21452 },
+  // Ajoutés le 2026-11-16 (OpenStreetMap + site de l'enseigne / répertoire municipal). Aucun Walmart trouvé à Beloeil ou Mont-Saint-Hilaire.
+  { id: 'm9', banniere: 'provigo', nom: 'Provigo Le Marché Boucherville', codePostal: 'J4B', adresse: '1001, boul. de Montarville, Boucherville, QC J4B', lat: 45.59114, lng: -73.43430 },
+  { id: 'm10', banniere: 'walmart', nom: 'Walmart Saint-Bruno', codePostal: 'J3V', adresse: '1475, boul. Saint-Bruno, Saint-Bruno-de-Montarville, QC J3V 6J1', lat: 45.50928, lng: -73.38431 },
 ];
 
 export function etatDemo() {
@@ -110,7 +117,7 @@ export function etatDemo() {
     utilisateur: 'Chris',
     membres: ['Chris', 'Partenaire'],
     magasinCourant: 'defaut',
-    version: 3,
+    version: 4,
     codesPostaux: CODES_POSTAUX_REELS.map((c) => ({ ...c })),
     alertesMasquees: [],
     magasins,

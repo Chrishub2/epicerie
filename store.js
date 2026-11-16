@@ -27,6 +27,15 @@ function migrer(e) {
     try { localStorage.setItem(CLE_AVANT_V3, JSON.stringify({ date: new Date().toISOString(), etat: e })); } catch { /* espace plein : la migration n'efface rien de toute façon */ }
     migrerV3(e);
   }
+  if (e.version < 4) {
+    // v4 : Provigo (Boucherville) et Walmart (Saint-Bruno) ajoutés avec l'accord de Chris — seulement s'ils manquent.
+    for (const id of ['m9', 'm10']) {
+      const r = MAGASINS_REELS.find((x) => x.id === id);
+      if (r && !e.magasins.some((x) => x.id === r.id || x.nom === r.nom || x.adresse === r.adresse)) e.magasins.push({ ...r });
+    }
+    for (const c of CODES_POSTAUX_REELS) if (!e.codesPostaux.some((x) => x.code === c.code)) e.codesPostaux.push({ ...c });
+    e.version = 4;
+  }
   return e;
 }
 

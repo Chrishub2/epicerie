@@ -68,7 +68,8 @@ export async function lireEtiquette(blob, etat) {
 /** Reçu (1 ou plusieurs photos) → { banniere, date, total, lignes:[{libelle, prix, code…}], verification, … }. liste = noms à relier. */
 export async function lireRecu(blobs, etat, liste = [], attendus = []) {
   const r = await essayerIA('recu', blobs, etat, { ...(liste.length ? { liste } : {}), ...(attendus.length ? { attendus } : {}) });
-  if (r) return { banniere: r.banniere === 'autre' ? null : r.banniere, magasin: r.magasin, adresse: r.adresse, telephone: r.telephone,
+  // « autre » : l'enseigne peut être plus récente que la fonction IA déployée (ex. Provigo, Walmart) → on la reconnaît dans le nom du magasin
+  if (r) return { banniere: r.banniere && r.banniere !== 'autre' ? r.banniere : (ENSEIGNES.find(([re]) => re.test(`${r.magasin || ''} ${r.adresse || ''}`))?.[1] || null), magasin: r.magasin, adresse: r.adresse, telephone: r.telephone,
     date: r.date, heure: r.heure, caisse: r.caisse, caissier: r.caissier, transaction: r.transaction,
     nombreArticles: r.nombre_articles, sousTotal: r.sous_total, total: r.total, tps: r.tps, tvq: r.tvq, economies: r.economies,
     modePaiement: r.mode_paiement, programmeFidelite: r.programme_fidelite, pointsGagnes: r.points_gagnes, soldePoints: r.solde_points,
@@ -166,7 +167,8 @@ export async function lirePrixPhoto(cb, zoneEtat) {
 // ---------------------------------------------------------------------
 // Reçus
 // ---------------------------------------------------------------------
-const ENSEIGNES = [[/super\s*c/i, 'super_c'], [/\bmaxi\b/i, 'maxi'], [/\bmetro\b/i, 'metro'], [/\biga\b/i, 'iga'],
+// Walmart d'abord : « Walmart Supercentre » contient « Superc » ; Super C exige un mot complet (« SUPER C », « SuperC »)
+const ENSEIGNES = [[/wal-?mart/i, 'walmart'], [/provigo/i, 'provigo'], [/super\s*c\b/i, 'super_c'], [/\bmaxi\b/i, 'maxi'], [/\bmetro\b/i, 'metro'], [/\biga\b/i, 'iga'],
   [/costco/i, 'costco'], [/jean\s*coutu/i, 'jean_coutu']];
 
 /** Reçu → { banniere, date, total, lignes:[{ libelle, prix }] } (au mieux ; à vérifier). */
