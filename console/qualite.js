@@ -74,10 +74,20 @@ export function analyser(e, ignores = new Set()) {
   const problemes = [];
   const rayonDe = new Map((e.rayons || []).map((r) => [r.id, r]));
   const prixParArticle = new Map();
-  for (const p of e.prix || []) { if (!p.annule) (prixParArticle.get(p.articleId) || prixParArticle.set(p.articleId, []).get(p.articleId)).push(p); }
+  // La base garde chaque copie d'un prix (ajout seulement) : le téléphone renvoie les mêmes prix d'épiceries.ca
+  // à chaque rafraîchissement. Une observation = (produit, magasin, offre, format, type, date) → comptée UNE fois.
+  const vusPrix = new Set();
+  let prixDoublons = 0;
+  for (const p of e.prix || []) {
+    if (p.annule) continue;
+    const cleP = [p.articleId, p.banniere, p.magasinId || '', p.offre, p.format || '', p.type || '', p.observeLe || ''].join('|');
+    if (vusPrix.has(cleP)) { prixDoublons++; continue; }
+    vusPrix.add(cleP);
+    (prixParArticle.get(p.articleId) || prixParArticle.set(p.articleId, []).get(p.articleId)).push(p);
+  }
 
   const ajouter = (code, cibles, extra) => {
-    const cle = code + ':' + cibles.join('+');
+    const cle = code + ':' + cibles.join('+') + (extra?.prixId ? ':' + extra.prixId : ''); // un prix suspect = un problème
     if (ignores.has(cle)) return;
     const r = REGLES[code];
     problemes.push({ cle, code, priorite: r.priorite, titre: r.titre, cibles, confiance: 1, correction: null, ...extra });
@@ -127,7 +137,7 @@ export function analyser(e, ignores = new Set()) {
         const ratio = x.pu / med;
         if (ratio > 2.5 || ratio < 0.4) {
           ajouter('prix_aberrant', [a.id], {
-            probleme: `${x.p.offre} chez ${x.p.banniere} le ${x.p.observeLe} : ${ratio.toFixed(1).replace('.', ',')} × la médiane (n = ${pus.length})`,
+            probleme: `${x.p.offre} chez ${x.p.banniere} le ${x.p.observeLe}${x.p.source ? ` (${x.p.source === 'epiceries_ca' ? 'épiceries.ca' : x.p.source})` : ''} : ${ratio.toFixed(1).replace('.', ',')} × la médiane (n = ${pus.length})`,
             raison: `Médiane ${med.toFixed(2).replace('.', ',')} $/${a.uniteRef === 'unite' ? 'unité' : a.uniteRef}. Les prix sont en ajout seulement : on ne les modifie pas, on les vérifie.`,
             confiance: Math.min(0.95, 0.55 + pus.length * 0.05), impact: 'Fausse le meilleur prix et les économies calculées.',
             prixId: x.p.id,
@@ -224,7 +234,7 @@ export function analyser(e, ignores = new Set()) {
   const parArticle = new Map();
   for (const p of problemes) for (const id of p.cibles) (parArticle.get(id) || parArticle.set(id, []).get(id)).push(p);
   problemes.sort((x, y) => x.priorite - y.priorite || y.confiance - x.confiance);
-  return { problemes, parArticle, prixParArticle, duree: Math.round(performance.now() - t0) };
+  return { problemes, parArticle, prixParArticle, prixUniques: vusPrix.size, prixDoublons, duree: Math.round(performance.now() - t0) };
 }
 
 /** Meilleur prix unitaire récent (≤ 120 jours) : { pu, banniere } ou null. */

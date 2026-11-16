@@ -227,7 +227,7 @@ function vueTdb(t) {
     ['Types de produits', E.articles.length, 'catalogue'], ['Produits commerciaux', commerciaux.size, null, 'Calculés : type + marque (seulement les variantes qui ont une marque)'],
     ['SKU (variantes)', variantes.length], ['Marques', marques.size], ['Codes-barres', codes.size], ['Rayons', E.rayons.length],
     ['Images', E.articles.filter((a) => a.imageUrl).length], ['Références marchand', alias, null, 'Noms imprimés sur les reçus'],
-    ['Prix observés', E.prix.length], ['Problèmes ouverts', A.problemes.length, 'boite'], ['Corrections prêtes', applicables, 'boite', `Confiance ≥ ${pct(SEUIL_LOT)}`],
+    ['Prix observés', A.prixUniques ?? E.prix.length, null, A.prixDoublons ? `${A.prixUniques} observations distinctes · ${A.prixDoublons} copie(s) identique(s) gardée(s) dans la base (non comptées)` : ''], ['Problèmes ouverts', A.problemes.length, 'boite'], ['Corrections prêtes', applicables, 'boite', `Confiance ≥ ${pct(SEUIL_LOT)}`],
     ['Fiches complètes', pct(completes / E.articles.length), 'catalogue'],
   ];
   t.innerHTML = `
@@ -732,7 +732,7 @@ function vueBoite(t) {
     { cle: 'act', titre: 'Action', largeur: 168, rendu: (p) => `${p.correction ? '<button class="btn petit principal" data-act="appliquer" title="Appliquer la correction proposée">✓ Appliquer</button> ' : ''}${!p.correction && CHAMP_A_CORRIGER[p.code] ? '<button class="btn petit" data-act="corriger" title="Ouvrir la fiche sur ce champ">✎ Corriger</button> ' : ''}${p.cibles.length > 1 ? '<button class="btn petit" data-act="comparer" title="Comparer">⇄</button> ' : ''}<button class="btn petit" data-act="ignorer" title="Écarter ce problème">✕</button>` },
     { cle: 'prod', titre: 'Produit(s)', largeur: 200, souple: true, rendu: (p) => p.cibles.map((id) => nomCourt(ARTS.get(id))).join(' <span class="discret">·</span> ') },
     { cle: 'pb', titre: 'Problème', largeur: 280, rendu: (p) => esc(p.probleme) },
-    { cle: 'corr', titre: 'Correction proposée', largeur: 200, rendu: (p) => (p.correction ? `<span class="badge ia">Proposé</span> ${esc(p.correction.texte)}` : `<span class="discret">${p.cibles.length > 1 ? 'À comparer' : CHAMP_A_CORRIGER[p.code] ? 'À corriger (✎)' : 'Au téléphone (scan, photo, prix)'}</span>`) },
+    { cle: 'corr', titre: 'Correction proposée', largeur: 200, rendu: (p) => (p.correction ? `<span class="badge ia">Proposé</span> ${esc(p.correction.texte)}` : `<span class="discret">${p.cibles.length > 1 ? 'À comparer' : CHAMP_A_CORRIGER[p.code] ? 'À corriger (✎)' : p.code === 'prix_aberrant' ? 'À vérifier (✕ si le prix est bon)' : 'Au téléphone (scan, photo, prix)'}</span>`) },
     { cle: 'conf', titre: 'Confiance', largeur: 100, rendu: (p) => confiance(p.confiance) },
   ];
   const tv = new TableVirtuelle($('#hoteBoite', t), {
