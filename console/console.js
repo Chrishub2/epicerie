@@ -341,6 +341,15 @@ function vueCatalogue(t) {
     classes: (a) => (ui.selection.has(a.id) ? 'choisie' : '') + (ui.articleOuvert === a.id ? ' focus' : ''),
     rendreGroupe: (g) => `${esc(g.groupe)} <span class="mono discret" style="font-weight:400">${g.n}</span>`,
     surTri: (tri) => { f.tri = tri; remplir(); },
+    surTout: (coche, items) => {
+      for (const it of items) if (!it.groupe) { if (coche) ui.selection.add(it.id); else ui.selection.delete(it.id); }
+      tv.rafraichir(); barreSelection();
+    },
+    etatTout: (items) => {
+      const vis = items.filter((it) => !it.groupe);
+      const n = vis.filter((it) => ui.selection.has(it.id)).length;
+      return !n ? 'rien' : n === vis.length ? 'tout' : 'partiel';
+    },
     surLargeur: (c) => { (prefs.largeurs ||= {})[c.cle] = c.largeur; sauverPrefs(); },
     surClic: (a, i, ev) => {
       if (a.groupe) return;
@@ -674,7 +683,7 @@ function actionProbleme(p, act) {
     if (p.cibles.length > 1 && /doublon/.test(p.code)) {
       for (const id of p.cibles) { const a = ARTS.get(id); a.pasDoublon = [...new Set([...(a.pasDoublon || []), ...p.cibles.filter((x) => x !== id)])]; aPersister(id); }
       historique.unshift({ id: historique.length + 1, quand: new Date().toISOString(), articleId: p.cibles[0], nom: ARTS.get(p.cibles[0]).nom, champ: 'pasDoublon', avant: null, apres: p.cibles.join(' + '), source: 'console' });
-    } else ignores.add(p.cle);
+    } else { ignores.add(p.cle); memoriserEcartes([p]); }
     reanalyser(); rendre();
     note('Problème écarté');
   } else if (act === 'comparer') {
@@ -691,6 +700,13 @@ function corrigerChamp(id, champ) {
   if (!el) return;
   el.scrollIntoView({ block: 'center' });
   editerChampDetail(el, ARTS.get(id));
+}
+/** Mode réel : « pas un problème » est enregistré dans la base (table propositions) pour ne plus revenir au rechargement. */
+async function memoriserEcartes(liste) {
+  if (MODE !== 'reel' || !source?.foyer || !liste.length) return;
+  let echecs = 0;
+  for (const p of liste) { try { await source.ecarter(p); } catch (err) { echecs++; console.warn('Écarter', err); } }
+  if (echecs) note(`${echecs} décision(s) non enregistrée(s) dans la base : elles reviendront au prochain chargement.`);
 }
 function appliquerCorrection(p, lot = null) {
   const c = p.correction;
@@ -714,13 +730,13 @@ function vueBoite(t) {
       <div class="regles">${parPrio.map(([k, regles]) => `<h3>${PRIORITES[k].court} · ${PRIORITES[k].nom}</h3>` + regles.map(([code, rr]) =>
         `<button data-regle="${code}" aria-pressed="${code === b.regle}"><span class="prio p${rr.priorite}">P${rr.priorite}</span>${rr.titre}<span class="n">${nf(compte(code))}</span></button>`).join('')).join('')}</div>
       <div class="liste-problemes">
-        <div class="explication"><strong>${esc(r.titre)}.</strong> ${esc(r.explication)}</div>
+        <div class="explication"><strong>${esc(r.titre)}.</strong> ${esc(r.explication)}${CHAMP_A_CORRIGER[b.regle] ? ' <b>✎ Corriger</b> ouvre la fiche sur le bon champ.' : b.regle === 'prix_aberrant' ? ' <b>Pas de correction automatique</b> : un prix n\'est jamais modifié. Vérifie-le ; s\'il est bon, coche-le puis <b>Écarter</b> (ou ✕).' : ''} Un problème écarté ne revient plus${MODE === 'reel' ? ' (décision gardée dans ta base)' : ''}.</div>
         <div class="outils">
           <input class="champ" id="filtreBoite" placeholder="Filtrer ces problèmes…" value="${esc(b.texte)}" style="width:180px">
           <button class="puce" id="toutCocher">Cocher les corrections ≥ ${pct(SEUIL_LOT)}</button>
           <span style="flex:1"></span>
           <span class="muet" id="compteSelBoite"></span>
-          <button class="btn principal" id="appliquerLot" disabled>Appliquer la sélection…</button>
+          <button class="btn principal" id="appliquerLot" disabled title="Applique les corrections proposées des lignes cochées. Les lignes sans correction (« À vérifier », « À corriger ») ne sont pas concernées.">Appliquer la sélection…</button>
           <button class="btn" id="ignorerLot" disabled>Écarter la sélection</button>
         </div>
         <div id="hoteBoite" style="flex:1;min-height:0;display:flex"></div>
@@ -737,6 +753,8 @@ function vueBoite(t) {
   ];
   const tv = new TableVirtuelle($('#hoteBoite', t), {
     colonnes: cols, cle: (p) => p.cle, vide: 'Aucun problème de ce type. 👍',
+    surTout: (coche, items) => { for (const p of items) { if (coche) b.selection.add(p.cle); else b.selection.delete(p.cle); } tv.rafraichir(); majBoutons(); },
+    etatTout: (items) => { const n = items.filter((p) => b.selection.has(p.cle)).length; return !n ? 'rien' : n === items.length ? 'tout' : 'partiel'; },
     classes: (p) => (b.selection.has(p.cle) ? 'choisie' : ''),
     surClic: (p, i, ev) => {
       if (ev.target.matches('[data-sel]')) { if (b.selection.has(p.cle)) b.selection.delete(p.cle); else b.selection.add(p.cle); tv.rafraichir(); majBoutons(); return; }
@@ -769,7 +787,7 @@ function vueBoite(t) {
   };
   $('#ignorerLot').onclick = () => {
     const sel = liste().filter((p) => b.selection.has(p.cle));
-    sel.forEach((p) => ignores.add(p.cle)); b.selection.clear();
+    sel.forEach((p) => ignores.add(p.cle)); memoriserEcartes(sel.filter((p) => !(p.cibles.length > 1 && /doublon/.test(p.code)))); b.selection.clear();
     reanalyser(); rendre(); note(`${sel.length} problème(s) écarté(s)`);
   };
   $('#appliquerLot').onclick = () => {
@@ -1138,6 +1156,7 @@ async function chargerTout() {
   const lignes = await source.chargerObjets((n) => ecranAttente(`Lecture de ton foyer… ${n} élément(s)`));
   E = construireEtat(lignes, source.membres);
   try { histoBase = await source.chargerHistorique(); } catch (err) { console.warn('Historique', err); histoBase = []; }
+  try { for (const cle of await source.chargerDecisions()) ignores.add(cle); } catch (err) { console.warn('Décisions', err); }
   reanalyser();
   etatSynchro('ok', `Vraies données · « ${foyer.nom} »`);
   rendre();

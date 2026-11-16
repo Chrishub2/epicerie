@@ -124,6 +124,26 @@ export class SourceSupabase {
     return v;
   }
 
+  /** Problèmes que Chris a écartés (« pas un problème ») : leurs clés, pour ne plus les afficher. */
+  async chargerDecisions() {
+    const { data, error } = await this.sb.from('propositions').select('correction')
+      .eq('foyer_id', this.foyer.id).in('statut', ['pas_un_probleme', 'rejetee']).limit(5000);
+    if (error) throw error;
+    return (data || []).map((d) => d.correction?.cle).filter(Boolean);
+  }
+
+  /** Enregistre « pas un problème » pour ce problème (table propositions, étape C2). Rien d'autre n'est modifié. */
+  async ecarter(p) {
+    const { data: s } = await this.sb.auth.getSession();
+    const { error } = await this.sb.from('propositions').insert({
+      foyer_id: this.foyer.id, origine: 'regle', priorite: p.priorite, code: p.code,
+      cibles: p.cibles.map((id) => ({ type: 'article', id })), probleme: String(p.probleme || p.titre).slice(0, 500),
+      raison: p.raison || null, confiance: p.confiance ?? null, correction: { cle: p.cle, prixId: p.prixId || null },
+      statut: 'pas_un_probleme', decide_par: s.session?.user?.id || null, decide_le: new Date().toISOString(),
+    });
+    if (error) throw error;
+  }
+
   /** Relit un objet tel qu'il est dans la base (après un conflit). */
   async relire(type, id) {
     const { data, error } = await this.sb.from('objets').select('type, id, data, supprime, version, maj, maj_par')

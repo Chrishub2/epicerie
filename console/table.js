@@ -72,10 +72,18 @@ export class TableVirtuelle {
     const cols = this.o.colonnes.filter((c) => !c.cache);
     this.tete.innerHTML = cols.map((c) => {
       const fl = this.tri?.cle === c.cle ? (this.tri.sens > 0 ? ' ↑' : ' ↓') : '';
-      return `<div ${c.tri ? `data-tri="${c.cle}"` : ''} title="${c.aide || ''}" style="${c.aligne ? `justify-content:${c.aligne}` : ''}">${c.titre}${fl}<span class="poignee" data-col="${c.cle}"></span></div>`;
+      // Colonne des cases : une case « tout sélectionner / tout désélectionner » (lignes affichées)
+      const tout = c.cle === 'sel' && this.o.surTout ? '<input type="checkbox" class="case" data-tout aria-label="Tout sélectionner ou tout désélectionner" title="Tout sélectionner / tout désélectionner (lignes affichées)">' : '';
+      return `<div ${c.tri ? `data-tri="${c.cle}"` : ''} title="${c.aide || ''}" style="${c.aligne ? `justify-content:${c.aligne}` : ''}">${tout || c.titre}${fl}<span class="poignee" data-col="${c.cle}"></span></div>`;
     }).join('');
+    this.majTout();
+    this.tete.onchange = (ev) => {
+      if (!ev.target.matches('[data-tout]')) return;
+      this.o.surTout(ev.target.checked, this.items || []);
+      this.majTout();
+    };
     this.tete.onclick = (ev) => {
-      if (ev.target.classList.contains('poignee')) return;
+      if (ev.target.classList.contains('poignee') || ev.target.matches('[data-tout]')) return;
       const k = ev.target.closest('[data-tri]')?.dataset.tri;
       if (!k) return;
       this.tri = { cle: k, sens: this.tri?.cle === k ? -this.tri.sens : 1 };
@@ -94,12 +102,22 @@ export class TableVirtuelle {
     };
   }
 
+  /** État de la case du haut : cochée (tout), partielle (une partie) ou vide (rien) — selon o.etatTout(). */
+  majTout() {
+    const c = this.tete.querySelector('[data-tout]');
+    if (!c || !this.o.etatTout) return;
+    const e = this.o.etatTout(this.items || []);
+    c.checked = e === 'tout';
+    c.indeterminate = e === 'partiel';
+  }
+
   donnees(items, { garderDefilement = true } = {}) {
     this.items = items;
     if (!garderDefilement) this.corps.scrollTop = 0;
     if (this.focusI >= items.length) this.focusI = items.length - 1;
     this.espaceur.style.height = items.length * this.hauteur() + 'px';
     this.rendre(true);
+    this.majTout();
   }
 
   planifier() {
@@ -107,7 +125,7 @@ export class TableVirtuelle {
     this.raf = requestAnimationFrame(() => { this.raf = null; this.rendre(); });
   }
 
-  rafraichir() { this.rendre(true); }
+  rafraichir() { this.rendre(true); this.majTout(); }
 
   rendre(force = false) {
     const h = this.hauteur();

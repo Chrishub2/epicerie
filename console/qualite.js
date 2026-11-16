@@ -87,7 +87,9 @@ export function analyser(e, ignores = new Set()) {
   }
 
   const ajouter = (code, cibles, extra) => {
-    const cle = code + ':' + cibles.join('+') + (extra?.prixId ? ':' + extra.prixId : ''); // un prix suspect = un problème
+    // Un prix suspect = un problème, identifié par son CONTENU (magasin, offre, date) : stable même si la base
+    // reçoit d'autres copies identiques plus tard (rafraîchissements épiceries.ca).
+    const cle = code + ':' + cibles.join('+') + (extra?.observation ? ':' + extra.observation : '');
     if (ignores.has(cle)) return;
     const r = REGLES[code];
     problemes.push({ cle, code, priorite: r.priorite, titre: r.titre, cibles, confiance: 1, correction: null, ...extra });
@@ -140,7 +142,7 @@ export function analyser(e, ignores = new Set()) {
             probleme: `${x.p.offre} chez ${x.p.banniere} le ${x.p.observeLe}${x.p.source ? ` (${x.p.source === 'epiceries_ca' ? 'épiceries.ca' : x.p.source})` : ''} : ${ratio.toFixed(1).replace('.', ',')} × la médiane (n = ${pus.length})`,
             raison: `Médiane ${med.toFixed(2).replace('.', ',')} $/${a.uniteRef === 'unite' ? 'unité' : a.uniteRef}. Les prix sont en ajout seulement : on ne les modifie pas, on les vérifie.`,
             confiance: Math.min(0.95, 0.55 + pus.length * 0.05), impact: 'Fausse le meilleur prix et les économies calculées.',
-            prixId: x.p.id,
+            prixId: x.p.id, observation: [x.p.banniere, x.p.offre, x.p.observeLe].join('|'),
           });
         }
       }
