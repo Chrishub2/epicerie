@@ -330,6 +330,33 @@ export function varianteDeLAchat(a, { codes = [], banniere, libelle, marque, for
   return { variante: variantePref(a), raison: 'habituelle' };
 }
 
+// ---------------------------------------------------------------------
+// Fiche complète ? (v42 : catalogue)
+// ---------------------------------------------------------------------
+/**
+ * Les 6 données de base d'une fiche, et ce qui manque. Une fiche « complète » peut être
+ * comparée (format + vrai prix), reconnue au scan et aux reçus (code + marque), et retrouvée (photo, rayon).
+ * Retourne { ok, total, manquants:[{cle, icone, texte}], alertes:[texte] }.
+ */
+export function completude(a, e) {
+  const prixReel = (e.prix || []).some((p) => p.articleId === a.id && p.source !== 'demo' && !p.annule && !p.enAttente);
+  const rayon = (e.rayons || []).find((r) => r.id === a.rayonId);
+  const f = analyserFormat(a.format);
+  const criteres = [
+    { cle: 'format', icone: '⚖️', texte: 'format', ok: !!f },
+    { cle: 'marque', icone: '🏷️', texte: 'marque', ok: !!String(a.marque || '').trim() },
+    { cle: 'code', icone: '▥', texte: 'code-barres', ok: codesDe(a).length > 0 },
+    { cle: 'photo', icone: '📷', texte: 'photo', ok: !!a.imageUrl },
+    { cle: 'prix', icone: '💲', texte: 'vrai prix', ok: prixReel },
+    { cle: 'rayon', icone: '🗂️', texte: 'rayon', ok: !!rayon && !/^divers$/i.test(rayon.nom) },
+  ];
+  const manquants = criteres.filter((c) => !c.ok).map(({ cle, icone, texte }) => ({ cle, icone, texte }));
+  const alertes = [];
+  // Format en kg mais comparé à l'unité (ou l'inverse) : les prix au kg seraient faux
+  if (f && f.base !== a.uniteRef) alertes.push(`format en ${f.base === 'unite' ? 'unités' : f.base === 'kg' ? 'poids' : 'volume'}, comparé ${a.uniteRef === 'unite' ? 'à l\'unité' : a.uniteRef === 'kg' ? 'au kg' : 'au litre'}`);
+  return { ok: criteres.length - manquants.length, total: criteres.length, manquants, alertes };
+}
+
 /**
  * Migration v3 (une seule fois) : structure + alias des reçus déjà reliés
  * (« RIZ BASM 2KG » chez Maxi → variante), pour que les prochains reçus se relient seuls.

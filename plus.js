@@ -201,11 +201,15 @@ function confirmerFusion(ids, apres) {
 
 // --- Catalogue --------------------------------------------------------
 let offProgres = null; // texte de progression du rafraîchissement (survit aux réaffichages)
+let filtreCatalogue = 'tous'; // « tous » ou « incomplets »
 function vueCatalogue(v) {
   const e = S.get();
   const parRayon = e.rayons.map((r) => ({ r, arts: e.articles.filter((a) => a.rayonId === r.id).sort((a, b) => a.nom.localeCompare(b.nom, 'fr')) }))
     .filter((x) => x.arts.length);
   const avecCode = e.articles.filter((a) => a.codes?.length).length;
+  // Données de base de chaque fiche (ce qui manque pour comparer, scanner et relier les reçus)
+  const comp = new Map(e.articles.map((a) => [a.id, P.completude(a, e)]));
+  const nbIncomplets = [...comp.values()].filter((c) => c.manquants.length || c.alertes.length).length;
   v.innerHTML = retour() + `<p class="doux">Touche un article pour modifier son nom, son rayon, son unité de comparaison ou son format.</p>
     <div class="carte"><button class="btn" id="invScan" style="width:100%">▥ Scanner mes produits</button>
       <p class="doux" style="margin:6px 0 0">Pour bâtir ta base à la maison : scanne tes produits un après l'autre. Rien n'est ajouté à ta liste d'épicerie.</p></div>
@@ -217,12 +221,27 @@ function vueCatalogue(v) {
       <p class="doux" style="margin:6px 0 0">${(() => { const n = P.doublonsProbables(e).length; return n ? `${n} doublon(s) probable(s) repéré(s). ` : ''; })()}Ex. « Lait 2 % » et « Natrel 2 % » → un seul produit avec deux marques.</p></div>
     <div class="carte"><button class="btn sec" id="couverture" style="width:100%">📊 Test de couverture des sources</button>
       <p class="doux" style="margin:6px 0 0">Combien de tes produits scannés sont connus d'Open Food Facts, d'épiceries.ca et d'UPCitemdb, avec la bonne marque et le bon format.</p></div>`
-    + parRayon.map(({ r, arts }) => `<section class="rayon"><h3>${esc(r.nom)}</h3>${arts.map((a) => {
+    + `<div class="rang envelopper" style="margin:4px 0 8px">
+        <button class="btn ${filtreCatalogue === 'tous' ? '' : 'sec'}" data-fcat="tous" style="padding:6px 10px">Tous (${e.articles.length})</button>
+        <button class="btn ${filtreCatalogue === 'incomplets' ? '' : 'sec'}" data-fcat="incomplets" style="padding:6px 10px">⚠️ À compléter (${nbIncomplets})</button></div>
+      <p class="doux" style="margin:0 0 8px;font-size:12px">Données de base : ⚖️ format · 🏷️ marque · ▥ code-barres · 📷 photo · 💲 vrai prix · 🗂️ rayon. Touche une fiche pour la compléter (le scan ▥ en remplit la plupart d'un coup).</p>`
+    + (filtreCatalogue === 'incomplets' && !nbIncomplets ? '<div class="vide">🎉 Toutes tes fiches ont leurs données de base.</div>' : '')
+    + parRayon.map(({ r, arts }) => {
+      const visibles = filtreCatalogue === 'incomplets' ? arts.filter((a) => comp.get(a.id).manquants.length || comp.get(a.id).alertes.length) : arts;
+      if (!visibles.length) return '';
+      return `<section class="rayon"><h3>${esc(r.nom)}</h3>${visibles.map((a) => {
       const nbV = P.variantesActives(a).length;
+      const c = comp.get(a.id);
+      const niveau = c.ok === c.total && !c.alertes.length ? 'complet' : c.ok >= c.total - 2 ? 'presque' : 'incomplet';
       return `<div class="item" data-a="${a.id}" style="cursor:pointer"><div class="grandir"><div class="nom">${esc(a.nom)} ${a.local ? '🍁' : ''}${a.bio ? ' 🌱' : ''}</div>
-       <div class="info">${esc(a.format || 'format ?')} · comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef}${a.codes?.length ? ' · ▥' : ''}${nbV > 1 ? ` · ${nbV} marques/formats` : ''}${a.allergenes?.length ? ` · ⚠️ ${esc(a.allergenes.join(', '))}` : ''}</div></div></div>`;
-    }).join('')}</section>`).join('');
+       <div class="info">${esc(a.format || 'format ?')} · comparé au ${a.uniteRef === 'unite' ? 'prix unitaire' : a.uniteRef}${a.codes?.length ? ' · ▥' : ''}${nbV > 1 ? ` · ${nbV} marques/formats` : ''}${a.allergenes?.length ? ` · ⚠️ ${esc(a.allergenes.join(', '))}` : ''}</div>
+       ${c.manquants.length ? `<div class="info manque">Manque : ${c.manquants.map((m) => `${m.icone} ${esc(m.texte)}`).join(' · ')}</div>` : ''}
+       ${c.alertes.map((t) => `<div class="info manque">⚠️ ${esc(t)}</div>`).join('')}</div>
+       <span class="score-fiche ${niveau}" title="${c.ok} données de base sur ${c.total}">${niveau === 'complet' ? '✓' : `${c.ok}/${c.total}`}</span></div>`;
+    }).join('')}</section>`;
+    }).join('');
   brancherRetour(v);
+  $$('[data-fcat]', v).forEach((b) => b.onclick = () => { filtreCatalogue = b.dataset.fcat; vueCatalogue(v); });
   $('#couverture', v).onclick = () => import('./couverture.js').then((m) => m.ouvrirCouverture());
   $('#fusion', v).onclick = () => ouvrirFusion(() => { if (section === 'catalogue') vueCatalogue(v); });
   $('#invScan', v).onclick = async () => {

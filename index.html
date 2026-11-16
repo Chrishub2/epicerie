@@ -264,6 +264,12 @@ table.comp tr.proche td.pu { color: var(--ambre); }
   animation: appui-long 2.7s linear .3s forwards; }
 @keyframes appui-long { from { width: 0; } to { width: 100%; } }
 .item-liste.indisponible { opacity: .65; }
+/* Catalogue : données de base d'une fiche */
+.score-fiche { flex: none; min-width: 34px; text-align: center; font-size: 12px; font-weight: 700; padding: 4px 6px; border-radius: 999px; }
+.score-fiche.complet { background: var(--vert-fond); color: var(--vert); }
+.score-fiche.presque { background: var(--ambre-fond); color: var(--ambre); }
+.score-fiche.incomplet { background: var(--rouge-fond); color: var(--rouge); }
+.info.manque { color: var(--ambre); }
 .item-liste.indisponible .nom { text-decoration: line-through; }
 .tableau-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--ligne); border-radius: 12px;
   background: var(--carte); margin-bottom: 6px; }
