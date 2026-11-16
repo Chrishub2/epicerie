@@ -1,5 +1,5 @@
 // =====================================================================
-// Console Épicerie — étape C3 : VRAIES données en lecture seule (Supabase).
+// Console Épicerie — étape C4 : VRAIES données (Supabase), modifications enregistrées avec contrôle de version.
 // Mode démo (?demo) : données FICTIVES en mémoire, modifiables, rien n'est envoyé.
 // Réutilise la logique de l'app téléphone (../app/normalise.js, ../app/produits.js).
 // =====================================================================
@@ -99,9 +99,10 @@ function note(texte, action) {
 // Modifications (mode démo seulement) + historique
 // ---------------------------------------------------------------------
 /** Mode réel : rien ne s'écrit avant l'étape C4. Retourne true (et prévient) si l'action doit être bloquée. */
-function lectureSeule() {
-  if (MODE !== 'reel') return false;
-  note('Lecture seule : modifier les vraies données arrive à l\'étape C4 (contrôle de version + historique).');
+/** Mode réel : la fusion reste bloquée (elle déplace des prix, protégés en ajout seulement) — étape C5. */
+function lectureSeule(action = '') {
+  if (MODE !== 'reel' || action !== 'fusion') return false;
+  note('Fusionner de vraies fiches arrive à l\'étape C5 : la fusion déplace des prix, qui sont protégés. En attendant : « Pas des doublons », ou corrige les fiches une à une.');
   return true;
 }
 let nLot = 0;
@@ -124,6 +125,7 @@ function modifier(articleId, champ, apres, source = 'console', lot = null) {
   a.maj = new Date().toISOString(); a.majPar = 'Chris (console)';
   const h = { id: historique.length + 1, quand: a.maj, articleId, nom: a.nom, champ, avant, apres, source, lot };
   historique.unshift(h);
+  aPersister(articleId, source === 'restauration' ? 'restauration' : 'console');
   return h;
 }
 function restaurer(h) {
@@ -147,7 +149,7 @@ function majSynchro() {
   if (MODE === 'reel') {
     $('#synchro').dataset.etat = synchro.etat;
     $('#synchroTexte').textContent = synchro.texte;
-    $('#synchro').title = 'Vraies données (Supabase), lecture seule jusqu\'à l\'étape C4';
+    $('#synchro').title = 'Vraies données (Supabase). Chaque modification est enregistrée avec contrôle de version et historique. Clic : réessayer un envoi en échec.';
     return;
   }
   const n = historique.length;
@@ -229,7 +231,7 @@ function vueTdb(t) {
     ['Fiches complètes', pct(completes / E.articles.length), 'catalogue'],
   ];
   t.innerHTML = `
-    <div class="entete-vue"><h1>Santé des données</h1><span class="muet">${MODE === 'reel' ? `Foyer « ${esc(source?.foyer?.nom || '')} » · ${nf(E.articles.length)} produits · lecture seule` : `${nf(E.articles.length)} produits fictifs`} · analyse en ${A.duree} ms</span></div>
+    <div class="entete-vue"><h1>Santé des données</h1><span class="muet">${MODE === 'reel' ? `Foyer « ${esc(source?.foyer?.nom || '')} » · ${nf(E.articles.length)} produits` : `${nf(E.articles.length)} produits fictifs`} · analyse en ${A.duree} ms</span></div>
     <div class="defile">
       <div class="tuiles">${tuiles.map(([l, v, vue, aide]) => `<div class="tuile ${vue ? 'cliquable' : ''}" ${vue ? `data-aller="${vue}"` : ''} title="${aide || ''}"><div class="v">${typeof v === 'number' ? nf(v) : v}</div><div class="l">${l}</div></div>`).join('')}</div>
       <div class="colonnes-tdb">
@@ -661,7 +663,7 @@ function actionProbleme(p, act) {
     note(`Corrigé : ${esc(p.titre.toLowerCase())}`, h && { libelle: 'Annuler', faire: () => restaurer(h) });
   } else if (act === 'ignorer') {
     if (p.cibles.length > 1 && /doublon/.test(p.code)) {
-      for (const id of p.cibles) { const a = ARTS.get(id); a.pasDoublon = [...new Set([...(a.pasDoublon || []), ...p.cibles.filter((x) => x !== id)])]; }
+      for (const id of p.cibles) { const a = ARTS.get(id); a.pasDoublon = [...new Set([...(a.pasDoublon || []), ...p.cibles.filter((x) => x !== id)])]; aPersister(id); }
       historique.unshift({ id: historique.length + 1, quand: new Date().toISOString(), articleId: p.cibles[0], nom: ARTS.get(p.cibles[0]).nom, champ: 'pasDoublon', avant: null, apres: p.cibles.join(' + '), source: 'console' });
     } else ignores.add(p.cle);
     reanalyser(); rendre();
@@ -819,11 +821,11 @@ function vueComparer(t) {
   $('#viderComp').onclick = () => { ui.comparer = []; vueComparer(t); rendreNav(); };
   $('#pasDoublons').onclick = () => {
     if (lectureSeule()) return;
-    for (const a of arts) a.pasDoublon = [...new Set([...(a.pasDoublon || []), ...arts.filter((x) => x !== a).map((x) => x.id)])];
+    for (const a of arts) { a.pasDoublon = [...new Set([...(a.pasDoublon || []), ...arts.filter((x) => x !== a).map((x) => x.id)])]; aPersister(a.id); }
     historique.unshift({ id: historique.length + 1, quand: new Date().toISOString(), articleId: arts[0].id, nom: arts[0].nom, champ: 'pasDoublon', avant: null, apres: arts.map((a) => a.id).join(' + '), source: 'console' });
     reanalyser(); ui.comparer = []; aller('boite'); note('Marqués comme produits différents : ils ne seront plus proposés.');
   };
-  $('#fusionner').onclick = () => lectureSeule() || modale('Confirmer la fusion', `<p>Fusionner ${arts.length - 1} fiche(s) dans « <b>${nomCourt(ARTS.get(ui.cibleFusion))}</b> » ?</p>
+  $('#fusionner').onclick = () => lectureSeule('fusion') || modale('Confirmer la fusion', `<p>Fusionner ${arts.length - 1} fiche(s) dans « <b>${nomCourt(ARTS.get(ui.cibleFusion))}</b> » ?</p>
     <p class="muet">Maquette : la fusion utilise la même fonction que le téléphone (<span class="mono">fusionner</span>). Elle peut être annulée tant que c'est la dernière opération. En phase 4, chaque fiche retirée reste dans l'historique de la base.</p>`, [
     ['Annuler', 'fermer'],
     ['Fusionner', 'principal', () => {
@@ -856,6 +858,7 @@ function ligneHistorique(h) {
     <div>${desc}</div>${peut ? `<button class="btn petit" data-restaurer="${h.id}" style="margin-top:4px">↺ Restaurer l'ancienne valeur</button>` : h.restauree ? '<span class="discret">restaurée</span>' : ''}</li>`;
 }
 function brancherHistorique(zone) {
+  zone.querySelectorAll('[data-annuler-base]').forEach((b) => b.onclick = () => revenirAvant(+b.dataset.annulerBase));
   zone.querySelectorAll('[data-restaurer]').forEach((b) => b.onclick = () => restaurer(historique.find((h) => h.id === +b.dataset.restaurer)));
 }
 /** Ligne d'historique lue dans la base : qui, quand, d'où, et les champs changés. */
@@ -865,12 +868,14 @@ function ligneHistoBase(h) {
   const op = { insert: 'création', update: 'modification', delete: 'suppression' }[h.operation] || h.operation;
   const diffs = h.operation === 'update' ? differences(h.data_avant, h.data) : [];
   return `<li class="${h.source === 'console' ? 'console' : ''}"><div><b>${esc(String(nom).trim())}</b> <span class="discret">· ${dateCourte(h.quand)} ${heure(h.quand)} · ${op} · ${esc(src)} · ${esc(source?.nomMembre(h.par) || '')} · v${h.version}</span></div>
-    ${diffs.map((d) => `<div>${esc(d.champ)} : <span class="avant">${esc(d.avant)}</span> → <span class="apres">${esc(d.apres)}</span></div>`).join('')}</li>`;
+    ${diffs.map((d) => `<div>${esc(d.champ)} : <span class="avant">${esc(d.avant)}</span> → <span class="apres">${esc(d.apres)}</span></div>`).join('')}
+    ${h.type === 'article' && h.operation === 'update' && h.data_avant && ARTS.get(h.id) ? `<button class="btn petit" data-annuler-base="${h.hid}" style="margin-top:4px">↺ Revenir à avant ce changement</button>` : ''}</li>`;
 }
 function vueHistorique(t) {
   if (MODE === 'reel') {
-    t.innerHTML = `<div class="entete-vue"><h1>Historique</h1><span class="muet">${histoBase.length} dernière(s) modification(s) enregistrée(s) par la base · téléphone et console · restauration à l'étape C4</span></div>
+    t.innerHTML = `<div class="entete-vue"><h1>Historique</h1><span class="muet">${histoBase.length} dernière(s) modification(s) enregistrée(s) par la base · téléphone et console · « Revenir à avant » annule un changement</span></div>
       <div class="defile">${histoBase.length ? `<ul class="chrono" style="max-width:1100px">${histoBase.map(ligneHistoBase).join('')}</ul>` : '<div class="placeholder"><div class="boite-p">Aucune modification depuis l\'installation de l\'historique (C2).<br><span class="muet">Coche un article sur le téléphone : il apparaît ici en quelques secondes.</span></div></div>'}</div>`;
+    brancherHistorique(t);
     return;
   }
   t.innerHTML = `<div class="entete-vue"><h1>Historique</h1><span class="muet">${historique.length} modification(s) dans cette session · ancienne valeur, nouvelle valeur, auteur, heure</span></div>
@@ -1083,8 +1088,9 @@ document.addEventListener('keydown', (ev) => {
 // ---------------------------------------------------------------------
 ui.vue = location.hash.slice(2) || 'tdb';
 if (prefs.copilote && innerWidth > 1300) basculerCopilote();
-if (MODE === 'reel') document.body.classList.add('lecture-seule');
 window.__console = { E: () => E, A: () => A, ui, historique, histoBase: () => histoBase, mode: MODE, recevoir: (l) => recevoir(l) }; // inspection pendant les tests
+// Tests en local seulement : brancher une fausse base (même interface que SourceSupabase). Inactif en ligne.
+if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__console.tester = async (faux) => { source = faux; await chargerTout(); };
 demarrer();
 
 async function demarrer() {
@@ -1111,15 +1117,122 @@ async function chargerTout() {
   E = construireEtat(lignes, source.membres);
   try { histoBase = await source.chargerHistorique(); } catch (err) { console.warn('Historique', err); histoBase = []; }
   reanalyser();
-  etatSynchro('ok', `Vraies données · « ${foyer.nom} » · lecture seule`);
+  etatSynchro('ok', `Vraies données · « ${foyer.nom} »`);
   rendre();
   source.ecouter(recevoir, (statut) => {
-    if (statut === 'SUBSCRIBED') etatSynchro('ok', `Vraies données · « ${foyer.nom} » · temps réel actif · lecture seule`);
+    if (statut === 'SUBSCRIBED' && !attente.size) etatSynchro('ok', `Vraies données · « ${foyer.nom} » · temps réel actif`);
     else if (statut === 'CHANNEL_ERROR' || statut === 'TIMED_OUT') etatSynchro('erreur', 'Temps réel interrompu · recharge la page');
   });
 }
 
 function etatSynchro(etat, texte) { synchro.etat = etat; synchro.texte = texte; majSynchro(); }
+
+// ---------------------------------------------------------------------
+// Écriture dans la base (étape C4) : un produit modifié est envoyé en entier avec sa version.
+// La base refuse si le produit a changé ailleurs entre-temps (conflit) → rien n'est écrasé en silence.
+// ---------------------------------------------------------------------
+const attente = new Map();        // articleId → source ('console' | 'restauration')
+const mesEcritures = new Set();   // `${id}:${version}` écrits par cette console (écho temps réel silencieux)
+let enEcriture = false, minuterieEcrire = null;
+function aPersister(id, src = 'console') {
+  if (MODE !== 'reel' || !source?.foyer) return;
+  if (attente.get(id) !== 'restauration') attente.set(id, src);
+  clearTimeout(minuterieEcrire);
+  minuterieEcrire = setTimeout(ecrireAttente, 80);
+  etatSynchro('local', `Enregistrement… ${attente.size} produit(s)`);
+}
+async function ecrireAttente() {
+  if (enEcriture) { minuterieEcrire = setTimeout(ecrireAttente, 250); return; }
+  enEcriture = true;
+  const echecs = [], conflits = [];
+  let n = 0;
+  try {
+    for (const [id, src] of [...attente]) {
+      const a = ARTS.get(id);
+      if (!a) { attente.delete(id); continue; }
+      try {
+        const v = await source.ecrire('article', id, a, a._version ?? null, src);
+        a._version = v; a._base = JSON.parse(JSON.stringify(a)); mesEcritures.add(`${id}:${v}`); attente.delete(id); n++;
+      } catch (err) {
+        if (err.conflit) { attente.delete(id); conflits.push(id); } else echecs.push(err);
+      }
+    }
+  } finally { enEcriture = false; }
+  if (echecs.length) etatSynchro('erreur', `${attente.size} modification(s) non enregistrée(s) · ${echecs[0].message} · clique ici pour réessayer`);
+  else if (n) etatSynchro('ok', `Enregistré dans ta base · ${n} produit(s) · ${heure(new Date().toISOString())}`);
+  try { histoBase = await source.chargerHistorique(); } catch { /* garde l'ancien */ }
+  rendreNav();
+  if (ui.vue === 'historique' || ui.vue === 'tdb') rendre(); else rendreDetail();
+  for (const id of conflits) await resoudreConflit(id);
+}
+$('#synchro').onclick = () => { if (MODE === 'reel' && attente.size) ecrireAttente(); };
+
+/** Remplace en mémoire un produit par sa version de la base. */
+function remplacerParBase(l) {
+  const neuf = l && !l.supprime ? construireEtat([l], source.membres).articles[0] : null;
+  const i = E.articles.findIndex((x) => x.id === (l?.id));
+  if (i >= 0) { if (neuf) E.articles[i] = neuf; else E.articles.splice(i, 1); }
+}
+
+/** Champs que J'AI changés depuis la dernière version connue de la base (variantes : recalculées, jamais imposées). */
+function mesChamps(a, mienne) {
+  const base = a?._base || {};
+  return [...new Set([...Object.keys(base), ...Object.keys(mienne)])]
+    .filter((k) => !['variantes', 'variantePreferee'].includes(k) && JSON.stringify(base[k]) !== JSON.stringify(mienne[k]));
+}
+
+/** Conflit : le produit a changé ailleurs (téléphone). On montre les deux versions ; Chris choisit. */
+async function resoudreConflit(id) {
+  const a0 = ARTS.get(id);
+  const mienne = JSON.parse(JSON.stringify(a0 || {}));
+  const miens = mesChamps(a0, mienne);
+  let l;
+  try { l = await source.relire('article', id); } catch (err) { note(`Conflit sur ${esc(id)} : impossible de relire la base (${esc(err.message)}).`); return; }
+  remplacerParBase(l);
+  reanalyser(); rendre();
+  if (!l || l.supprime) { note(`« ${esc(mienne.nom || id)} » a été retiré sur un autre appareil : ta modification n'a pas été enregistrée.`); return; }
+  const diffs = differences(l.data, mienne, 12);
+  etatSynchro('erreur', 'Conflit à régler : un produit a changé sur un autre appareil');
+  modale('Conflit : produit modifié ailleurs', `
+    <p>« <b>${esc(String(l.data.nom || id).trim())}</b> » a été modifié sur un autre appareil (v${l.version}) pendant que tu le changeais ici.
+    <b>Ta modification n'a pas été enregistrée</b> ; la console affiche maintenant la version de la base.</p>
+    ${diffs.length ? `<table class="mini-table avant-apres"><tr><th>Champ</th><th>Dans la base</th><th>Ta version</th></tr>
+      ${diffs.map((d) => `<tr><td>${esc(d.champ)}</td><td class="av">${esc(d.avant)}</td><td class="ap">${esc(d.apres)}</td></tr>`).join('')}</table>` : '<p class="muet">Aucune différence de contenu : rien à faire.</p>'}`, [
+    ['Garder la version de la base', 'fermer'],
+    ...(diffs.length ? [['Remplacer par ma version', '', () => {
+      const a = ARTS.get(id); if (!a) return;
+      for (const k of Object.keys(a)) delete a[k];
+      Object.assign(a, mienne);                // garde _version de la base (non énumérable) → nouvelle écriture contrôlée
+      reanalyser(); rendre(); aPersister(id);
+    }]] : []),
+    ...(diffs.length && miens.length ? [[`Garder les deux : appliquer seulement mes changements (${miens.join(', ')})`, 'principal', () => {
+      const a = ARTS.get(id); if (!a) return;
+      for (const k of miens) { if (mienne[k] === undefined) delete a[k]; else a[k] = JSON.parse(JSON.stringify(mienne[k])); }
+      reanalyser(); rendre(); aPersister(id);   // normaliserProduits recalcule la variante ★ à partir de la fiche
+    }]] : []),
+  ]);
+}
+
+/** « Revenir à avant ce changement » : réécrit la valeur d'avant (nouvelle version, rien n'est effacé). */
+function revenirAvant(hid) {
+  const h = histoBase.find((x) => x.hid === hid);
+  const a = h && ARTS.get(h.id);
+  if (!h?.data_avant || !a) return;
+  const diffs = differences(a, h.data_avant, 12);
+  if (!diffs.length) { note('Ce produit a déjà ces valeurs.'); return; }
+  modale('Revenir à avant ce changement', `<p>« <b>${esc(String(a.nom).trim())}</b> » reprendra les valeurs d'avant le changement du ${dateCourte(h.quand)} à ${heure(h.quand)}.
+    Rien n'est effacé : c'est une nouvelle version, elle aussi dans l'historique.</p>
+    <table class="mini-table avant-apres"><tr><th>Champ</th><th>Maintenant</th><th>Après</th></tr>
+    ${diffs.map((d) => `<tr><td>${esc(d.champ)}</td><td class="av">${esc(d.avant)}</td><td class="ap">${esc(d.apres)}</td></tr>`).join('')}</table>`, [
+    ['Annuler', 'fermer'],
+    ['Revenir à avant', 'principal', () => {
+      const avant = JSON.parse(JSON.stringify(h.data_avant));
+      for (const k of Object.keys(a)) delete a[k];
+      Object.assign(a, avant);
+      reanalyser(); rendre(); aPersister(a.id, 'restauration');
+    }],
+  ]);
+}
 
 /** Changement reçu en temps réel (téléphone ou autre) : mis à jour en mémoire, puis réaffiché. */
 let minuterieRecu = null;
@@ -1127,22 +1240,24 @@ const recusTR = new Set();
 function recevoir(l) {
   const coll = COLLECTIONS[l.type];
   if (!coll || l.type === 'carte' || l.type === 'point') return;
+  if (l.type === 'article' && attente.has(l.id)) return; // notre envoi suivra (et détectera le conflit s'il y en a un)
+  const echo = mesEcritures.has(`${l.id}:${l.version}`);
   const neuf = construireEtat([{ ...l, supprime: false }], source?.membres || [])[coll]?.[0];
   const liste = (E[coll] ||= []);
   const cle = (o) => String(l.type === 'cp' ? o.code : o.id);
   const i = liste.findIndex((o) => cle(o) === l.id);
   if (l.supprime) { if (i >= 0) liste.splice(i, 1); }
   else if (neuf) { if (i >= 0) liste[i] = neuf; else liste.push(neuf); }
-  recusTR.add(l.id);
+  if (!echo) recusTR.add(l.id);
   clearTimeout(minuterieRecu);
   minuterieRecu = setTimeout(async () => {
     try { if (source?.foyer) histoBase = await source.chargerHistorique(); } catch { /* garde l'ancien */ }
     reanalyser();
     if (ui.vue === 'catalogue' && ui.remplirCatalogue) { ui.remplirCatalogue(); rendreNav(); rendreDetail(); } else rendre();
     for (const id of recusTR) tableCourante?.ligneDom(id)?.classList.add('flash');
-    note(`${recusTR.size} changement(s) reçu(s)`);
+    if (recusTR.size) note(`${recusTR.size} changement(s) reçu(s) d'un autre appareil`);
     recusTR.clear();
-    etatSynchro('ok', `Vraies données · « ${source?.foyer?.nom || ''} » · mis à jour ${heure(new Date().toISOString())} · lecture seule`);
+    if (!attente.size && synchro.etat !== 'erreur') etatSynchro('ok', `Vraies données · « ${source?.foyer?.nom || ''} » · à jour ${heure(new Date().toISOString())}`);
   }, 400);
 }
 
@@ -1156,7 +1271,7 @@ function ecranConnexion(message = '') {
   etatSynchro('connexion', 'Non connecté');
   $('#travail').innerHTML = `<div class="placeholder"><form class="boite-p connexion" id="formConnexion" autocomplete="on">
       <h2 style="margin-bottom:6px">Connexion à ton foyer</h2>
-      <p class="muet">Même compte que l'app téléphone. La console lit tes données en lecture seule.</p>
+      <p class="muet">Même compte que l'app téléphone. Chaque modification est enregistrée dans ta base, avec historique.</p>
       <label>Courriel<input class="champ" type="email" name="email" autocomplete="username" required></label>
       <label>Mot de passe<input class="champ" type="password" name="password" autocomplete="current-password" required></label>
       ${message ? `<p class="erreur">${esc(message)}</p>` : ''}

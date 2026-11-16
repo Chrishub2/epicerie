@@ -1,9 +1,9 @@
 // =====================================================================
-// Console — source des VRAIES données (Supabase), en LECTURE SEULE (étape C3).
+// Console — source des VRAIES données (Supabase) : lecture (C3) et écriture contrôlée (C4).
 // - Même projet, même connexion que l'app téléphone (même site : la session est partagée).
 // - Lit la table `objets` du foyer, page par page, et l'historique (`objets_historique`, étape C2).
 // - Écoute le temps réel : un changement fait au téléphone apparaît dans la console.
-// - N'écrit RIEN : aucune fonction d'écriture ici (l'écriture arrive à l'étape C4, via ecrire_objet).
+// - Écrit (étape C4) seulement via ecrire_objet : contrôle de version, historique, source « console ».
 // =====================================================================
 import { SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, SUPABASE_JS } from '../config.js';
 
@@ -27,8 +27,11 @@ export function construireEtat(lignes, membres = []) {
     const coll = COLLECTIONS[l.type];
     if (!coll || !TYPES_LUS.includes(l.type) || l.supprime || !l.data || typeof l.data !== 'object') continue; // jamais de cartes ni de points
     const o = l.data;
-    Object.defineProperty(o, '_version', { value: l.version ?? null, enumerable: false, writable: true });
-    if (l.type === 'article') { o.maj = l.maj; o.majPar = noms.get(l.maj_par) || (l.maj_par ? 'membre' : '—'); }
+    // Propriétés de la console seulement : non énumérables, donc JAMAIS renvoyées dans la base (JSON.stringify les ignore).
+    const cache = (k, v) => Object.defineProperty(o, k, { value: v, enumerable: false, writable: true, configurable: true });
+    cache('_version', l.version ?? null);
+    cache('_base', JSON.parse(JSON.stringify(o))); // valeur connue de la base : sert à repérer MES changements en cas de conflit
+    if (l.type === 'article') { cache('maj', l.maj); cache('majPar', noms.get(l.maj_par) || (l.maj_par ? 'membre' : '—')); }
     (e[coll] ||= []).push(o);
   }
   return e;
@@ -105,6 +108,28 @@ export class SourceSupabase {
     this.canal = this.sb.channel(`console-${this.foyer.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'objets', filter: `foyer_id=eq.${this.foyer.id}` }, (p) => { if (p.new?.type) fn(p.new); })
       .subscribe((statut) => surEtat(statut));
+  }
+
+  /**
+   * Écrit un objet avec contrôle de version (fonction ecrire_objet, étape C2).
+   * Retourne la nouvelle version. Erreur `conflit` (code 40001) si l'objet a changé ailleurs depuis `version`.
+   * Les champs propres à la console (non énumérables) ne sont jamais envoyés.
+   */
+  async ecrire(type, id, data, version, source = 'console') {
+    const propre = JSON.parse(JSON.stringify(data));
+    const { data: v, error } = await this.sb.rpc('ecrire_objet', {
+      p_foyer: this.foyer.id, p_type: type, p_id: id, p_data: propre, p_version: version, p_supprime: false, p_source: source,
+    });
+    if (error) { const e = new Error(error.message); e.code = error.code; e.conflit = error.code === '40001' || /conflit/.test(error.message); throw e; }
+    return v;
+  }
+
+  /** Relit un objet tel qu'il est dans la base (après un conflit). */
+  async relire(type, id) {
+    const { data, error } = await this.sb.from('objets').select('type, id, data, supprime, version, maj, maj_par')
+      .eq('foyer_id', this.foyer.id).eq('type', type).eq('id', id).maybeSingle();
+    if (error) throw error;
+    return data;
   }
 
   nomMembre(uid) { return this.membres.find((m) => m.user_id === uid)?.nom_affiche || (uid ? 'membre' : 'serveur'); }
