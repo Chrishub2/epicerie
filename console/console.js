@@ -400,6 +400,7 @@ function editerCellule(id, champ) {
   tableCourante?.rafraichir();
   const ch = tableCourante?.ligneDom(id)?.querySelector('[data-edit]');
   ch?.focus(); ch?.select?.();
+  if (ch?.tagName === 'SELECT') { try { ch.showPicker?.(); } catch { /* navigateur sans showPicker : le menu reste visible, un clic l'ouvre */ } }
 }
 function validerEdition(valeur) {
   const ed = ui.edition; ui.edition = null;
@@ -615,6 +616,7 @@ function editerChampDetail(el, a) {
     : `<input class="cellule-edit" data-edit value="${esc(a[champ] || '')}">`;
   el.innerHTML = ctl;
   const c = el.firstElementChild; c.focus(); c.select?.();
+  if (c.tagName === 'SELECT') { try { c.showPicker?.(); } catch { /* le menu reste visible, un clic l'ouvre */ } }
   let fini = false;
   const valider = () => {
     if (fini) return; fini = true;
@@ -1250,7 +1252,13 @@ function recevoir(l) {
   else if (neuf) { if (i >= 0) liste[i] = neuf; else liste.push(neuf); }
   if (!echo) recusTR.add(l.id);
   clearTimeout(minuterieRecu);
-  minuterieRecu = setTimeout(async () => {
+  minuterieRecu = setTimeout(appliquerRecus, 400);
+}
+async function appliquerRecus() {
+  {
+    // Une modification est en cours (menu ou champ ouvert, fenêtre) : on attend qu'elle soit finie,
+    // sinon le réaffichage refermerait le menu sous la souris (vu le 2026-11-16 pendant la synchro du téléphone).
+    if (document.activeElement?.matches?.('[data-edit]') || document.querySelector('.voile')) { minuterieRecu = setTimeout(appliquerRecus, 700); return; }
     try { if (source?.foyer) histoBase = await source.chargerHistorique(); } catch { /* garde l'ancien */ }
     reanalyser();
     if (ui.vue === 'catalogue' && ui.remplirCatalogue) { ui.remplirCatalogue(); rendreNav(); rendreDetail(); } else rendre();
@@ -1258,7 +1266,7 @@ function recevoir(l) {
     if (recusTR.size) note(`${recusTR.size} changement(s) reçu(s) d'un autre appareil`);
     recusTR.clear();
     if (!attente.size && synchro.etat !== 'erreur') etatSynchro('ok', `Vraies données · « ${source?.foyer?.nom || ''} » · à jour ${heure(new Date().toISOString())}`);
-  }, 400);
+  }
 }
 
 function ecranAttente(message, erreur = false) {
