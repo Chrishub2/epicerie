@@ -429,11 +429,13 @@ function barreSelection() {
     <button class="btn petit" data-lot="uniteRef">Changer l'unité de comparaison…</button>
     <button class="btn petit" id="lotComparer" ${n < 2 || n > 4 ? 'disabled title="Choisis 2 à 4 produits"' : ''}>⇄ Comparer</button>
     <button class="btn petit" id="lotExport">Exporter CSV</button>
+    <button class="btn petit danger" id="lotSupprimer">🗑 Supprimer…</button>
     <span style="flex:1"></span><button class="btn petit" id="lotVider">Tout désélectionner</button>`;
   b.querySelectorAll('[data-lot]').forEach((x) => x.onclick = () => modifierEnLot(x.dataset.lot));
   $('#lotComparer').onclick = () => { ui.comparer = [...ui.selection]; ui.cibleFusion = ui.comparer[0]; aller('comparer'); };
   $('#lotVider').onclick = () => { ui.selection.clear(); tableCourante?.rafraichir(); barreSelection(); };
   $('#lotExport').onclick = exporterCsv;
+  $('#lotSupprimer').onclick = () => supprimerProduits([...ui.selection]);
 }
 
 function exporterCsv() {
@@ -553,6 +555,7 @@ function rendreDetail() {
           <span class="badge mono">${a.id}</span><span class="discret">modifié ${dateCourte(a.maj)} par ${esc(a.majPar || '—')}</span>
         </div>
       </div>
+      <button class="btn petit danger" id="supprimerFiche" title="Supprimer ce produit du catalogue">🗑 Supprimer</button>
       <button class="bouton-icone" id="fermerDetail" title="Fermer (Échap)">✕</button>
     </div>
     <div class="sections">
@@ -589,6 +592,7 @@ function rendreDetail() {
     </section>
     </div>`;
   $('#fermerDetail').onclick = fermerDetail;
+  $('#supprimerFiche').onclick = () => supprimerProduits([a.id]);
   brancherProblemes(zone);
   brancherHistorique(zone);
   zone.querySelectorAll('.valeur.editable').forEach((el) => {
@@ -861,6 +865,7 @@ function ligneHistorique(h) {
 }
 function brancherHistorique(zone) {
   zone.querySelectorAll('[data-annuler-base]').forEach((b) => b.onclick = () => revenirAvant(+b.dataset.annulerBase));
+  zone.querySelectorAll('[data-restaurer-produit]').forEach((b) => b.onclick = () => restaurerProduit(+b.dataset.restaurerProduit));
   zone.querySelectorAll('[data-restaurer]').forEach((b) => b.onclick = () => restaurer(historique.find((h) => h.id === +b.dataset.restaurer)));
 }
 /** Ligne d'historique lue dans la base : qui, quand, d'où, et les champs changés. */
@@ -871,7 +876,8 @@ function ligneHistoBase(h) {
   const diffs = h.operation === 'update' ? differences(h.data_avant, h.data) : [];
   return `<li class="${h.source === 'console' ? 'console' : ''}"><div><b>${esc(String(nom).trim())}</b> <span class="discret">· ${dateCourte(h.quand)} ${heure(h.quand)} · ${op} · ${esc(src)} · ${esc(source?.nomMembre(h.par) || '')} · v${h.version}</span></div>
     ${diffs.map((d) => `<div>${esc(d.champ)} : <span class="avant">${esc(d.avant)}</span> → <span class="apres">${esc(d.apres)}</span></div>`).join('')}
-    ${h.type === 'article' && h.operation === 'update' && h.data_avant && ARTS.get(h.id) ? `<button class="btn petit" data-annuler-base="${h.hid}" style="margin-top:4px">↺ Revenir à avant ce changement</button>` : ''}</li>`;
+    ${h.type === 'article' && h.supprime ? `<div class="muet">🗑 produit supprimé du catalogue</div>${!ARTS.get(h.id) && h.data ? `<button class="btn petit" data-restaurer-produit="${h.hid}" style="margin-top:4px">↺ Restaurer ce produit</button>` : ''}`
+      : h.type === 'article' && h.operation === 'update' && h.data_avant && ARTS.get(h.id) ? `<button class="btn petit" data-annuler-base="${h.hid}" style="margin-top:4px">↺ Revenir à avant ce changement</button>` : ''}</li>`;
 }
 function vueHistorique(t) {
   if (MODE === 'reel') {
@@ -1213,6 +1219,87 @@ async function resoudreConflit(id) {
       reanalyser(); rendre(); aPersister(id);   // normaliserProduits recalcule la variante ★ à partir de la fiche
     }]] : []),
   ]);
+}
+
+/**
+ * Supprimer des produits du catalogue — même règle que le téléphone (fiche produit → « Supprimer du catalogue ») :
+ * le produit est retiré du catalogue ET de la liste, les recettes ne le pointent plus, son historique de prix est GARDÉ.
+ * Dans la base : suppression douce (supprime = true), visible dans l'historique et restaurable.
+ */
+function supprimerProduits(ids) {
+  const arts = ids.map((id) => ARTS.get(id)).filter(Boolean);
+  if (!arts.length) return;
+  const set = new Set(arts.map((a) => a.id));
+  const lignes = (E.liste || []).filter((l) => set.has(l.articleId));
+  const recettes = (E.recettes || []).filter((r) => (r.ingredients || []).some((i) => set.has(i.articleId)));
+  const nPrix = (E.prix || []).filter((p) => set.has(p.articleId)).length;
+  modale(`Supprimer ${arts.length} produit(s) du catalogue`, `
+    <table class="mini-table"><tr><th>Produit</th><th>Rayon</th><th>Prix gardés</th></tr>
+      ${arts.slice(0, 100).map((a) => `<tr><td>${nomCourt(a)}</td><td>${esc(rayonNom(a.rayonId))}</td><td class="mono">${(A.prixParArticle.get(a.id) || []).length}</td></tr>`).join('')}</table>
+    ${arts.length > 100 ? `<p class="discret">… et ${arts.length - 100} autres.</p>` : ''}
+    <ul style="margin:12px 0 0;padding-left:18px">
+      <li>Retirés de la <b>liste</b> : ${lignes.length} ligne(s).</li>
+      <li>Recettes qui ne pointeront plus vers ces produits : ${recettes.length}.</li>
+      <li><b>Historique des prix gardé</b> : ${nPrix} prix (jamais effacés).</li>
+      <li>${MODE === 'reel' ? 'Restaurable depuis l\'<b>Historique</b> de la console (« Restaurer ce produit »). Les lignes de liste ne reviennent pas toutes seules.' : 'Démo : rien n\'est envoyé.'}</li>
+    </ul>`, [
+    ['Annuler', 'fermer'],
+    [`Supprimer ${arts.length} produit(s)`, 'principal', () => { executerSuppression(arts, lignes, recettes); }],
+  ]);
+}
+async function executerSuppression(arts, lignes, recettes) {
+  const set = new Set(arts.map((a) => a.id));
+  const retirerLocal = (idsArts, idsLignes) => {
+    E.articles = E.articles.filter((a) => !idsArts.has(a.id));
+    E.liste = (E.liste || []).filter((l) => !idsLignes.has(l.id));
+    for (const r of recettes) for (const i of r.ingredients || []) if (idsArts.has(i.articleId)) i.articleId = null;
+    for (const id of idsArts) { ui.selection.delete(id); if (ui.articleOuvert === id) fermerDetail(); }
+    reanalyser(); rendre();
+  };
+  if (MODE !== 'reel') { retirerLocal(set, new Set(lignes.map((l) => l.id))); note(`${arts.length} produit(s) supprimé(s) (démo)`); return; }
+  etatSynchro('local', `Suppression… ${arts.length} produit(s)`);
+  const faits = new Set(), lignesFaites = new Set(), problemes = [];
+  const ecrireSupp = async (type, o, supprime) => {
+    try { const v = await source.ecrire(type, o.id, o, o._version ?? null, 'console', supprime); o._version = v; mesEcritures.add(`${o.id}:${v}`); return true; }
+    catch (err) { problemes.push(`${type} ${o.nom || o.id} : ${err.conflit ? 'modifié ailleurs entre-temps' : err.message}`); return false; }
+  };
+  for (const a of arts) if (await ecrireSupp('article', a, true)) faits.add(a.id);
+  for (const l of lignes) if (faits.has(l.articleId) && await ecrireSupp('liste', l, true)) lignesFaites.add(l.id);
+  for (const r of recettes) {
+    const copie = JSON.parse(JSON.stringify(r));
+    for (const i of copie.ingredients || []) if (faits.has(i.articleId)) i.articleId = null;
+    Object.defineProperty(copie, '_version', { value: r._version, writable: true });
+    if (await ecrireSupp('recette', copie, false)) r._version = copie._version;
+  }
+  retirerLocal(faits, lignesFaites);
+  try { histoBase = await source.chargerHistorique(); } catch { /* garde l'ancien */ }
+  rendre();
+  if (problemes.length) {
+    etatSynchro('erreur', `${problemes.length} élément(s) non supprimé(s) · voir le détail`);
+    modale('Suppression incomplète', `<p>${faits.size} produit(s) supprimé(s). Pas fait :</p><ul>${problemes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul><p class="muet">Recharge la page puis réessaie : la console relira la dernière version.</p>`, [['Fermer', 'fermer']]);
+  } else {
+    etatSynchro('ok', `Supprimé · ${faits.size} produit(s) · ${heure(new Date().toISOString())}`);
+    note(`${faits.size} produit(s) supprimé(s) du catalogue · restaurable depuis l'Historique`);
+  }
+}
+
+/** Restaure un produit supprimé (nouvelle version, supprime = false). */
+async function restaurerProduit(hid) {
+  const h = histoBase.find((x) => x.hid === hid);
+  if (!h?.data || MODE !== 'reel') return;
+  try {
+    const l = await source.relire('article', h.id);
+    if (!l) { note('Produit introuvable dans la base.'); return; }
+    if (!l.supprime) { note('Ce produit est déjà dans le catalogue.'); return; }
+    const v = await source.ecrire('article', h.id, l.data, l.version, 'restauration', false);
+    mesEcritures.add(`${h.id}:${v}`);
+    const neuf = construireEtat([{ ...l, version: v, supprime: false }], source.membres).articles[0];
+    if (neuf && !ARTS.get(h.id)) E.articles.push(neuf);
+    try { histoBase = await source.chargerHistorique(); } catch { /* garde l'ancien */ }
+    reanalyser(); rendre();
+    etatSynchro('ok', `Restauré · ${heure(new Date().toISOString())}`);
+    note(`« ${esc(String(l.data.nom || h.id).trim())} » est de retour dans le catalogue (pas sur la liste).`);
+  } catch (err) { note(`Restauration impossible : ${esc(err.message)}`); }
 }
 
 /** « Revenir à avant ce changement » : réécrit la valeur d'avant (nouvelle version, rien n'est effacé). */

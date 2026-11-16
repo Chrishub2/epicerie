@@ -96,7 +96,7 @@ export class SourceSupabase {
   /** Dernières modifications enregistrées par la base (étape C2). */
   async chargerHistorique(limite = 300) {
     const { data, error } = await this.sb.from('objets_historique')
-      .select('hid, type, id, version, operation, data_avant, data, par, source, quand')
+      .select('hid, type, id, version, operation, data_avant, data, supprime, par, source, quand')
       .eq('foyer_id', this.foyer.id).neq('type', 'carte').neq('type', 'point')
       .order('hid', { ascending: false }).limit(limite);
     if (error) throw error;
@@ -115,10 +115,10 @@ export class SourceSupabase {
    * Retourne la nouvelle version. Erreur `conflit` (code 40001) si l'objet a changé ailleurs depuis `version`.
    * Les champs propres à la console (non énumérables) ne sont jamais envoyés.
    */
-  async ecrire(type, id, data, version, source = 'console') {
+  async ecrire(type, id, data, version, source = 'console', supprime = false) {
     const propre = JSON.parse(JSON.stringify(data));
     const { data: v, error } = await this.sb.rpc('ecrire_objet', {
-      p_foyer: this.foyer.id, p_type: type, p_id: id, p_data: propre, p_version: version, p_supprime: false, p_source: source,
+      p_foyer: this.foyer.id, p_type: type, p_id: id, p_data: propre, p_version: version, p_supprime: supprime, p_source: source,
     });
     if (error) { const e = new Error(error.message); e.code = error.code; e.conflit = error.code === '40001' || /conflit/.test(error.message); throw e; }
     return v;
