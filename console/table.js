@@ -23,8 +23,31 @@ export class TableVirtuelle {
     this.espaceur = this.racine.querySelector('.espaceur');
     this.corps.addEventListener('scroll', () => this.planifier(), { passive: true });
     new ResizeObserver(() => this.planifier()).observe(this.corps);
-    this.espaceur.addEventListener('click', (ev) => this.evenement(ev, this.o.surClic));
-    this.espaceur.addEventListener('dblclick', (ev) => this.evenement(ev, this.o.surDouble));
+    // Double-clic détecté ici (même ligne, même colonne, < 450 ms) : le premier clic redessine la ligne
+    // (ouverture de la fiche), et le navigateur ne reconnaît alors plus le « dblclick » natif.
+    this.espaceur.addEventListener('click', (ev) => {
+      const l = ev.target.closest('.ligne');
+      const cle = l ? `${l.dataset.id}|${ev.target.closest('[data-col]')?.dataset.col}` : null;
+      const maintenant = Date.now();
+      const surCase = ev.target.matches('[data-sel], [data-act], [data-edit], button, input, select');
+      if (!surCase && cle && this.dernierClic && this.dernierClic.cle === cle && maintenant - this.dernierClic.t < 450) {
+        clearTimeout(this.clicDiffere);
+        this.dernierClic = null;
+        this.evenement(ev, this.o.surDouble);
+        return;
+      }
+      this.dernierClic = { cle, t: maintenant };
+      // Colonne modifiable : on attend un instant avant le clic simple (ouvrir la fiche rétrécit le tableau
+      // et déplacerait la colonne sous la souris → le 2e clic tomberait ailleurs).
+      const col = ev.target.closest('[data-col]')?.dataset.col;
+      if (!surCase && this.o.colonnes.find((c) => c.cle === col)?.edit) {
+        const cible = ev.target;
+        clearTimeout(this.clicDiffere);
+        this.clicDiffere = setTimeout(() => { if (this.dernierClic?.cle === cle) this.evenement({ target: cible }, this.o.surClic); }, 260);
+        return;
+      }
+      this.evenement(ev, this.o.surClic);
+    });
     this.construireTete();
   }
 
