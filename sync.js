@@ -11,6 +11,7 @@
 import * as S from './store.js';
 import { toast } from './ui.js';
 import { SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, SUPABASE_JS } from './config.js';
+import { envoyerParPaquets } from './envoi.js';
 
 // type d'objet en base → collection de l'état local
 const COLLECTIONS = {
@@ -39,7 +40,8 @@ function signaler() { ecouteurs.forEach((f) => f(etatSync())); }
 
 export function surChangement(fn) { ecouteurs.add(fn); return () => ecouteurs.delete(fn); }
 export function etatSync() {
-  return { connecte: !!session, courriel: session?.user?.email || null, foyer, membres, dernier: meta.dernier || null, enLigne: navigator.onLine, recuperation };
+  return { connecte: !!session, courriel: session?.user?.email || null, foyer, membres, dernier: meta.dernier || null, enLigne: navigator.onLine, recuperation,
+    refuses: meta.refuses || [], erreurEnvoi: meta.erreurEnvoi || null };
 }
 export function finRecuperation() { recuperation = false; signaler(); }
 export function client() { return sb; }
@@ -203,17 +205,22 @@ export async function pousser() {
       if (type === 'prix') { delete meta.empreintes[k]; continue; }
       lignes.push({ foyer_id: foyer.id, type, id, data: JSON.parse(meta.empreintes[k]), supprime: true, _k: k, _json: null });
     }
-    for (let i = 0; i < lignes.length; i += 200) {
-      const lot = lignes.slice(i, i + 200);
+    // Un élément refusé par la base ne doit JAMAIS bloquer les autres (incident du 2026-11-16 :
+    // un seul prix refusé faisait échouer tout le paquet de 200, plus rien ne passait).
+    const envoyer = async (lot) => {
       const { error } = await sb.from('objets').upsert(lot.map(({ _k, _json, ...l }) => l), { onConflict: 'foyer_id,type,id' });
-      if (error) throw error;
-      lot.forEach((l) => { if (l._json == null) delete meta.empreintes[l._k]; else meta.empreintes[l._k] = l._json; });
-      ecrireMeta();
-    }
+      if (!error) { lot.forEach((l) => { if (l._json == null) delete meta.empreintes[l._k]; else meta.empreintes[l._k] = l._json; }); ecrireMeta(); }
+      return error;
+    };
+    const refuses = await envoyerParPaquets(lignes, envoyer, new Set((meta.refuses || []).map((r) => r.k)));
+    if (refuses.length) console.warn('Synchronisation : élément(s) refusé(s) par la base', refuses);
+    meta.refuses = refuses;
     await envoyerPhotos();
+    meta.erreurEnvoi = null;
     meta.dernier = new Date().toISOString(); ecrireMeta(); signaler();
   } catch (err) {
     console.warn('Synchronisation : envoi reporté', err);
+    meta.erreurEnvoi = err?.message || String(err); ecrireMeta(); signaler();
   } finally { enEnvoi = false; }
 }
 

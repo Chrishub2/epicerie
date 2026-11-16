@@ -211,7 +211,7 @@ function rendre() {
 // ---------------------------------------------------------------------
 function vueTdb(t) {
   const variantes = E.articles.flatMap((a) => variantesActives(a));
-  const commerciaux = new Set(E.articles.flatMap((a) => variantesActives(a).map((v) => a.id + '|' + sansAccents(v.marque))));
+  const commerciaux = new Set(E.articles.flatMap((a) => variantesActives(a).filter((v) => String(v.marque || '').trim()).map((v) => a.id + '|' + sansAccents(v.marque))));
   const marques = new Set(variantes.map((v) => sansAccents(v.marque)).filter(Boolean));
   const codes = new Set(E.articles.flatMap(codesDe));
   const alias = variantes.reduce((s, v) => s + (v.alias?.length || 0), 0);
@@ -222,7 +222,7 @@ function vueTdb(t) {
   const parRegle = Object.entries(REGLES).map(([code, r]) => ({ code, r, n: A.problemes.filter((p) => p.code === code).length }));
   const maxR = Math.max(...parRegle.map((x) => x.n), 1);
   const tuiles = [
-    ['Types de produits', E.articles.length, 'catalogue'], ['Produits commerciaux', commerciaux.size, null, 'Calculés : type + marque'],
+    ['Types de produits', E.articles.length, 'catalogue'], ['Produits commerciaux', commerciaux.size, null, 'Calculés : type + marque (seulement les variantes qui ont une marque)'],
     ['SKU (variantes)', variantes.length], ['Marques', marques.size], ['Codes-barres', codes.size], ['Rayons', E.rayons.length],
     ['Images', E.articles.filter((a) => a.imageUrl).length], ['Références marchand', alias, null, 'Noms imprimés sur les reçus'],
     ['Prix observés', E.prix.length], ['Problèmes ouverts', A.problemes.length, 'boite'], ['Corrections prêtes', applicables, 'boite', `Confiance ≥ ${pct(SEUIL_LOT)}`],

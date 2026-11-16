@@ -7,10 +7,10 @@
 // - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
 // À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
 // =====================================================================
-const CACHE = 'epicerie-v43';
+const CACHE = 'epicerie-v44';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'couverture.js', 'demo-data.js',
   'ui.js', 'comparer.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
-  'retouche.js', 'maj.js', 'scan.js', 'recettes.js', 'plus.js', 'manifest.webmanifest', 'icone.svg',
+  'retouche.js', 'maj.js', 'scan.js', 'recettes.js', 'plus.js', 'envoi.js', 'manifest.webmanifest', 'icone.svg',
   // Skins (même liste que FICHIERS_SKINS dans skins/skins.js)
   'skins/skins.js', 'skins/pro.css', 'skins/etiquette.css', 'skins/ludique.css', 'skins/potager.css', 'skins/doux.css',
   'skins/party.css', 'skins/futuriste.css', 'skins/metal.css', 'skins/electro.css', 'skins/musique.css', 'skins/sport.css'];

@@ -42,7 +42,17 @@ function majEntete() {
     choix.innerHTML = e.membres.map((m) => `<option ${m === e.utilisateur ? 'selected' : ''}>${esc(m)}</option>`).join('');
   }
   const b = $('#bandeauDemo');
-  if (st.foyer) {
+  b.onclick = null;
+  if (st.foyer && st.enLigne && (st.refuses.length || st.erreurEnvoi)) {
+    // Ne jamais afficher « synchronisé » quand un envoi échoue (incident du 2026-11-16)
+    b.classList.remove('ok');
+    b.textContent = st.refuses.length
+      ? `⚠ ${st.refuses.length} élément(s) refusé(s) par la base · le reste est synchronisé · touche pour le détail`
+      : '⚠ Envoi en attente : la base n\'a pas répondu · nouvel essai au prochain changement · touche pour le détail';
+    b.onclick = () => toast(st.refuses.length
+      ? st.refuses.slice(0, 3).map((r) => `${r.k} : ${r.erreur}`).join(' · ')
+      : `Dernière erreur : ${st.erreurEnvoi}`);
+  } else if (st.foyer) {
     b.classList.add('ok');
     b.textContent = `👪 Partagé avec « ${st.foyer.nom} » · ${st.enLigne ? 'synchronisé' : '📵 hors ligne : envoi au retour du réseau'}`;
   } else {
