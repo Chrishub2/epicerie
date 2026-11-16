@@ -66,8 +66,8 @@ export async function lireEtiquette(blob, etat) {
 }
 
 /** Reçu (1 ou plusieurs photos) → { banniere, date, total, lignes:[{libelle, prix, code…}], verification, … }. liste = noms à relier. */
-export async function lireRecu(blobs, etat, liste = []) {
-  const r = await essayerIA('recu', blobs, etat, liste.length ? { liste } : {});
+export async function lireRecu(blobs, etat, liste = [], attendus = []) {
+  const r = await essayerIA('recu', blobs, etat, { ...(liste.length ? { liste } : {}), ...(attendus.length ? { attendus } : {}) });
   if (r) return { banniere: r.banniere === 'autre' ? null : r.banniere, magasin: r.magasin, adresse: r.adresse, telephone: r.telephone,
     date: r.date, heure: r.heure, caisse: r.caisse, caissier: r.caissier, transaction: r.transaction,
     nombreArticles: r.nombre_articles, sousTotal: r.sous_total, total: r.total, tps: r.tps, tvq: r.tvq, economies: r.economies,
@@ -75,7 +75,7 @@ export async function lireRecu(blobs, etat, liste = []) {
     autres: r.autres || [], verification: r.verification || null, source: 'ia',
     lignes: (r.lignes || []).map((l) => ({ libelle: l.libelle, nomClair: l.nom_clair, marque: l.marque, format: l.format,
       code: l.code_barres ? String(l.code_barres).replace(/\D/g, '') || null : null, quantite: l.quantite, poids: l.poids,
-      prixUnitaire: l.prix_unitaire, prix: l.prix_total, rabais: l.rabais, taxable: l.taxable, articleListe: l.article_liste })) };
+      prixUnitaire: l.prix_unitaire, prix: l.prix_total, rabais: l.rabais, taxable: l.taxable, articleListe: l.article_liste, explicationPrix: l.explication_prix || null })) };
   let texte = '';
   for (const b of blobs) texte += (await lireTexte(b, etat)) + '\n';
   return { ...analyserRecu(texte), texte, source: 'ocr' };

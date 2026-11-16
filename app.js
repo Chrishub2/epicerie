@@ -18,6 +18,7 @@ import { surveillerMisesAJour } from './maj.js';
 surveillerMisesAJour(); // « Mise à jour disponible — Oui / Non »
 import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle, remplacerArticle } from './manuscrit.js';
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
+import { htmlVerdictListe, htmlDernierAchat } from './recu.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -242,7 +243,9 @@ function htmlItem(l, a) {
   const k = l.magasinCible;
   const m = (k && offresArticle(a).find((o) => o.pu != null && cleOffre(o) === k)) || meilleureOffre(a);
   const meilleur = m ? `${logo(m.banniere)} ${esc(m.magasinNom ? m.magasinNom.replace(/^\S+\s*/, '') : '')} ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}` : 'Prix inconnu — touche pour trouver les vrais prix';
-  return `<div class="item ${l.coche ? 'coche' : ''}" data-id="${l.id}">
+  const verdict = htmlVerdictListe(l.recu);
+  return `<div class="item item-liste ${l.coche ? 'coche' : ''}" data-id="${l.id}">
+    ${verdict ? verdict.replace('class="item-recu', `data-fiche="${a.id}" class="item-recu`) : ''}
     <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Acheté">
     ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
     <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
@@ -600,6 +603,8 @@ export function ficheArticle(articleId, ligneId) {
     ${a.exclusif ? `<div class="alerte ambre">Vendu seulement chez <b>${esc(nomBanniere(a.exclusif))}</b> : les autres bannières sont ignorées pour ce produit.</div>` : ''}
     <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres</button>
     <p class="doux" style="margin:-4px 0 10px">Remplit la fiche : nom, marque, format, catégorie, photo et prix.</p>
+    ${htmlDernierAchat(l?.recu?.absent ? null : (l?.recu || a.dernierAchat))}
+    ${l?.recu?.absent ? `<div class="alerte" style="margin-bottom:10px">🧾 Ce produit n'est pas sur la facture du ${esc(l.recu.date || '')}${l.recu.banniere ? ` (${esc(nomBanniere(l.recu.banniere))})` : ''}.</div>` : ''}
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a, { avecManquants: true })}
     <div class="carte" style="margin-top:8px;background:var(--gris-fond)">

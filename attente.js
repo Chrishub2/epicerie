@@ -48,8 +48,8 @@ async function photos(ids) {
 
 async function executer(t) {
   if (t.type === 'recu') {
-    const { nomsListe, verifierRecu, appliquerRecu } = await import('./recu.js');
-    const r = await lireRecu(await photos(t.photoIds), undefined, nomsListe());
+    const { nomsListe, attendusListe, verifierRecu, appliquerRecu } = await import('./recu.js');
+    const r = await lireRecu(await photos(t.photoIds), undefined, nomsListe(), attendusListe());
     S.maj((e) => { const rc = (e.recus || []).find((y) => y.id === t.recuId); if (rc) Object.assign(rc, r, { statut: 'lu' }); });
     // Reçu complet → la liste est remplie tout de suite ; sinon tu le vois « À vérifier » dans Mes reçus
     if (verifierRecu(r).ok) await appliquerRecu(t.recuId);

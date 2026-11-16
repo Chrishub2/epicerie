@@ -309,15 +309,16 @@ function vueReleve(v) {
   v.innerHTML = retour() + `<div class="carte"><h2>Relevé de prix</h2>
       <p class="doux">Photographie les étiquettes qui t'intéressent : je lis le prix et le format, tu confirmes le produit. Les prix vont dans ton historique, pas dans ta liste. Sans réseau, les photos sont lues plus tard.</p>
       <div class="champ"><label>Magasin</label><select id="rlMag">${mags.map((m) => `<option value="${m.id}" ${m.id === magasinReleve ? 'selected' : ''}>${esc(m.nom)}</option>`).join('')}</select></div>
-      <button class="btn" id="rlPhoto" style="width:100%">📷 Photographier une étiquette</button>
+      <div class="rang envelopper"><button class="btn grandir" id="rlPhoto">📷 Photographier une étiquette</button>
+        <button class="btn sec grandir" id="rlScan">▥ Scanner un code-barres</button></div>
       ${faits ? `<p class="doux">${faits} prix déjà enregistré(s) par relevé.</p>` : ''}</div>
     <datalist id="rlCat">${e.articles.map((a) => `<option value="${esc(a.nom)}">`).join('')}</datalist>
     ${releves.map((r) => {
       const m = e.magasins.find((x) => x.id === r.magasinId);
       return `<div class="carte" data-rl="${r.id}">
-        <div class="rang"><div class="vignettes" style="width:72px;flex:none" data-ph="${r.photoId}"></div>
+        <div class="rang">${r.photoId ? `<div class="vignettes" style="width:72px;flex:none" data-ph="${r.photoId}"></div>` : (r.imageUrl ? `<img class="vignette" src="${esc(r.imageUrl)}" alt="">` : '<span class="vignette" style="display:grid;place-items:center">▥</span>')}
           <div class="grandir"><div class="doux">${m ? logoMagasin(m) : ''} · ${esc(r.date.slice(0, 10))}</div>
-            <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : r.offre ? '✓ Lu sur la photo — vérifie' : 'Prix non lu : écris-le'}</div></div></div>
+            <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : r.code ? `▥ Code ${esc(r.code)} — écris le prix de l'étiquette` : r.offre ? '✓ Lu sur la photo — vérifie' : 'Prix non lu : écris-le'}</div></div></div>
         <div class="champ" style="margin-top:6px"><label>Produit</label><input data-nom list="rlCat" value="${esc(r.nom || r.nomLu || '')}" placeholder="ex. Beurre Lactantia"></div>
         <div class="rang"><div class="champ grandir"><label>Prix</label><input data-offre value="${esc(r.offre || '')}" placeholder="4,99 $ · 2/5 $"></div>
           <div class="champ grandir"><label>Format</label><input data-format value="${esc(r.format || '')}" placeholder="454 g"></div></div>
@@ -335,6 +336,16 @@ function vueReleve(v) {
     S.maj((x) => { (x.releves ||= []).unshift({ id, photoId, magasinId: magasinReleve, date: new Date().toISOString(), statut: 'à lire', par: x.utilisateur }); });
     ajouterTache({ type: 'releve', releveId: id, photoId });
   };
+  // Par code-barres : le produit est identifié (catalogue, bases ouvertes, épiceries.ca) ; tu écris le prix
+  $('#rlScan', v).onclick = async () => {
+    const { ouvrirScan } = await import('./scan.js');
+    ouvrirScan((a) => {
+      if (!a) return;
+      S.maj((x) => { (x.releves ||= []).unshift({ id: S.uid('rl'), photoId: null, magasinId: magasinReleve, date: new Date().toISOString(), statut: 'lu',
+        nom: a.nom, format: a.format || '', articleId: a.id, imageUrl: a.imageUrl || null, code: (a.codes || [])[0] || '', par: x.utilisateur }); });
+      toast(`${a.nom} : écris le prix de l'étiquette`);
+    }, { libelleOk: 'Ajouter au relevé' });
+  };
   $$('[data-rl]', v).forEach((el) => {
     const r = releves.find((x) => x.id === el.dataset.rl);
     el.querySelector('[data-sup]').onclick = () => S.maj((x) => { x.releves = x.releves.filter((y) => y.id !== r.id); });
@@ -349,8 +360,8 @@ function vueReleve(v) {
       const m = S.get().magasins.find((y) => y.id === r.magasinId);
       S.maj((x) => {
         x.prix.push({ id: S.uid('p'), articleId: a.id, banniere: m?.banniere, magasinId: r.magasinId, offre, format: format || a.format,
-          type: r.rabais ? 'circulaire' : 'regulier', fin: null, source: 'photo', photoId: r.photoId, observeLe: r.date.slice(0, 10) });
-        x.photos.push({ id: r.photoId, type: 'prix', articleId: a.id, date: r.date, prise_par: r.par, note: `${offre} · ${m?.nom || ''}` });
+          type: r.rabais ? 'circulaire' : 'regulier', fin: null, source: r.photoId ? 'photo' : 'manuel', photoId: r.photoId || undefined, observeLe: r.date.slice(0, 10) });
+        if (r.photoId) x.photos.push({ id: r.photoId, type: 'prix', articleId: a.id, date: r.date, prise_par: r.par, note: `${offre} · ${m?.nom || ''}` });
         const rr = x.releves.find((y) => y.id === r.id); Object.assign(rr, { statut: 'enregistré', nom, offre, format, articleId: a.id });
       });
       if (el.querySelector('[data-liste]').checked) app.ajouterALaListe(a.id);
@@ -381,7 +392,7 @@ export async function nouveauRecu() {
   ouvrirModale('Vérification du reçu', `<div id="rvVerdict"><div class="alerte">⏳ Je lis et je vérifie ton reçu (${blobs.length} photo(s))… environ 20 à 40 secondes.</div></div>
     <p class="doux">Le reçu entier, tel que je le vois :</p><div id="rvEntier"></div><div id="rvActions" class="rang envelopper" style="margin-top:10px"></div>`, async (c) => {
     R.apercuEntier(blobs, $('#rvEntier', c));
-    const lu = await lireRecu(blobs, undefined, R.nomsListe());
+    const lu = await lireRecu(blobs, undefined, R.nomsListe(), R.attendusListe());
     if (!$('#rvVerdict', c)) return; // fenêtre fermée ou remplacée entre-temps
     const v = R.verifierRecu(lu);
     $('#rvVerdict', c).innerHTML = v.ok

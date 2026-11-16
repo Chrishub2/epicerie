@@ -246,6 +246,12 @@ table.comp tr.meilleur td.pu { color: var(--vert); }
 table.comp tr.proche td.pu { color: var(--ambre); }
 .vignette { width: 44px; height: 44px; object-fit: contain; border-radius: 8px; background: #fff; flex: none; cursor: pointer; }
 .item .vignette { width: 64px; height: 64px; }
+.item-liste { flex-wrap: wrap; row-gap: 6px; }
+.item-liste .item-recu { flex-basis: 100%; order: -1; font-size: 12px; font-weight: 600; cursor: pointer; }
+.item-recu.ok { color: var(--vert); }
+.item-recu.ecart { color: var(--rouge); }
+.item-liste .qte { flex-basis: 100%; justify-content: flex-end; }
+.item.coche .item-recu { text-decoration: none; }
 .tableau-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--ligne); border-radius: 12px;
   background: var(--carte); margin-bottom: 6px; }
 table.matrice { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 100%; }

@@ -88,7 +88,7 @@ export function ouvrirScan(surArticle, opts = {}) {
       if (code === dernier.code && now - dernier.t < 3000) return; // anti-doublon
       dernier = { code, t: now }; bip();
       if (!$('#rafale', c).checked) { arret?.(); arret = null; etat.textContent = `Code ${code}`; }
-      rechercher(code, $('#resultat', c), surArticle, () => $('#rafale', c).checked, opts.cibleId);
+      rechercher(code, $('#resultat', c), surArticle, () => $('#rafale', c).checked, opts.cibleId, opts.libelleOk);
     };
     $('#okCode', c).onclick = () => traiter($('#codeManuel', c).value);
     quandFermee(() => { arret?.(); arret = null; });
@@ -125,7 +125,7 @@ async function chercherEnLigne(variantes) {
   return null;
 }
 
-async function rechercher(code, zone, surArticle, enRafale, cibleId) {
+async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk = 'Ajouter à la liste') {
   const e = S.get();
   const variantes = gtinVariantes(code);
   // ① catalogue (toutes les variantes : UPC/EAN, caisse ITF-14)
@@ -133,6 +133,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId) {
   if (local && local.id !== cibleId) {
     surArticle(local);
     zone.innerHTML = `<div class="alerte vert">✓ ${esc(local.nom)} (déjà au catalogue)</div>`;
+    if (libelleOk !== 'Ajouter à la liste' && !enRafale()) setTimeout(fermerModale, 700);
     return;
   }
   zone.innerHTML = `<p class="doux">Recherche du produit ${esc(code)}${code.length === 14 ? ' (code de caisse, je cherche aussi le produit à l\'unité)' : ''}…</p>`;
@@ -156,7 +157,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId) {
       <div class="champ grandir"><label>Format</label><input id="sFormat" value="${esc(fmt)}" placeholder="454 g"></div></div>
     <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
     ${image ? '' : '<div id="sPhotos" class="champ"><label>Photo du produit</label><p class="doux">Recherche de photos en ligne…</p></div>'}
-    <div class="rang envelopper"><button class="btn" id="sOk">${cibleId ? '✓ Remplir la fiche' : 'Ajouter à la liste'}</button>
+    <div class="rang envelopper"><button class="btn" id="sOk">${cibleId ? '✓ Remplir la fiche' : esc(libelleOk)}</button>
       <button class="btn sec" id="sPhoto">📷 Photo du produit</button></div>`;
   zone.querySelector('#sOk').onclick = () => {
     const nom = zone.querySelector('#sNom').value.trim();

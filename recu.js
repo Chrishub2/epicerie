@@ -6,8 +6,74 @@
 // rien n'est inventé (une ligne non reconnue reste « non reliée »).
 // =====================================================================
 import * as S from './store.js';
-import { esc, argent, nomBanniere } from './ui.js';
-import { gtinVariantes, chiffreControle, analyserFormat, formatLisible } from './normalise.js';
+import { esc, argent, nomBanniere, offresArticle } from './ui.js';
+import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normaliser } from './normalise.js';
+
+const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
+
+/**
+ * Prix affiché dans l'app AVANT l'achat (on ignore les prix venant des reçus) :
+ * celui de la bannière du reçu si on l'a, sinon le meilleur ailleurs.
+ */
+function prixAttendu(a, banniere) {
+  const offres = offresArticle(a).filter((o) => o.source !== 'recu' && !o.perso && o.pu != null);
+  const ici = offres.filter((o) => o.banniere === banniere).sort((x, y) => x.pu - y.pu)[0];
+  const o = ici || offres[0];
+  return o ? { pu: o.pu, uniteRef: o.uniteRef, prixArticle: o.prixArticle, banniere: o.banniere, offre: o.offre, type: o.type,
+    fin: o.fin || null, source: o.source, observeLe: o.observeLe || null, ailleurs: !ici } : null;
+}
+
+/** « Prix affichés dans l'app » envoyés à l'IA pour qu'elle explique les écarts. */
+export function attendusListe() {
+  const e = S.get();
+  const vus = new Set();
+  return e.liste.flatMap((l) => {
+    const a = e.articles.find((x) => x.id === l.articleId);
+    if (!a || vus.has(a.id)) return [];
+    vus.add(a.id);
+    const parBanniere = {};
+    offresArticle(a).filter((o) => o.source !== 'recu' && !o.perso && o.pu != null)
+      .forEach((o) => { if (!parBanniere[o.banniere] || o.pu < parBanniere[o.banniere].pu) parBanniere[o.banniere] = o; });
+    const t = Object.values(parBanniere).map((o) => `${nomBanniere(o.banniere)} ${o.offre}${o.format ? ` (${o.format})` : ''}${o.type === 'circulaire' ? ` rabais${o.fin ? ` jusqu'au ${o.fin}` : ''}` : ''}`);
+    return t.length ? [`${a.nom}${a.format ? ` [${a.format}]` : ''} : ${t.join(' ; ')}`.slice(0, 200)] : [];
+  });
+}
+
+/** Compare le prix payé (ligne de reçu) au prix affiché ; explique l'écart avec des règles simples + l'IA. */
+function comparerPrix(l, ar, att, r) {
+  const offre = offreLigne(l);
+  const date = r.date || r.cree.slice(0, 10);
+  const base = { recuId: r.id, date, banniere: r.banniere, offrePayee: offre, explicationIA: l.explicationPrix || null };
+  if (!offre) return { ...base, statut: 'inconnu' };
+  const np = normaliser(offre, ar.format, ar.uniteRef);
+  let paye = null, attendu = null, unite = '';
+  if (att && l.poids && np.prixUnitaire != null) {           // produit pesé : on compare au kg
+    paye = np.prixUnitaire; attendu = att.pu; unite = att.uniteRef === 'kg' ? '/kg' : att.uniteRef === 'l' ? '/L' : '';
+  } else if (att && att.prixArticle != null) {               // à l'unité : prix d'un article
+    paye = ((Number(l.prix) || 0) - (Number(l.rabais) || 0)) / (Number(l.quantite) || 1); attendu = att.prixArticle;
+  } else if (att && np.prixUnitaire != null) {               // sinon : au kg / L / unité
+    paye = np.prixUnitaire; attendu = att.pu; unite = att.uniteRef === 'kg' ? '/kg' : att.uniteRef === 'l' ? '/L' : '/unité';
+  }
+  if (paye == null) {
+    const p = ((Number(l.prix) || 0) - (Number(l.rabais) || 0)) / (Number(l.quantite) || 1);
+    return { ...base, statut: 'inconnu', paye: p, explication: ['Aucun prix n\'était affiché dans l\'app pour comparer.'] };
+  }
+  const ecart = paye - attendu;
+  const statut = Math.abs(ecart) <= TOLERANCE ? 'ok' : ecart < 0 ? 'moins' : 'plus';
+  const raisons = [];
+  if (statut !== 'ok') {
+    if (att.ailleurs) raisons.push(`Le prix affiché vient de ${nomBanniere(att.banniere)}, pas de ${nomBanniere(r.banniere)}.`);
+    if (att.type === 'circulaire' && att.fin && att.fin < date) raisons.push(`Le rabais affiché se terminait le ${att.fin}.`);
+    else if (att.type === 'circulaire' && statut === 'plus') raisons.push('Le prix affiché était un prix en rabais : il n\'a peut-être pas été appliqué à la caisse.');
+    const fL = analyserFormat(l.format), fA = analyserFormat(ar.format);
+    if (fL && fA && fL.base === fA.base && Math.abs(fL.total - fA.total) / fA.total > 0.05) raisons.push(`Format sur la facture (${formatLisible(l.format)}) différent de ta fiche (${formatLisible(ar.format)}).`);
+    if (l.rabais) raisons.push(`Un rabais de ${argent(l.rabais)} a été appliqué à la caisse.`);
+    if (att.source === 'epiceries_ca') raisons.push('Le prix affiché vient d\'épiceries.ca (en ligne) : il peut différer de ta succursale.');
+    if (att.source === 'demo') raisons.push('Le prix affiché était un prix de démonstration.');
+    if (statut === 'plus' && !att.ailleurs) raisons.push('Si le prix à la caisse dépasse le prix affiché en magasin, la Politique d\'exactitude des prix s\'applique : article gratuit jusqu\'à 15 $, sinon 15 $ de rabais. Garde ton reçu.');
+  }
+  return { ...base, statut, paye, attendu, ecart, unite, offreAffichee: att.offre, banniereAffichee: att.banniere, explication: raisons };
+}
 
 const ECART_MAX = 0.10; // $ d'écart toléré entre la somme des lignes et le sous-total
 
@@ -101,7 +167,7 @@ export async function relireRecu(recuId) {
   const blobs = [];
   for (const id of r?.photoIds || [r?.photoId]) { const b = id && await S.lirePhoto(id); if (b) blobs.push(b); }
   if (!blobs.length) throw new Error('Photos du reçu introuvables sur ce téléphone.');
-  const lu = await lireRecu(blobs, undefined, nomsListe());
+  const lu = await lireRecu(blobs, undefined, nomsListe(), attendusListe());
   if (lu.source !== 'ia') throw new Error('La lecture par l\'IA a échoué. Réessaie dans un instant.');
   S.maj((x) => { const rc = x.recus.find((y) => y.id === recuId); if (rc) { Object.assign(rc, lu, { statut: 'lu', relu: new Date().toISOString() }); delete rc.applique; delete rc.bilan; } });
   return lu;
@@ -129,7 +195,9 @@ export async function appliquerRecu(recuId, etat = () => {}) {
   const mag = e.magasins.find((m) => m.banniere === r.banniere && r.magasin && simple(r.magasin).includes(simple(m.nom).split(' ').pop()))
     || e.magasins.find((m) => m.banniere === r.banniere);
   const date = r.date || r.cree.slice(0, 10);
-  const bilan = { relies: 0, coches: 0, prix: 0, completes: 0, nonRelies: 0 };
+  const bilan = { relies: 0, coches: 0, prix: 0, completes: 0, nonRelies: 0, bonPrix: 0, ecarts: 0 };
+  const lignesListe = new Set(e.liste.map((x) => x.id)); // articles de la liste au moment du reçu
+  const relies = new Set();
   const { infosCode } = await import('./scan.js');
 
   for (const [i, l] of (r.lignes || []).entries()) {
@@ -157,7 +225,11 @@ export async function appliquerRecu(recuId, etat = () => {}) {
       continue;
     }
     bilan.relies++;
+    relies.add(a.id);
     const offre = offreLigne(l);
+    const verdict = comparerPrix(l, S.get().articles.find((y) => y.id === a.id) || a, prixAttendu(a, r.banniere), r); // avant d'ajouter le prix payé
+    if (verdict.statut === 'ok' || verdict.statut === 'moins') bilan.bonPrix++;
+    if (verdict.statut === 'plus') bilan.ecarts++;
     let coche = false, complete = false;
     S.maj((x) => {
       const ar = x.articles.find((y) => y.id === a.id);
@@ -176,6 +248,8 @@ export async function appliquerRecu(recuId, etat = () => {}) {
       }
       const li = x.liste.find((y) => y.articleId === ar.id && !y.coche);
       if (li) { li.coche = true; li.cocheLe = new Date().toISOString(); coche = true; }
+      x.liste.filter((y) => y.articleId === ar.id && lignesListe.has(y.id)).forEach((y) => { y.recu = verdict; });
+      ar.dernierAchat = verdict;
       const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
       if (ln) ln.articleId = ar.id;
     });
@@ -183,6 +257,11 @@ export async function appliquerRecu(recuId, etat = () => {}) {
     if (coche) bilan.coches++;
     if (complete) bilan.completes++;
   }
+  // Articles de la liste absents de cette facture (sans effacer un achat confirmé par une autre facture)
+  S.maj((x) => {
+    x.liste.filter((y) => lignesListe.has(y.id) && !relies.has(y.articleId) && (!y.recu || y.recu.absent))
+      .forEach((y) => { y.recu = { recuId, date, banniere: r.banniere, absent: true }; });
+  });
   S.maj((x) => { const rc = x.recus.find((y) => y.id === recuId); if (rc) { rc.applique = new Date().toISOString(); rc.bilan = bilan; } });
   return bilan;
 }
@@ -221,7 +300,40 @@ export async function completerFiches(recuId, fin) {
   return file.length;
 }
 
-export const texteBilan =(b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s) · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}` : '';
+export const texteBilan = (b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s)${b.bonPrix != null ? ` · ${b.bonPrix} au bon prix` : ''}${b.ecarts ? ` · ⚠️ ${b.ecarts} payé(s) plus cher` : ''} · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}` : '';
+
+const dateCourte = (d) => (d ? new Date(`${d}T12:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }) : '');
+
+/** Ligne du haut de l'encadré de la liste : « payé le bon prix ? » selon la facture. */
+export function htmlVerdictListe(v) {
+  if (!v) return '';
+  const ou = `${v.banniere ? nomBanniere(v.banniere) + ', ' : ''}${dateCourte(v.date)}`;
+  if (v.absent) return `<div class="item-recu doux">🧾 Pas sur la facture (${esc(ou)})</div>`;
+  const p = (x) => `${argent(x)}${v.unite || ''}`;
+  if (v.statut === 'ok') return `<div class="item-recu ok">🧾 ✓ Bon prix selon la facture : ${p(v.paye)} (${esc(ou)})</div>`;
+  if (v.statut === 'moins') return `<div class="item-recu ok">🧾 ✓ Payé moins cher : ${p(v.paye)} au lieu de ${p(v.attendu)} (${esc(ou)})</div>`;
+  if (v.statut === 'plus') return `<div class="item-recu ecart">🧾 ⚠️ Payé ${p(v.paye)} au lieu de ${p(v.attendu)} (+${argent(v.ecart)}) — touche pour comprendre</div>`;
+  return `<div class="item-recu doux">🧾 Payé ${v.paye != null ? argent(v.paye) : esc(v.offrePayee || '?')} (${esc(ou)}) — aucun prix affiché pour comparer</div>`;
+}
+
+/** Bloc de la fiche produit : détail du dernier achat et explication de l'écart. */
+export function htmlDernierAchat(v) {
+  if (!v || v.absent) return '';
+  const p = (x) => `${argent(x)}${v.unite || ''}`;
+  const titre = v.statut === 'plus' ? '⚠️ Payé plus cher que le prix affiché' : v.statut === 'inconnu' ? '🧾 Dernier achat' : '✓ Payé le bon prix';
+  return `<div class="carte" style="margin:0 0 10px;${v.statut === 'plus' ? 'border-color:var(--rouge)' : ''}">
+    <b>${titre}</b>
+    <table class="comp" style="margin-top:6px">
+      <tr><td class="doux">Facture</td><td>${v.banniere ? esc(nomBanniere(v.banniere)) + ' · ' : ''}${esc(dateCourte(v.date))}</td></tr>
+      <tr><td class="doux">Payé</td><td><b>${v.paye != null ? p(v.paye) : esc(v.offrePayee || '?')}</b></td></tr>
+      ${v.attendu != null ? `<tr><td class="doux">Affiché dans l'app</td><td>${p(v.attendu)}${v.banniereAffichee ? ` (${esc(nomBanniere(v.banniereAffichee))}${v.offreAffichee ? ` · ${esc(v.offreAffichee)}` : ''})` : ''}</td></tr>` : ''}
+      ${v.ecart != null && v.statut !== 'ok' ? `<tr><td class="doux">Écart</td><td>${v.ecart > 0 ? '+' : '−'}${argent(Math.abs(v.ecart))}</td></tr>` : ''}
+    </table>
+    ${v.explicationIA ? `<p style="margin:6px 0 0">🤖 <b>Explication (IA, d'après la facture)</b> : ${esc(v.explicationIA)}</p>` : ''}
+    ${v.explication?.length ? `<ul style="margin:6px 0 0;padding-left:18px">${v.explication.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${v.statut === 'plus' && !v.explicationIA && !v.explication?.length ? '<p class="doux" style="margin:6px 0 0">Aucune explication évidente sur la facture : vérifie l\'étiquette en magasin.</p>' : ''}
+  </div>`;
+}
 
 /** Détail complet d'un reçu (en-tête, lignes, totaux, paiement, fidélité, autres infos). */
 export function htmlDetail(r) {
