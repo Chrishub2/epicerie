@@ -211,6 +211,7 @@ export function offresArticle(article) {
  * le nom du produit chez la bannière (épiceries.ca) ou la variante (« Tilda · 2 kg »).
  */
 function produitDeLOffre(article, p, v) {
+  if (p.source === 'flipp' && p.nomProduit) return p.nomProduit; // trouvé par la récolte : montrer le produit exact
   const actives = (article.variantes || []).filter((x) => !x.retiree);
   if (actives.length < 2) return '';
   if (p.nomProduit) return p.nomProduit;

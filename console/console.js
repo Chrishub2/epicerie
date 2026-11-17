@@ -960,7 +960,7 @@ function ligneHistorique(h) {
   const desc = h.champ === 'fusion' ? `fusion de ${esc(h.avant)} → ${esc(h.apres)}`
     : h.champ === 'pasDoublon' ? `pas des doublons : ${esc(h.apres)}`
     : `${libelleChamp(h.champ)} : <span class="avant">${valeurLisible(h.champ, h.avant)}</span> → <span class="apres">${valeurLisible(h.champ, h.apres)}</span>`;
-  const src = { console: 'toi (console)', regle: 'règle approuvée', restauration: 'restauration' }[h.source] || h.source;
+  const src = { console: 'toi (console)', regle: 'règle approuvée', restauration: 'restauration', agent: 'récolte automatique' }[h.source] || h.source;
   const peut = !h.restauree && h.source !== 'restauration' && h.champ !== 'pasDoublon' && (h.champ !== 'fusion' || h.instantane);
   return `<li class="console"><div><b>${esc((h.nom || '').trim())}</b> <span class="discret">· ${heure(h.quand)} · ${src}${h.lot ? ' · lot ' + h.lot : ''}</span></div>
     <div>${desc}</div>${peut ? `<button class="btn petit" data-restaurer="${h.id}" style="margin-top:4px">↺ Restaurer l'ancienne valeur</button>` : h.restauree ? '<span class="discret">restaurée</span>' : ''}</li>`;
@@ -973,7 +973,7 @@ function brancherHistorique(zone) {
 /** Ligne d'historique lue dans la base : qui, quand, d'où, et les champs changés. */
 function ligneHistoBase(h) {
   const nom = h.type === 'article' ? (ARTS.get(h.id)?.nom || (h.data || h.data_avant)?.nom || h.id) : `${h.type} · ${h.id}`;
-  const src = { telephone: 'téléphone', console: 'console', ia: 'IA', restauration: 'restauration' }[h.source] || h.source;
+  const src = { telephone: 'téléphone', console: 'console', ia: 'IA', restauration: 'restauration', agent: 'récolte automatique' }[h.source] || h.source;
   const op = { insert: 'création', update: 'modification', delete: 'suppression' }[h.operation] || h.operation;
   const diffs = h.operation === 'update' ? differences(h.data_avant, h.data) : [];
   return `<li class="${h.source === 'console' ? 'console' : ''}"><div><b>${esc(String(nom).trim())}</b> <span class="discret">· ${dateCourte(h.quand)} ${heure(h.quand)} · ${op} · ${esc(src)} · ${esc(source?.nomMembre(h.par) || '')} · v${h.version}</span></div>
