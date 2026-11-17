@@ -21,6 +21,14 @@ export const BANNIERES = {
   // Ajoutés le 2026-11-16 avec l'accord de Chris (prix réels via épiceries.ca)
   provigo: { nom: 'Provigo', couleur: '#e2231a', circulaire: 'https://www.provigo.ca/fr/print-flyer' },
   walmart: { nom: 'Walmart', couleur: '#0071ce', circulaire: 'https://www.walmart.ca/fr/flyer' },
+  // Ajoutés le 2026-11-17 avec l'accord de Chris (circulaires par captures). Lien de circulaire : à vérifier, donc absent.
+  tigre_geant: { nom: 'Tigre Géant', couleur: '#e4002b' },
+  uniprix: { nom: 'Uniprix', couleur: '#00843d' },
+  uniprix_sante: { nom: 'Uniprix Santé', couleur: '#006b32' },
+  familiprix_clinique: { nom: 'Familiprix Clinique', couleur: '#5b2c83' },
+  familiprix_extra: { nom: 'Familiprix Extra', couleur: '#7a3fa8' },
+  pharmaprix: { nom: 'Pharmaprix', couleur: '#cc0033' },
+  canadian_tire: { nom: 'Canadian Tire', couleur: '#d2232a' },
   // Commande en ligne seulement (épicerie en ligne d'IGA) : pas de succursale, pas dans les comparaisons en magasin.
   voila: { nom: 'Voilà (IGA en ligne)', couleur: '#6a1b9a', enLigneSeulement: true },
 };

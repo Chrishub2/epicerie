@@ -12,6 +12,7 @@ import { analyserOffre, analyserFormat } from './normalise.js';
 import { ajouterTache } from './attente.js';
 import * as Sync from './sync.js';
 import * as P from './produits.js';
+import { monterCirculaires } from './circulaires.js';
 
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
@@ -28,9 +29,11 @@ export function vuePlus(v) {
   if (section === 'releve') return vueReleve(v);
   if (section === 'apparence') return vueApparence(v);
   if (section === 'foyer') return vueFoyer(v);
+  if (section === 'circulaires') return vueCirculaires(v);
   const e = S.get();
   const st = Sync.etatSync();
   const menu = [
+    ['circulaires', '📰', 'Circulaires de la semaine', 'Charge tes captures par bannière, puis envoie : les rabais sont lus pour toi'],
     ['foyer', '👪', 'Mon foyer et partage', st.foyer ? `Partagé · ${st.membres.length} membre(s)` : st.connecte ? 'Connecté — crée ou joins ton foyer' : 'Connecte-toi pour partager la liste et activer l\'IA'],
     ['releve', '🏷️', 'Relevé de prix en magasin', 'Photographie des étiquettes pour ton inventaire de prix, sans rien acheter'],
     ['recus', '🧾', 'Mes reçus', `${(e.recus || []).length} reçu(s) · prends-les en photo après l'épicerie`],
@@ -51,6 +54,20 @@ export function vuePlus(v) {
 }
 
 const retour = () => `<button class="btn sec" id="retour" style="margin-bottom:10px">‹ Retour</button>`;
+
+// --- Circulaires de la semaine (même écran que la console : circulaires.js) ---
+let circulairesMontees = null;
+function vueCirculaires(v) {
+  circulairesMontees?.arreter();
+  v.innerHTML = retour() + '<div id="zoneCirc"></div>';
+  brancherRetour(v);
+  const st = Sync.etatSync();
+  circulairesMontees = monterCirculaires($('#zoneCirc', v), {
+    sb: Sync.estPret() ? Sync.client() : null, foyer: st.foyer?.id || null, articles: () => S.get().articles,
+    hote: 'app', source: 'telephone', message: toast,
+    succursale: (b) => S.get().magasins.some((m) => m.banniere === b && m.actif !== false),
+  });
+}
 function brancherRetour(v) { $('#retour', v).onclick = () => { section = null; vuePlus(v); }; }
 
 // --- Cartes fidélité --------------------------------------------------

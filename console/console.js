@@ -10,6 +10,7 @@ import { gtinValide, formatLisible, libelleUnitaire, analyserFormat } from '../n
 import { normaliserProduits, variantesActives, variantePref, completude, codesDe, fusionner, apercuFusion } from '../produits.js';
 import { SourceSupabase, construireEtat, differences, COLLECTIONS } from './source.js';
 import { chercherProduit, besoinsPour } from './recherche.js';
+import { monterCirculaires, compterAValider } from '../circulaires.js';
 
 // ---------------------------------------------------------------------
 // Outils
@@ -21,7 +22,8 @@ const nf = (n) => Number(n).toLocaleString('fr-CA');
 const pct = (x) => Math.round(x * 100) + ' %';
 const dateCourte = (iso) => iso ? new Date(iso).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
 const heure = (iso) => new Date(iso).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' });
-const BANNIERES = { iga: 'IGA', super_c: 'Super C', metro: 'Metro', maxi: 'Maxi', costco: 'Costco', jean_coutu: 'Jean Coutu', provigo: 'Provigo', walmart: 'Walmart' };
+const BANNIERES = { iga: 'IGA', super_c: 'Super C', metro: 'Metro', maxi: 'Maxi', costco: 'Costco', jean_coutu: 'Jean Coutu', provigo: 'Provigo', walmart: 'Walmart',
+  tigre_geant: 'Tigre Géant', uniprix: 'Uniprix', uniprix_sante: 'Uniprix Santé', familiprix_clinique: 'Familiprix Clinique', familiprix_extra: 'Familiprix Extra', pharmaprix: 'Pharmaprix', canadian_tire: 'Canadian Tire' };
 const UNITES = { kg: 'kg', l: 'L', unite: 'unité' };
 
 // ---------------------------------------------------------------------
@@ -165,7 +167,7 @@ function majSynchro() {
 // Navigation
 // ---------------------------------------------------------------------
 const VUES = [
-  ['Données', [['tdb', '◧', 'Tableau de bord'], ['catalogue', '▤', 'Catalogue'], ['boite', '⚑', 'Boîte de résolution'], ['comparer', '⇄', 'Comparateur'], ['historique', '↺', 'Historique']]],
+  ['Données', [['tdb', '◧', 'Tableau de bord'], ['catalogue', '▤', 'Catalogue'], ['boite', '⚑', 'Boîte de résolution'], ['circulaires', '📰', 'Circulaires'], ['comparer', '⇄', 'Comparateur'], ['historique', '↺', 'Historique']]],
   ['Référentiel', [['marques', '®', 'Marques', 'C3'], ['rayons', '▦', 'Rayons et types', 'C3'], ['codes', '▥', 'Codes UPC / EAN / PLU', 'C3'], ['magasins', '⌂', 'Magasins et références', 'C3']]],
   ['Activité', [['prix', '$', 'Prix et achats', 'C3'], ['recus', '🧾', 'Reçus', 'C3'], ['medias', '▣', 'Images et médias', 'C7']]],
   ['Système', [['ia', '✦', 'Assistant IA', 'C6'], ['synchro', '⇅', 'Synchronisation', 'C4'], ['admin', '⛁', 'Base de données', 'C2'], ['reglages', '⚙', 'Réglages', 'C3']]],
@@ -185,11 +187,29 @@ const PREVU = {
 };
 function rendreNav() {
   const nP1 = A.problemes.filter((p) => p.priorite === 1).length;
-  const comptes = { catalogue: nf(E.articles.length), boite: nf(A.problemes.length), comparer: ui.comparer.length || '', historique: (MODE === 'reel' ? histoBase.length : historique.length) || '' };
+  const comptes = { catalogue: nf(E.articles.length), boite: nf(A.problemes.length), circulaires: circAValider || '', comparer: ui.comparer.length || '', historique: (MODE === 'reel' ? histoBase.length : historique.length) || '' };
   $('#nav').innerHTML = VUES.map(([titre, items]) => `<h3>${titre}</h3>` + items.map(([id, ico, lib, etape]) =>
-    `<a href="#/${id}" data-vue="${id}" class="${etape ? 'prevu' : ''}" ${ui.vue === id ? 'aria-current="page"' : ''} title="${esc(lib)}${etape ? ' — prévu à l\'étape ' + etape : ''}">
+    `<a href="#/${id}" data-vue="${id}" class="${etape ? 'prevu' : ''}" ${ui.vue === id ? 'aria-current="page"' : ''} title="${esc(lib)}${etape ? ' — prévu à l\'étape ' + etape : ''}${id === 'circulaires' && circAValider ? ` — ${circAValider} rabais à valider` : ''}">
       <span class="ico">${ico}</span><span class="lib">${lib}</span>
-      <span class="compte ${id === 'boite' && nP1 ? 'p1' : ''}">${etape || comptes[id] || ''}</span></a>`).join('')).join('');
+      <span class="compte ${(id === 'boite' && nP1) || (id === 'circulaires' && circAValider) ? 'p1' : ''}">${etape || comptes[id] || ''}</span></a>`).join('')).join('');
+}
+
+// Circulaires (même écran que l'app : ../circulaires.js). Compteur rouge = rabais encore douteux après Claude.
+let circAValider = 0, circMonte = null;
+async function majCompteCirc() {
+  if (MODE !== 'reel' || !source?.foyer) return;
+  const n = await compterAValider(source.sb, source.foyer.id).catch(() => circAValider);
+  if (n !== circAValider) { circAValider = n; rendreNav(); }
+}
+setInterval(majCompteCirc, 60_000);
+function vueCirculaires(t) {
+  circMonte?.arreter();
+  if (MODE !== 'reel' || !source?.foyer) {
+    t.innerHTML = '<div style="padding:24px" class="discret">Les circulaires fonctionnent avec tes vraies données seulement (pas en mode démo).</div>';
+    return;
+  }
+  circMonte = monterCirculaires(t, { sb: source.sb, foyer: source.foyer.id, articles: () => E.articles, hote: 'console', source: 'console',
+    apresChangement: majCompteCirc, succursale: (b) => (E.magasins || []).some((m) => m.banniere === b && m.actif !== false) });
 }
 function aller(vue) { location.hash = '#/' + vue; }
 window.addEventListener('hashchange', () => { const v = location.hash.slice(2) || 'tdb'; ui.vue = v; rendre(); });
@@ -206,6 +226,7 @@ function rendre() {
   if (ui.vue === 'tdb') vueTdb(t);
   else if (ui.vue === 'catalogue') vueCatalogue(t);
   else if (ui.vue === 'boite') vueBoite(t);
+  else if (ui.vue === 'circulaires') { if (!t.querySelector(':scope > .circ')) vueCirculaires(t); } // déjà monté : il se rafraîchit seul
   else if (ui.vue === 'comparer') vueComparer(t);
   else if (ui.vue === 'historique') vueHistorique(t);
   else vuePrevue(t, ui.vue);
@@ -1230,6 +1251,7 @@ async function chargerTout() {
   reanalyser();
   etatSynchro('ok', `Vraies données · « ${foyer.nom} »`);
   rendre();
+  majCompteCirc();
   source.ecouter(recevoir, (statut) => {
     if (statut === 'SUBSCRIBED' && !attente.size) etatSynchro('ok', `Vraies données · « ${foyer.nom} » · temps réel actif`);
     else if (statut === 'CHANNEL_ERROR' || statut === 'TIMED_OUT') etatSynchro('erreur', 'Temps réel interrompu · recharge la page');

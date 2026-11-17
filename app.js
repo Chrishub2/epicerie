@@ -20,6 +20,7 @@ import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle, remplacerArti
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat } from './recu.js';
 import * as P from './produits.js';
+import { compterAValider } from './circulaires.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -116,11 +117,27 @@ export function rendre() {
   majEntete();
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
   const v = $('#vue');
-  if (onglet === 'liste') vueListe(v);
+  if (onglet === 'liste') { vueListe(v); majBandeauCirc(); }
   else if (onglet === 'comparer') vueComparaison(v, rendre);
   else if (onglet === 'recettes') vueRecettes(v);
   else if (onglet === 'magasins') vueMagasins(v);
   else vuePlus(v);
+}
+
+// Bandeau « rabais de circulaire à valider » en haut de la liste (compte relu au plus une fois par minute)
+let compteCirc = { n: 0, quand: 0 };
+async function majBandeauCirc() {
+  if (!Sync.estPret()) return;
+  if (Date.now() - compteCirc.quand > 60_000) {
+    compteCirc = { n: await compterAValider(Sync.client(), Sync.etatSync().foyer?.id).catch(() => 0), quand: Date.now() };
+  }
+  const z = $('#bandeauCirc');
+  if (!z) return;
+  z.innerHTML = compteCirc.n ? `<button class="carte rang" id="btnCirc" style="width:100%;text-align:left;font:inherit;color:inherit;border-color:var(--accent)">
+    <span style="font-size:22px">📰</span><span class="grandir"><b>${compteCirc.n} rabais de circulaire à valider</b>
+    <div class="doux">Vérifie le produit, puis valide</div></span><span>›</span></button>` : '';
+  const b = $('#btnCirc');
+  if (b) b.onclick = () => { compteCirc.quand = 0; allerOnglet('plus', { section: 'circulaires' }); };
 }
 
 // ---------------------------------------------------------------------
@@ -369,6 +386,7 @@ function vueListe(v) {
       <div id="suggestions" class="suggestions cache"></div>
     </div>
     ${alertesListe()}
+    <div id="bandeauCirc"></div>
     <div class="rang" style="margin:4px 0 6px">
       ${magFiltre ? `<div class="grandir doux">Rayons dans l'ordre de <b>${esc(magFiltre.nom)}</b></div>`
         : avecCibles ? '<div class="grandir doux">Chaque magasin garde son ordre de rayons</div>'
