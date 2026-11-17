@@ -354,7 +354,7 @@ export function completude(a, e, opts = {}) {
   const criteres = [
     { cle: 'format', icone: '⚖️', texte: 'format', ok: !!f },
     { cle: 'marque', icone: '🏷️', texte: 'marque', ok: !!String(a.marque || '').trim() },
-    { cle: 'code', icone: '▥', texte: 'code-barres', ok: codesDe(a).length > 0 },
+    { cle: 'code', icone: '▥', texte: 'code-barres', ok: codesDe(a).length > 0 || !!a.plu?.length },
     { cle: 'photo', icone: '📷', texte: 'photo', ok: !!a.imageUrl },
     { cle: 'prix', icone: '💲', texte: 'vrai prix', ok: prixReel },
     { cle: 'rayon', icone: '🗂️', texte: 'rayon', ok: !!rayon && !/^divers$/i.test(rayon.nom) },

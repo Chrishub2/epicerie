@@ -10,6 +10,7 @@ import { esc, argent, nomBanniere, offresArticle } from './ui.js';
 import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normaliser } from './normalise.js';
 import * as P from './produits.js';
 import { BANNIERES } from './demo-data.js';
+import { analyserPlu, infosPlu } from './plu.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -270,6 +271,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   for (const [i, l] of (r.lignes || []).entries()) {
     etat(`Produit ${i + 1}/${r.lignes.length}…`);
     const codes = variantesRecu(l.code);
+    const pluL = await infosPlu(l.code); // fruit ou légume : code PLU (4 chiffres, 9 + PLU = bio)
     const etatNow = S.get();
     // ① par le nom de la liste (relié par l'IA), ② par code-barres dans tout le catalogue
     // ⓪ association faite à la main (prioritaire)
@@ -278,6 +280,8 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     if (l.manuel && !l.articleId) { bilan.nonRelies++; continue; } // « aucun » choisi à la main
     // ① code-barres → variante exacte ; ② nom déjà vu sur un reçu de cette bannière (appris)
     if (!a && codes.length) { const t = P.varianteParCode(etatNow, codes); if (t) ({ article: a, variante: v } = t); }
+    // ①b code PLU déjà associé à un produit (appris d'un reçu précédent ou ajouté à la main)
+    if (!a && pluL) a = etatNow.articles.find((x) => (x.plu || []).includes(pluL.plu));
     if (!a) { const t = P.varianteParAlias(etatNow, r.banniere, l.libelle); if (t) ({ article: a, variante: v } = t); }
     // ③ nom de la liste (relié par l'IA)
     if (!a) a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
@@ -285,6 +289,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
     // (lien deviné : on ne l'apprend pas comme nom de reçu, pour ne pas répéter une erreur)
     let devine = false;
+    if (!a && pluL) { a = parNom(`${pluL.produit} ${pluL.variete}`, etatNow); devine = !!a; } // nom officiel du PLU
     if (!a) { a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow); devine = !!a; }
     // Recherche en ligne : complète la fiche reliée ou documente la ligne non reliée
     let info = null;
@@ -297,6 +302,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       S.maj((x) => {
         const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
         if (ln && info) Object.assign(ln, { nomEnLigne: info.nom || null, imageUrl: info.image || null, formatEnLigne: info.format || null });
+        if (ln && pluL && !ln.nomEnLigne) ln.nomEnLigne = pluL.nom; // le nom officiel aide à l'associer à la main
       });
       continue;
     }
@@ -315,7 +321,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     if (verdict.statut === 'ok' || verdict.statut === 'moins') bilan.bonPrix++;
     if (verdict.statut === 'plus') bilan.ecarts++;
     // Pas de code-barres ni sur la facture ni dans la fiche : recherche en ligne (sinon mention dans la fiche)
-    if (!codes.length && !a.codes?.length && navigator.onLine) { etat(`Code-barres de ${a.nom}…`); await trouverCode(a.id, l.marque); }
+    if (!codes.length && !a.codes?.length && !pluL && !a.plu?.length && navigator.onLine) { etat(`Code-barres de ${a.nom}…`); await trouverCode(a.id, l.marque); }
     let coche = false, complete = false;
     S.maj((x) => {
       const ar = x.articles.find((y) => y.id === a.id);
@@ -338,6 +344,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       if (estPref && !ar.marque && marqueLigne) { ar.marque = marqueLigne; complete = true; }
       if (estPref && !ar.imageUrl && info?.image) { ar.imageUrl = info.image; complete = true; }
       if (va && !devine) P.retenirAlias(x, ar.id, va.id, r.banniere, l.libelle); // le prochain reçu se reliera seul
+      if (pluL && !devine && !(ar.plu || []).includes(pluL.plu)) ar.plu = [...(ar.plu || []), pluL.plu]; // PLU appris (sûr seulement)
       if (info?.details) { if (info.details.quebec) ar.local = true; if (info.details.bio) ar.bio = true; if (info.details.allergenes.length && !ar.allergenes?.length) ar.allergenes = info.details.allergenes; }
       if (info?.ecp && !(ar.liens || []).some((k) => k.id === info.ec.id)) {
         ar.liens = [...(ar.liens || []), { id: info.ec.id, nom: [info.ecp.brand, info.ecp.name].filter(Boolean).join(' '), size: info.ecp.size, image: info.ecp.image }];
@@ -482,7 +489,7 @@ export function htmlDetail(r) {
     const a = l.articleId && e.articles.find((x) => x.id === l.articleId);
     const nom = l.nomClair || l.nomEnLigne || l.libelle;
     return `<tr><td>${a ? '✓ ' : ''}<b>${esc(nom)}</b>${a && simple(a.nom) !== simple(nom) ? ` <span class="doux">→ ${esc(a.nom)}</span>` : ''}
-        <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? ` · code ${esc(l.code)}` : ''}${l.marque ? ` · ${esc(l.marque)}` : ''}${l.format || l.formatEnLigne ? ` · ${esc(l.format || l.formatEnLigne)}` : ''}${l.quantite > 1 ? ` · qté ${l.quantite}` : ''}${l.poids ? ` · ${esc(l.poids)}` : ''}${l.taxable ? ` · taxe ${esc(l.taxable)}` : ''}</div></td>
+        <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? (analyserPlu(l.code) ? ` · PLU ${esc(analyserPlu(l.code).plu)}${analyserPlu(l.code).bio ? ' bio' : ''}` : ` · code ${esc(l.code)}`) : ''}${l.marque ? ` · ${esc(l.marque)}` : ''}${l.format || l.formatEnLigne ? ` · ${esc(l.format || l.formatEnLigne)}` : ''}${l.quantite > 1 ? ` · qté ${l.quantite}` : ''}${l.poids ? ` · ${esc(l.poids)}` : ''}${l.taxable ? ` · taxe ${esc(l.taxable)}` : ''}</div></td>
       <td class="pu">${argent(l.prix)}${l.rabais ? `<div style="color:var(--vert);font-size:12px">−${argent(l.rabais)}</div>` : ''}</td></tr>`;
   }).join('');
   return `${verdict}
