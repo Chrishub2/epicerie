@@ -287,10 +287,10 @@ export function monterCirculaires(conteneur, opts) {
     if (!etat.aValider.length) return '';
     const auto = etat.aValider.filter((o) => o.auto).length;
     return `<div class="c-bloc" id="cAValider">
-      <div class="c-rang"><h2 class="c-grandir">⚠ ${etat.aValider.length} rabais à valider</h2>
-        <button class="c-btn p" data-valider-sel>Valider la sélection</button></div>
-      <p class="c-doux">Les rabais cochés sont ceux que les règles jugent sûrs (période de rodage : je mesure ma précision avant de les écrire seul).
-        Vérifie le produit, puis valide. « Pas ce produit » m'apprend à ne plus le proposer. ${auto ? `${auto} coché(s) d'avance.` : ''}</p>
+      <div class="c-rang"><h2 class="c-grandir">🔎 ${etat.aValider.length} rabais incertains <span class="c-doux" style="font-weight:400">(facultatif)</span></h2>
+        <button class="c-btn" data-valider-sel>Valider la sélection</button></div>
+      <p class="c-doux">Les rabais <b>sûrs</b> sont déjà enregistrés automatiquement. Ceux-ci sont incertains : ils ne sont <b>pas</b> enregistrés, et tu peux les ignorer.
+        Si tu en valides un, je retiens le lien pour les prochaines circulaires. « Pas ce produit » m'apprend à ne plus le proposer.${auto ? ` ${auto} coché(s) d'avance.` : ''}</p>
       ${etat.aValider.map(carteOffre).join('')}
     </div>`;
   }

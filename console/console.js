@@ -12,6 +12,7 @@ import { SourceSupabase, construireEtat, differences, COLLECTIONS } from './sour
 import { chercherProduit, besoinsPour } from './recherche.js';
 import { monterCirculaires, compterAValider } from '../circulaires.js';
 import { surveillerMisesAJourConsole } from './maj-console.js';
+import { vueMagasins } from './magasins.js';
 
 // ---------------------------------------------------------------------
 // Outils
@@ -197,7 +198,7 @@ function majSynchro() {
 // ---------------------------------------------------------------------
 const VUES = [
   ['Données', [['tdb', '◧', 'Tableau de bord'], ['catalogue', '▤', 'Catalogue'], ['boite', '⚑', 'Boîte de résolution'], ['circulaires', '📰', 'Circulaires'], ['comparer', '⇄', 'Comparateur'], ['historique', '↺', 'Historique']]],
-  ['Référentiel', [['marques', '®', 'Marques', 'C3'], ['rayons', '▦', 'Rayons et types', 'C3'], ['codes', '▥', 'Codes UPC / EAN / PLU', 'C3'], ['magasins', '⌂', 'Magasins et références', 'C3']]],
+  ['Référentiel', [['marques', '®', 'Marques', 'C3'], ['rayons', '▦', 'Rayons et types', 'C3'], ['codes', '▥', 'Codes UPC / EAN / PLU', 'C3'], ['magasins', '⌂', 'Magasins et références']]],
   ['Activité', [['prix', '$', 'Prix et achats', 'C3'], ['recus', '🧾', 'Reçus', 'C3'], ['medias', '▣', 'Images et médias', 'C7']]],
   ['Système', [['ia', '✦', 'Assistant IA', 'C6'], ['synchro', '⇅', 'Synchronisation', 'C4'], ['admin', '⛁', 'Base de données', 'C2'], ['reglages', '⚙', 'Réglages', 'C3']]],
 ];
@@ -218,9 +219,9 @@ function rendreNav() {
   const nP1 = A.problemes.filter((p) => p.priorite === 1).length;
   const comptes = { catalogue: nf(E.articles.length), boite: nf(A.problemes.length), circulaires: circAValider || '', comparer: ui.comparer.length || '', historique: (MODE === 'reel' ? histoBase.length : historique.length) || '' };
   $('#nav').innerHTML = VUES.map(([titre, items]) => `<h3>${titre}</h3>` + items.map(([id, ico, lib, etape]) =>
-    `<a href="#/${id}" data-vue="${id}" class="${etape ? 'prevu' : ''}" ${ui.vue === id ? 'aria-current="page"' : ''} title="${esc(lib)}${etape ? ' — prévu à l\'étape ' + etape : ''}${id === 'circulaires' && circAValider ? ` — ${circAValider} rabais à valider` : ''}">
+    `<a href="#/${id}" data-vue="${id}" class="${etape ? 'prevu' : ''}" ${ui.vue === id ? 'aria-current="page"' : ''} title="${esc(lib)}${etape ? ' — prévu à l\'étape ' + etape : ''}${id === 'circulaires' && circAValider ? ` — ${circAValider} rabais incertains (facultatif)` : ''}">
       <span class="ico">${ico}</span><span class="lib">${lib}</span>
-      <span class="compte ${(id === 'boite' && nP1) || (id === 'circulaires' && circAValider) ? 'p1' : ''}">${etape || comptes[id] || ''}</span></a>`).join('')).join('');
+      <span class="compte ${id === 'boite' && nP1 ? 'p1' : ''}">${etape || comptes[id] || ''}</span></a>`).join('')).join('');
 }
 
 // Circulaires (même écran que l'app : ../circulaires.js). Compteur rouge = rabais encore douteux après Claude.
@@ -258,6 +259,7 @@ function rendre() {
   else if (ui.vue === 'circulaires') { if (!t.querySelector(':scope > .circ')) vueCirculaires(t); } // déjà monté : il se rafraîchit seul
   else if (ui.vue === 'comparer') vueComparer(t);
   else if (ui.vue === 'historique') vueHistorique(t);
+  else if (ui.vue === 'magasins') vueMagasins(t, { etat: () => E, reel: MODE === 'reel' && !!source?.foyer, source, ecritures: () => mesEcritures, note, rendre });
   else vuePrevue(t, ui.vue);
   rendreDetail();
 }
