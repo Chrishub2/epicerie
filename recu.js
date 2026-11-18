@@ -11,7 +11,7 @@ import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normalis
 import * as P from './produits.js';
 import { BANNIERES } from './demo-data.js';
 import { analyserPlu, infosPlu } from './plu.js';
-import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes } from './lignes-recu.js';
+import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes, reporterAssociations, etatLigne } from './lignes-recu.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -231,6 +231,42 @@ export async function associerManuellement(recuId, choix, etat) {
   return appliquerRecu(recuId, etat, { force: true });
 }
 
+/**
+ * Produit en main (code scanné ou photo) : relie les lignes `indices` du reçu au produit `articleId`
+ * et y inscrit le code-barres (il sera ajouté à la fiche, à la bonne marque/format), puis recalcule le reçu.
+ */
+export async function associerProduit(recuId, indices, articleId, code, etat) {
+  if (code) S.maj((x) => { const rc = x.recus.find((y) => y.id === recuId); indices.forEach((i) => { if (rc?.lignes?.[i]) rc.lignes[i].code = code; }); });
+  return associerManuellement(recuId, Object.fromEntries(indices.map((i) => [i, articleId])), etat);
+}
+
+/** Détail d'une ligne (touchée dans la liste du reçu) : texte imprimé, code, quantité, lien, prix payé. */
+export function htmlLigne(r, i) {
+  const l = r.lignes?.[i];
+  if (!l) return '';
+  const e = S.get();
+  const a = l.articleId && e.articles.find((x) => x.id === l.articleId);
+  const mode = modeRabais(r);
+  const cons = consignes(r.lignes)[i];
+  const plu = l.code && analyserPlu(l.code);
+  const morceaux = [
+    `Imprimé : <b>${esc(l.libelle)}</b>`,
+    l.code ? (plu ? `PLU ${esc(plu.plu)}${plu.bio ? ' bio' : ''}` : `Code ${esc(l.code)}`) : '',
+    [l.marque, l.format || l.formatEnLigne].filter(Boolean).map(esc).join(' · '),
+    l.poids ? esc(l.poids) : pesee(l) ? `${String(pesee(l).qte).replace('.', ',')} kg (pesé)` : l.quantite > 1 ? `Quantité ${l.quantite}` : '',
+    l.rabais ? (mode === 'net' ? `Économie ${argent(l.rabais)} (déjà déduite)` : `Rabais −${argent(l.rabais)}`) : '',
+    cons ? `+ consigne ${argent(cons)}` : '',
+  ].filter(Boolean);
+  const v = a?.dernierAchat?.recuId === r.id ? a.dernierAchat : null;
+  const etat = etatLigne(l);
+  return `<div>${morceaux.join('<br>')}</div>
+    ${a ? `<div style="margin-top:4px">${etat === 'ok' ? '✓ Associé' : '! Associé (à vérifier)'} à <b>${esc(a.nom)}</b>${a.marque ? ` · ${esc(a.marque)}` : ''}</div>`
+      : etat === 'hors' ? `<div style="margin-top:4px" class="doux">${l.manuel ? 'Mis de côté (« aucun produit »)' : 'Pas un produit'}</div>`
+      : '<div style="margin-top:4px">✗ Aucune association</div>'}
+    ${v?.statut === 'plus' ? `<div style="color:var(--rouge)">⚠️ Payé ${argent(v.paye)}${v.unite || ''} au lieu de ${argent(v.attendu)}${v.unite || ''}</div>`
+      : v?.statut === 'ok' || v?.statut === 'moins' ? `<div style="color:var(--vert)">✓ Bon prix : ${argent(v.paye)}${v.unite || ''}</div>` : ''}`;
+}
+
 /** Relit un reçu enregistré avec l'IA (nouvelle lecture : codes, liens avec la liste, vérification). */
 export async function relireRecu(recuId) {
   const { lireRecu, iaDisponible } = await import('./ocr.js');
@@ -241,7 +277,15 @@ export async function relireRecu(recuId) {
   if (!blobs.length) throw new Error('Photos du reçu introuvables sur ce téléphone.');
   const lu = await lireRecu(blobs, undefined, nomsListe(), attendusListe());
   if (lu.source !== 'ia') throw new Error('La lecture par l\'IA a échoué. Réessaie dans un instant.');
-  S.maj((x) => { const rc = x.recus.find((y) => y.id === recuId); if (rc) { Object.assign(rc, lu, { statut: 'lu', relu: new Date().toISOString() }); delete rc.applique; delete rc.bilan; } });
+  S.maj((x) => {
+    const rc = x.recus.find((y) => y.id === recuId);
+    if (!rc) return;
+    const anciennes = rc.lignes || [];
+    Object.assign(rc, lu, { statut: 'lu', relu: new Date().toISOString() });
+    // Tes associations faites à la main (et tes « aucun produit ») survivent à la relecture
+    lu.reportees = reporterAssociations(anciennes, rc.lignes || []);
+    delete rc.reportees; delete rc.applique; delete rc.bilan;
+  });
   return lu;
 }
 
@@ -257,8 +301,11 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   const mag = e.magasins.find((m) => m.banniere === r.banniere && r.magasin && simple(r.magasin).includes(simple(m.nom).split(' ').pop()))
     || e.magasins.find((m) => m.banniere === r.banniere);
   const date = r.date || r.cree.slice(0, 10);
-  const bilan = { relies: 0, coches: 0, prix: 0, completes: 0, nonRelies: 0, bonPrix: 0, ecarts: 0, horsProduits: 0 };
-  const lignesListe = new Set(e.liste.map((x) => x.id)); // articles de la liste au moment du reçu
+  const bilan = { relies: 0, coches: 0, prix: 0, completes: 0, nonRelies: 0, bonPrix: 0, ecarts: 0, horsProduits: 0, absents: 0 };
+  // Lien avec la liste, choisi à l'enregistrement : { mode: 'panier', ids } = ce reçu correspond au panier ;
+  // { mode: 'aucun' } = autre achat, la liste n'est pas touchée ; absent = toute la liste (comme avant)
+  const lien = opts.lienListe || r.lienListe || null;
+  const lignesListe = new Set(lien?.mode === 'aucun' ? [] : lien?.mode === 'panier' ? lien.ids || [] : e.liste.map((x) => x.id));
   const relies = new Set();
   const mode = modeRabais(r); // prix imprimés déjà rabais déduits ('net') ou non ('brut')
   // Nouvelle application (relecture, correction) : les prix déjà tirés de ce reçu qui ne
@@ -284,19 +331,30 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     let a = l.manuel && l.articleId && etatNow.articles.find((x) => x.id === l.articleId);
     let v = null; // variante exacte (marque + format), quand elle est certaine
     if (l.manuel && !l.articleId) { bilan.nonRelies++; continue; } // « aucun » choisi à la main
+    // Source du lien (écran du reçu : ✓ sûr pour manuel / code / plu / alias, ! à vérifier pour liste / nom)
+    let lien = a ? 'manuel' : null;
+    const source = (s) => { if (a && !lien) lien = s; };
     // ① code-barres → variante exacte ; ② nom déjà vu sur un reçu de cette bannière (appris)
     if (!a && codes.length) { const t = P.varianteParCode(etatNow, codes); if (t) ({ article: a, variante: v } = t); }
+    source('code');
     // ①b code PLU déjà associé à un produit (appris d'un reçu précédent ou ajouté à la main)
     if (!a && pluL) a = etatNow.articles.find((x) => (x.plu || []).includes(pluL.plu));
+    source('plu');
     if (!a) { const t = P.varianteParAlias(etatNow, r.banniere, l.libelle); if (t) ({ article: a, variante: v } = t); }
-    // ③ nom de la liste (relié par l'IA)
+    source('alias');
+    // ③ nom de la liste (relié par l'IA) : à vérifier, et pas appris tant que tu ne l'as pas confirmé
     if (!a) a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
       && etatNow.liste.some((li) => li.articleId === x.id));
+    source('liste');
     // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
     // (lien deviné : on ne l'apprend pas comme nom de reçu, pour ne pas répéter une erreur)
-    let devine = false;
+    let devine = lien === 'liste';
     if (!a && pluL) { a = parNom(`${pluL.produit} ${pluL.variete}`, etatNow); devine = !!a; } // nom officiel du PLU
     if (!a) { a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow); devine = !!a; }
+    source('nom');
+    // ④ lien d'une application précédente (ex. article retiré de la liste depuis) : gardé, mais à vérifier
+    if (!a && l.articleId) { a = etatNow.articles.find((x) => x.id === l.articleId) || null; if (a) devine = true; }
+    source('ancien');
     // Recherche en ligne : complète la fiche reliée ou documente la ligne non reliée
     let info = null;
     const manque = a && (!a.imageUrl || !a.format || !a.marque);
@@ -307,6 +365,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       bilan.nonRelies++;
       S.maj((x) => {
         const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
+        if (ln) { ln.articleId = null; delete ln.varianteId; delete ln.lien; } // plus de lien (ancien lien périmé effacé)
         if (ln && info) Object.assign(ln, { nomEnLigne: info.nom || null, imageUrl: info.image || null, formatEnLigne: info.format || null });
         if (ln && pluL && !ln.nomEnLigne) ln.nomEnLigne = pluL.nom; // le nom officiel aide à l'associer à la main
       });
@@ -327,7 +386,8 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     if (verdict.statut === 'ok' || verdict.statut === 'moins') bilan.bonPrix++;
     if (verdict.statut === 'plus') bilan.ecarts++;
     // Pas de code-barres ni sur la facture ni dans la fiche : recherche en ligne (sinon mention dans la fiche)
-    if (!codes.length && !a.codes?.length && !pluL && !a.plu?.length && navigator.onLine) { etat(`Code-barres de ${a.nom}…`); await trouverCode(a.id, l.marque); }
+    const chercheRecent = a.codeCherche && Date.now() - Date.parse(a.codeCherche) < 7 * 864e5;
+    if (!codes.length && !a.codes?.length && !pluL && !a.plu?.length && !chercheRecent && navigator.onLine) { etat(`Code-barres de ${a.nom}…`); await trouverCode(a.id, l.marque); }
     let coche = false, complete = false;
     S.maj((x) => {
       const ar = x.articles.find((y) => y.id === a.id);
@@ -366,12 +426,13 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
             type: l.rabais ? 'circulaire' : 'regulier', fin: null, source: 'recu', recuId, observeLe: date });
         }
       }
-      const li = x.liste.find((y) => y.articleId === ar.id && !y.coche);
+      // Cocher l'article acheté : seulement sans lien choisi (panier : déjà coché ; autre achat : liste intacte)
+      const li = !lien && x.liste.find((y) => y.articleId === ar.id && !y.coche);
       if (li) { li.coche = true; li.cocheLe = new Date().toISOString(); coche = true; }
       x.liste.filter((y) => y.articleId === ar.id && lignesListe.has(y.id)).forEach((y) => { y.recu = verdict; });
       ar.dernierAchat = verdict;
       const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
-      if (ln) { ln.articleId = ar.id; if (va) ln.varianteId = va.id; }
+      if (ln) { ln.articleId = ar.id; ln.lien = lien; if (va) ln.varianteId = va.id; }
     });
     if (offre && r.banniere) bilan.prix++;
     if (coche) bilan.coches++;
@@ -380,7 +441,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   // Articles de la liste absents de cette facture (sans effacer un achat confirmé par une autre facture)
   S.maj((x) => {
     x.liste.filter((y) => lignesListe.has(y.id) && !relies.has(y.articleId) && (!y.recu || y.recu.absent))
-      .forEach((y) => { y.recu = { recuId, date, banniere: r.banniere, absent: true }; });
+      .forEach((y) => { y.recu = { recuId, date, banniere: r.banniere, absent: true }; if (lien?.mode === 'panier') bilan.absents++; });
   });
   // Anciens prix de ce reçu qui ne correspondent plus (rabais ou pesée recalculés, ligne changée)
   S.maj((x) => {
@@ -425,7 +486,7 @@ export async function completerFiches(recuId, fin) {
   return file.length;
 }
 
-export const texteBilan = (b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s)${b.bonPrix != null ? ` · ${b.bonPrix} au bon prix` : ''}${b.ecarts ? ` · ⚠️ ${b.ecarts} payé(s) plus cher` : ''} · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}${b.horsProduits ? ` · ${b.horsProduits} consigne(s), coupon(s) ou sac(s) mis à part` : ''}` : '';
+export const texteBilan = (b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s)${b.bonPrix != null ? ` · ${b.bonPrix} au bon prix` : ''}${b.ecarts ? ` · ⚠️ ${b.ecarts} payé(s) plus cher` : ''} · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}${b.horsProduits ? ` · ${b.horsProduits} consigne(s), coupon(s) ou sac(s) mis à part` : ''}${b.absents ? ` · ⚠️ ${b.absents} article(s) du panier pas sur la facture` : ''}` : '';
 
 const dateCourte = (d) => (d ? new Date(`${d}T12:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }) : '');
 
@@ -506,24 +567,25 @@ export function htmlDetail(r) {
   const verdict = !v ? '<div class="alerte">⏳ Pas encore lu (en attente du réseau).</div>'
     : v.ok ? `<div class="alerte vert">✅ Reçu complet et bien lu — ${esc(v.resume)}</div>`
     : `<div class="alerte">⚠️ À vérifier : ${v.problemes.map(esc).join(' ')}${v.resume ? `<br><span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
+  const ICONE = { ok: '<span class="rc-et ok" aria-label="associé">✓</span>', verifier: '<span class="rc-et ver" aria-label="à vérifier">!</span>',
+    aucun: '<span class="rc-et non" aria-label="aucune association">✗</span>', hors: '<span class="rc-et hors" aria-hidden="true">·</span>' };
+  const compte = { ok: 0, verifier: 0, aucun: 0, hors: 0 };
   const lignes = (r.lignes || []).map((l, i) => {
+    const et = etatLigne(l);
+    compte[et]++;
     const nat = natureLigne(l);
-    if (nat !== 'produit' && !(l.manuel && l.articleId)) {
-      return `<tr class="doux"><td>${NATURE[nat]} <span style="font-size:12px">· ${esc(l.libelle)}</span></td><td class="pu">${argent(l.prix)}</td></tr>`;
-    }
-    const a = l.articleId && e.articles.find((x) => x.id === l.articleId);
-    const nom = l.nomClair || l.nomEnLigne || l.libelle;
-    return `<tr><td>${a ? '✓ ' : ''}<b>${esc(nom)}</b>${a && simple(a.nom) !== simple(nom) ? ` <span class="doux">→ ${esc(a.nom)}</span>` : ''}
-        <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? (analyserPlu(l.code) ? ` · PLU ${esc(analyserPlu(l.code).plu)}${analyserPlu(l.code).bio ? ' bio' : ''}` : ` · code ${esc(l.code)}`) : ''}${l.marque ? ` · ${esc(l.marque)}` : ''}${l.format || l.formatEnLigne ? ` · ${esc(l.format || l.formatEnLigne)}` : ''}${l.poids ? ` · ${esc(l.poids)}` : pesee(l) ? ` · ${String(pesee(l).qte).replace('.', ',')} kg (pesé)` : l.quantite > 1 ? ` · qté ${l.quantite}` : ''}${l.taxable ? ` · taxe ${esc(l.taxable)}` : ''}${cons[i] ? ` · + consigne ${argent(cons[i])}` : ''}</div></td>
-      <td class="pu">${argent(l.prix)}${l.rabais ? `<div style="color:var(--vert);font-size:12px">${mode === 'net' ? `économie ${argent(l.rabais)} (déjà déduite)` : `−${argent(l.rabais)}`}</div>` : ''}</td></tr>`;
+    const nom = et === 'hors' && nat !== 'produit' ? `${NATURE[nat]} · ${l.libelle}` : (l.nomClair || l.nomEnLigne || l.libelle);
+    const extra = l.quantite > 1 && !pesee(l) ? ` ×${l.quantite}` : cons[i] ? ' ♻️' : '';
+    return `<li class="rc-l ${et}" data-ligne="${i}">${ICONE[et]}<span class="rc-nom">${esc(nom)}${extra}</span><span class="rc-px">${argent(l.prix)}</span></li>`;
   }).join('');
   return `${verdict}
     ${r.bilan ? `<p class="doux">${esc(texteBilan(r.bilan))}</p>` : ''}
-    <details id="rcEntierBloc"><summary><b>Reçu entier (photos)</b></summary><div id="rcEntier"></div></details>
+    <h3>Produits (${(r.lignes || []).length}) <span class="doux" style="font-weight:400">· ✓ ${compte.ok} · ! ${compte.verifier} · ✗ ${compte.aucun}</span></h3>
+    <p class="doux" style="margin:0 0 4px">Touche une ligne pour la voir ou la corriger.</p>
+    ${lignes ? `<ul class="rc-liste">${lignes}</ul>` : '<p class="doux">Aucune ligne reconnue.</p>'}
+    <details id="rcEntierBloc" style="margin-top:10px"><summary><b>Reçu entier (photos)</b></summary><div id="rcEntier"></div></details>
     <h3>Magasin</h3><table class="comp">${champ('Bannière', r.banniere && nomBanniere(r.banniere))}${champ('Succursale', r.magasin)}${champ('Adresse', r.adresse)}${champ('Téléphone', r.telephone)}
       ${champ('Date', r.date)}${champ('Heure', r.heure)}${champ('Caisse', r.caisse)}${champ('Caissier', r.caissier)}${champ('Transaction', r.transaction)}</table>
-    <h3>Produits (${(r.lignes || []).length})</h3>
-    <table class="comp">${lignes || '<tr><td class="doux">Aucune ligne reconnue.</td></tr>'}</table>
     <h3>Totaux</h3><table class="comp">${champ('Nombre d\'articles', r.nombreArticles)}${champ('Sous-total', r.sousTotal != null ? argent(r.sousTotal) : null)}
       ${champ('TPS', r.tps != null ? argent(r.tps) : null)}${champ('TVQ', r.tvq != null ? argent(r.tvq) : null)}
       ${r.total != null ? `<tr><td><b>Total</b></td><td><b>${argent(r.total)}</b></td></tr>` : ''}${champ('Économies', r.economies != null ? argent(r.economies) : null)}</table>

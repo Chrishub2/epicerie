@@ -3,7 +3,7 @@
 // sauvegarde.
 // =====================================================================
 import * as S from './store.js';
-import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin, brancherSelecteurProduit } from './ui.js';
+import { $, $$, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin, brancherSelecteurProduit } from './ui.js';
 import { PROGRAMMES } from './demo-data.js';
 import { SKINS, skinActuel, htmlChoixSkin, brancherChoixSkin } from './skins/skins.js';
 import { photographierRecu } from './camera.js';
@@ -13,7 +13,8 @@ import { ajouterTache } from './attente.js';
 import * as Sync from './sync.js';
 import * as P from './produits.js';
 import { monterCirculaires } from './circulaires.js';
-import { natureLigne } from './lignes-recu.js';
+import { natureLigne, etatLigne, candidatsLignes, choixEvident, ressemblanceMutuelle, lignesIdentiques } from './lignes-recu.js';
+import { gtinVariantes, formatLisible } from './normalise.js';
 
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
@@ -544,8 +545,11 @@ export async function nouveauRecu() {
   if (!blobs.length) return;
   const { iaDisponible, lireRecu } = await import('./ocr.js');
   if (!iaDisponible()) {
-    const id = await enregistrerRecu(blobs, null);
-    toast(navigator.onLine ? `Reçu enregistré (${blobs.length} photo(s)) — lecture en cours…` : 'Reçu gardé — il sera lu et vérifié au retour du réseau');
+    const q = await questionsPanier();
+    const id = await enregistrerRecu(blobs, null, q.lienListe);
+    fermerModale();
+    const nRetires = q.retirer ? retirerCoches() : 0;
+    toast(`${navigator.onLine ? `Reçu enregistré (${blobs.length} photo(s)) — lecture en cours…` : 'Reçu gardé — il sera lu et vérifié au retour du réseau'}${nRetires ? ` · ${nRetires} article(s) retiré(s) de la liste` : ''}`);
     await ajouterTache({ type: 'recu', recuId: id, photoIds: S.get().recus.find((r) => r.id === id).photoIds });
     return;
   }
@@ -564,14 +568,59 @@ export async function nouveauRecu() {
       : '<button class="btn" id="rvRefaire">📷 Reprendre les photos</button><button class="btn sec" id="rvOk">Garder quand même</button>';
     $('#rvRefaire', c).onclick = () => nouveauRecu();
     $('#rvOk', c).onclick = async () => {
-      const id = await enregistrerRecu(blobs, lu);
-      $('#rvActions', c).innerHTML = '';
-      const etat = (m) => { $('#rvVerdict', c).innerHTML = `<div class="alerte">⏳ Je remplis ta liste et je complète les fiches… ${esc(m)}</div>`; };
+      const q = await questionsPanier(); // ce reçu correspond-il au panier ? retirer les cochés ensuite ?
+      const id = await enregistrerRecu(blobs, lu, q.lienListe);
+      ouvrirModale('Enregistrement du reçu', '<div id="rvEtat" class="alerte">⏳ J\'enregistre ton reçu…</div>');
+      const etat = (m) => { const z = $('#rvEtat'); if (z) z.textContent = `⏳ Je compare les prix et je complète les fiches… ${m}`; };
       const bilan = await R.appliquerRecu(id, etat);
-      toast(`Reçu enregistré ✓ ${R.texteBilan(bilan)}`);
+      const nRetires = q.retirer ? retirerCoches() : 0;
+      toast(`Reçu enregistré ✓ ${R.texteBilan(bilan)}${nRetires ? ` · ${nRetires} article(s) retiré(s) de la liste` : ''}`);
       apresApplication(id);
     };
   });
+}
+
+/** Fenêtre « question » : résout avec la valeur du bouton touché, ou `parDefaut` si on la ferme (✕, Échap). */
+function demander(titre, html, boutons, parDefaut = null, opts = {}) {
+  return new Promise((ok) => {
+    let fini = false;
+    const fin = (v) => { if (fini) return; fini = true; quandFermee(null); ok(v); };
+    const style = opts.pile ? ' style="width:100%;text-align:left;margin-top:6px"' : '';
+    ouvrirModale(titre, `${html}<div class="${opts.pile ? '' : 'rang envelopper'}" style="margin-top:12px">${boutons.map(([v, t], i) => `<button class="btn${i || opts.pile ? ' sec' : ''}" data-rep="${esc(v)}"${style}>${t}</button>`).join('')}</div>`,
+      (c) => $$('[data-rep]', c).forEach((b) => { b.onclick = () => fin(b.dataset.rep); }));
+    quandFermee(() => fin(parDefaut));
+  });
+}
+
+/**
+ * Avant l'enregistrement final d'un reçu, si des articles sont cochés (dans le panier) :
+ *  1) ce reçu correspond-il au panier ? Oui → les prix payés sont comparés aux prix affichés pour ces articles,
+ *     et ceux du panier absents de la facture sont signalés ; Non → la liste n'est pas touchée ;
+ *  2) peut-on retirer les articles cochés de la liste (pour préparer la prochaine) ?
+ * Panier vide ou fenêtre fermée : comme avant (toute la liste), rien n'est retiré.
+ */
+async function questionsPanier() {
+  const e = S.get();
+  const panier = e.liste.filter((l) => l.coche);
+  if (!panier.length) return { lienListe: null, retirer: false };
+  const noms = panier.map((l) => e.articles.find((a) => a.id === l.articleId)?.nom).filter(Boolean);
+  const rep = await demander('Ton panier et ce reçu', `<p>🛒 Ton panier contient <b>${panier.length} article(s) coché(s)</b>. Est-ce que <b>ce reçu correspond à ce panier</b> ?</p>
+    <ul class="doux" style="margin:6px 0;padding-left:18px;max-height:30vh;overflow:auto">${noms.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
+    <p class="doux">Oui : je compare chaque prix payé au prix affiché dans l'app et je te signale ce qui est dans le panier mais pas sur la facture. Non : j'enregistre les prix du reçu sans toucher à ta liste.</p>`,
+  [['oui', '✓ Oui, il correspond'], ['non', 'Non, autre achat']]);
+  if (!rep) return { lienListe: null, retirer: false };
+  const lienListe = rep === 'oui' ? { mode: 'panier', ids: panier.map((l) => l.id) } : { mode: 'aucun' };
+  const ret = await demander('Préparer ta prochaine liste', `<p>🧹 Une fois le reçu enregistré, est-ce que je peux <b>retirer de ta liste les ${panier.length} article(s) coché(s)</b> ?</p>
+    <p class="doux">Ta prochaine liste partira de ce qui reste. Les prix payés restent dans les fiches des produits.</p>`,
+  [['oui', '🧹 Oui, retire-les'], ['non', 'Non, garde-les']], 'non');
+  return { lienListe, retirer: ret === 'oui' };
+}
+
+/** Retire de la liste les articles cochés (même action que « Retirer les articles achetés »). Retourne leur nombre. */
+function retirerCoches() {
+  let n = 0;
+  S.maj((x) => { const avant = x.liste.length; x.liste = x.liste.filter((l) => !l.coche); n = avant - x.liste.length; });
+  return n;
 }
 
 /** Après avoir rempli la liste : propose de compléter les fiches sans photo (une à la fois), puis montre le reçu. */
@@ -623,14 +672,14 @@ function associerRecu(id) {
   });
 }
 
-/** Enregistre les photos et le reçu (lu ou non). Retourne son id. */
-async function enregistrerRecu(blobs, lu) {
+/** Enregistre les photos et le reçu (lu ou non), avec son lien à la liste. Retourne son id. */
+async function enregistrerRecu(blobs, lu, lienListe = null) {
   const photoIds = [];
   for (const b of blobs) photoIds.push(await S.enregistrerPhoto(b));
   const id = S.uid('rc');
   const date = new Date().toISOString();
   S.maj((x) => {
-    (x.recus ||= []).unshift({ ...(lu || {}), id, photoId: photoIds[0], photoIds, cree: date, statut: lu ? 'lu' : 'à lire', par: x.utilisateur });
+    (x.recus ||= []).unshift({ ...(lu || {}), ...(lienListe ? { lienListe } : {}), id, photoId: photoIds[0], photoIds, cree: date, statut: lu ? 'lu' : 'à lire', par: x.utilisateur });
     photoIds.forEach((p, i) => x.photos.push({ id: p, type: 'recu', articleId: null, date, prise_par: x.utilisateur, note: `Reçu ${i + 1}/${photoIds.length}` }));
   });
   return id;
@@ -643,7 +692,11 @@ async function ouvrirDetailRecu(id) {
   if (!r) return;
   const v = r.statut === 'lu' ? R.verifierRecu(r) : null;
   const nbFiches = (await R.aCompleter(id)).length;
-  ouvrirModale('Reçu', `<div class="rang envelopper" style="margin-bottom:10px">
+  ouvrirModale('Reçu', `${r.statut === 'lu' && r.lignes?.length ? `<div class="carte" style="padding:10px;margin-bottom:10px">
+      <b>Tu as les produits en main ?</b>
+      <p class="doux" style="margin:2px 0 8px">Scanne leur code-barres ou prends-les en photo : je trouve la ligne du reçu, je l'associe et j'ajoute le code à la fiche.</p>
+      <div class="rang envelopper"><button class="btn" id="rcScan">📷 Scanner un code-barres</button><button class="btn sec" id="rcPhotoProd">🖼️ Photo du produit</button></div></div>` : ''}
+    <div class="rang envelopper" style="margin-bottom:10px">
       ${r.statut === 'lu' && r.lignes?.length ? '<button class="btn" id="rcAssocier">🔗 Associer les produits à la main</button>' : ''}
       ${nbFiches ? `<button class="btn sec" id="rcCompleter">🔎 Compléter ${nbFiches} fiche(s) : photo, format, prix</button>` : ''}
       ${r.statut === 'lu' && !(r.applique && r.bilan?.relies) ? '<button class="btn" id="rcAppliquer">Remplir ma liste avec ce reçu</button>' : ''}
@@ -670,10 +723,122 @@ async function ouvrirDetailRecu(id) {
       } catch (err) { toast(err.message); ouvrirDetailRecu(r.id); }
     });
     $('#rcAssocier', c)?.addEventListener('click', () => associerRecu(r.id));
+    $('#rcScan', c)?.addEventListener('click', async () => {
+      const { lireCode } = await import('./scan.js');
+      const code = await lireCode('Scanner un produit du reçu');
+      if (code) produitPourRecu(r.id, { code }); else ouvrirDetailRecu(r.id);
+    });
+    $('#rcPhotoProd', c)?.addEventListener('click', async () => {
+      const { prendrePhoto, lireProduitIA, iaDisponible } = await import('./ocr.js');
+      if (!iaDisponible()) { toast('La lecture d\'une photo demande le réseau et ton foyer connecté. Le scan du code-barres, lui, fonctionne.'); return; }
+      const blob = await prendrePhoto();
+      if (!blob) return;
+      ouvrirModale('Produit en photo', '<div class="alerte">⏳ Je lis la photo du produit…</div>');
+      const lu = await lireProduitIA(blob).catch(() => null);
+      if (!lu) { toast('Photo illisible : essaie le code-barres.'); ouvrirDetailRecu(r.id); return; }
+      produitPourRecu(r.id, { code: lu.code_barres ? String(lu.code_barres).replace(/\D/g, '') : null, nom: lu.nom, marque: lu.marque, format: lu.format, photo: blob });
+    });
+    // Toucher une ligne : son détail, et « C'est le bon produit » / « Changer »
+    $$('[data-ligne]', c).forEach((li) => li.addEventListener('click', () => basculerLigne(r.id, Number(li.dataset.ligne), li)));
     $('#rcCompleter', c)?.addEventListener('click', () => R.completerFiches(r.id, () => ouvrirDetailRecu(r.id)));
     $('#rcRefaire', c)?.addEventListener('click', () => nouveauRecu());
     $('#supRecu', c).onclick = () => { if (confirm('Supprimer ce reçu ?')) { S.maj((x) => { x.recus = x.recus.filter((y) => y.id !== r.id); }); fermerModale(); } };
   });
+}
+
+/** Ouvre ou ferme le détail d'une ligne du reçu, sous la ligne touchée. */
+async function basculerLigne(recuId, i, li) {
+  const suivant = li.nextElementSibling;
+  if (suivant?.classList.contains('rc-det')) { suivant.remove(); return; }
+  li.parentElement.querySelectorAll('.rc-det').forEach((x) => x.remove());
+  const R = await import('./recu.js');
+  const r = S.get().recus.find((x) => x.id === recuId);
+  const l = r?.lignes?.[i];
+  if (!l) return;
+  const et = etatLigne(l);
+  const det = document.createElement('li');
+  det.className = 'rc-det';
+  det.innerHTML = `${R.htmlLigne(r, i)}
+    <div class="rang envelopper" style="margin-top:8px">
+      ${et === 'verifier' ? '<button class="btn" data-bon>✓ C\'est le bon produit</button>' : ''}
+      <button class="btn sec" data-changer>🔗 ${l.articleId ? 'Changer' : 'Associer'}</button></div>
+    <div data-panneau hidden></div>`;
+  li.after(det);
+  const recalculer = async (choix) => {
+    det.innerHTML = '<div class="alerte">⏳ J\'enregistre et je recompare les prix…</div>';
+    const bilan = await R.associerManuellement(recuId, choix, () => {});
+    toast(`Association enregistrée ✓ ${R.texteBilan(bilan)}`);
+    ouvrirDetailRecu(recuId);
+  };
+  det.querySelector('[data-bon]')?.addEventListener('click', () => recalculer({ [i]: l.articleId }));
+  brancherSelecteurProduit(det.querySelector('[data-changer]'), det.querySelector('[data-panneau]'), async (nom) => {
+    let aid = '';
+    if (nom) {
+      const app = await import('./app.js');
+      const ex = S.get().articles.find((a) => a.nom.toLowerCase() === nom.toLowerCase());
+      aid = ex ? ex.id : app.assurerArticle(nom, { format: l.format || '', uniteRef: analyserFormat(l.format)?.base || 'unite', marque: l.marque || '' }).id;
+    }
+    recalculer(Object.fromEntries(lignesIdentiques(r.lignes, i).map((j) => [j, aid])));
+  });
+}
+
+/**
+ * Produit en main pendant qu'on regarde un reçu (code scanné et/ou photo lue par l'IA) :
+ * trouve la ligne du reçu (fenêtre de choix s'il y a un doute), l'associe et y inscrit le code.
+ * Produit relié : celui du code s'il est déjà au catalogue ; sinon celui de la ligne s'il lui ressemble ;
+ * sinon une fiche trouvée ou créée par le nom (Open Food Facts, ou lu sur la photo).
+ */
+async function produitPourRecu(recuId, p) {
+  const R = await import('./recu.js');
+  ouvrirModale('Produit en main', '<div class="alerte">⏳ Je cherche ce produit…</div>');
+  const e = S.get();
+  const r = e.recus.find((x) => x.id === recuId);
+  if (!r) return;
+  const code = p.code && /^\d{8,14}$/.test(p.code) ? p.code : null;
+  let art = null, info = null;
+  if (code) {
+    art = P.varianteParCode(e, gtinVariantes(code))?.article || null;
+    if (!art && navigator.onLine) { const { infosCode } = await import('./scan.js'); info = await infosCode(code).catch(() => null); }
+  }
+  const nom = art?.nom || info?.nom || p.nom || '';
+  const marque = art?.marque || info?.marque || p.marque || '';
+  const format = info?.format || p.format || '';
+  const texte = `${nom} ${marque}`.trim();
+  const cands = candidatsLignes(r.lignes, { texte, articleId: art?.id });
+  let i = choixEvident(cands, r.lignes);
+  if (i == null) i = await choisirLigne(r, cands, { nom, marque, format, code });
+  if (i == null) { ouvrirDetailRecu(recuId); return; }
+  const ln = r.lignes[i];
+  let cible = art;
+  const actuel = ln.articleId && S.get().articles.find((a) => a.id === ln.articleId);
+  if (!cible && actuel && (etatLigne(ln) === 'ok' || !texte || ressemblanceMutuelle(`${actuel.nom} ${actuel.marque || ''}`, texte) >= 0.5)) cible = actuel;
+  if (!cible) {
+    const app = await import('./app.js');
+    cible = app.assurerArticle(nom || ln.nomClair || ln.libelle, { format: format ? formatLisible(format) || format : '', uniteRef: analyserFormat(format)?.base || 'unite', marque });
+  }
+  if (p.photo) {
+    const pid = await S.enregistrerPhoto(p.photo);
+    S.maj((x) => x.photos.push({ id: pid, type: 'produit', articleId: cible.id, date: new Date().toISOString(), prise_par: x.utilisateur, note: 'Photo prise depuis un reçu' }));
+  }
+  ouvrirModale('Produit en main', `<div class="alerte" id="ppEtat">⏳ J'associe « ${esc(ln.nomClair || ln.libelle)} » à ${esc(cible.nom)}…</div>`);
+  await R.associerProduit(recuId, lignesIdentiques(r.lignes, i), cible.id, code, (m) => { const z = $('#ppEtat'); if (z) z.textContent = `⏳ ${m}`; });
+  toast(`✓ ${ln.nomClair || ln.libelle} → ${cible.nom}${code ? ` · code ${code} ajouté à la fiche` : ''}`);
+  ouvrirDetailRecu(recuId);
+}
+
+/** Fenêtre de choix : à quelle ligne du reçu correspond ce produit ? Rend l'indice, ou null (annulé). */
+async function choisirLigne(r, cands, p) {
+  const ICONE = { ok: '✓', verifier: '!', aucun: '✗' };
+  const bouton = (i) => [String(i), `${ICONE[etatLigne(r.lignes[i])] || ''} ${esc(r.lignes[i].nomClair || r.lignes[i].libelle)} · ${argent(r.lignes[i].prix)}`];
+  const proposes = cands.slice(0, 6).map((c) => c.i);
+  const autres = r.lignes.map((l, i) => i).filter((i) => !proposes.includes(i) && ['aucun', 'verifier'].includes(etatLigne(r.lignes[i])));
+  const entete = `<p><b>${esc(p.nom || 'Produit inconnu')}</b>${p.marque ? ` · ${esc(p.marque)}` : ''}${p.format ? ` · ${esc(p.format)}` : ''}${p.code ? `<br><span class="doux">Code ${esc(p.code)}</span>` : ''}</p>`;
+  if (!proposes.length && !autres.length) { toast('Aucune ligne libre sur ce reçu pour ce produit.'); return null; }
+  const rep = await demander('À quelle ligne du reçu ?', `${entete}<p class="doux">${proposes.length ? 'Plusieurs lignes peuvent correspondre : touche la bonne.' : 'Je n\'ai pas trouvé la ligne : choisis-la.'}</p>`,
+    [...(proposes.length ? proposes : autres).map(bouton), ...(proposes.length && autres.length ? [['autres', 'Autre ligne…']] : []), ['', 'Annuler']], '', { pile: true });
+  if (rep !== 'autres') return rep ? Number(rep) : null;
+  const rep2 = await demander('À quelle ligne du reçu ?', `${entete}<p class="doux">Lignes sans association (✗) ou à vérifier (!) :</p>`, [...autres.map(bouton), ['', 'Annuler']], '', { pile: true });
+  return rep2 ? Number(rep2) : null;
 }
 
 function vueRecus(v) {
@@ -683,7 +848,7 @@ function vueRecus(v) {
     <p class="doux">Centre le reçu dans le cadre jaune. Reçu long : prends-le en plusieurs sections, de haut en bas ; le bas de la photo précédente s'affiche en haut du cadre pour que les photos se chevauchent. Je te montre ensuite le reçu entier et je te confirme s'il est complet, sinon je te demande de reprendre.</p>`
     + (recus.length ? recus.map((r) => `<div class="carte" data-recu="${r.id}" style="cursor:pointer"><div class="rang">
         <b class="grandir">${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'} · ${esc(r.date || r.cree.slice(0, 10))}</b><b>${r.total != null ? argent(r.total) : ''}</b></div>
-        <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : `${(r.lignes || []).length} ligne(s) lue(s)${r.verification?.complet === false ? ' · ⚠️ à vérifier' : ''}${r.applique ? ' · ✓ liste remplie' : ''}`} · ${(r.photoIds || [1]).length} photo(s) · par ${esc(r.par || '')}</div></div>`).join('')
+        <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : `${(r.lignes || []).length} ligne(s) · ✓ ${(r.lignes || []).filter((l) => etatLigne(l) === 'ok').length} · ! ${(r.lignes || []).filter((l) => etatLigne(l) === 'verifier').length} · ✗ ${(r.lignes || []).filter((l) => etatLigne(l) === 'aucun').length}${r.verification?.complet === false ? ' · ⚠️ à vérifier' : ''}`} · ${(r.photoIds || [1]).length} photo(s) · par ${esc(r.par || '')}</div></div>`).join('')
       : '<div class="vide">Aucun reçu. Après l\'épicerie, prends ton reçu en photo.</div>');
   brancherRetour(v);
   $('#nouvRecu', v).onclick = nouveauRecu;

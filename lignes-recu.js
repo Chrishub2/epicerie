@@ -97,6 +97,91 @@ export function consignes(lignes = []) {
   return out;
 }
 
+/**
+ * Relecture d'un reçu : reporte sur les nouvelles lignes les associations faites à la main
+ * (y compris « aucun produit »), en retrouvant chaque ligne par son libellé et son prix.
+ * Une ancienne ligne ne sert qu'une fois (deux « OASIS JUS POMME » restent deux lignes).
+ * Modifie `nouvelles` ; retourne le nombre d'associations reportées.
+ */
+export function reporterAssociations(anciennes = [], nouvelles = []) {
+  const cle = (l) => `${String(l?.libelle || '').toLowerCase().replace(/\s+/g, ' ').trim()}|${Math.round(num(l?.prix) * 100)}`;
+  const dispo = new Map();
+  for (const l of anciennes) if (l?.manuel) dispo.set(cle(l), [...(dispo.get(cle(l)) || []), l]);
+  let n = 0;
+  for (const l of nouvelles) {
+    const a = dispo.get(cle(l))?.shift();
+    if (!a) continue;
+    l.articleId = a.articleId || null;
+    l.manuel = true;
+    if (a.varianteId) l.varianteId = a.varianteId; else delete l.varianteId;
+    n++;
+  }
+  return n;
+}
+
+/** Liens jugés sûrs : fait à la main, code-barres, PLU, nom déjà confirmé chez cette bannière. */
+export const LIENS_SURS = ['manuel', 'code', 'plu', 'alias'];
+
+/**
+ * État d'une ligne pour l'écran du reçu :
+ *  'ok' ✓ (lien sûr) · 'verifier' ! (lien deviné : liste lue par l'IA, ressemblance de nom, ou ancien lien sans source)
+ *  'aucun' ✗ (aucune association) · 'hors' (consigne, coupon, sac, ou « aucun produit » choisi à la main).
+ */
+export function etatLigne(l) {
+  if (l?.manuel) return l.articleId ? 'ok' : 'hors';
+  if (natureLigne(l) !== 'produit') return 'hors';
+  if (!l?.articleId) return 'aucun';
+  return LIENS_SURS.includes(l.lien) ? 'ok' : 'verifier';
+}
+
+const motsDe = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((m) => m.length >= 3);
+
+/** Part (0 à 1) des mots de `a` retrouvés dans `b`, en début de mot (« crack » ≈ « cracker »). */
+export function ressemblance(a, b) {
+  const ma = motsDe(a), mb = motsDe(b);
+  if (!ma.length || !mb.length) return 0;
+  return ma.filter((m) => mb.some((t) => m.startsWith(t) || t.startsWith(m))).length / ma.length;
+}
+
+/** Ressemblance dans les deux sens (la plus faible) : évite « Bar-b-q » ≈ « Cracker Barrel ». */
+export const ressemblanceMutuelle = (a, b) => Math.min(ressemblance(a, b), ressemblance(b, a));
+
+const texteLigne = (l) => `${l?.nomClair || ''} ${l?.libelle || ''} ${l?.marque || ''}`;
+const memeLibelle = (a, b) => String(a?.libelle || '').toLowerCase().replace(/\s+/g, ' ').trim() === String(b?.libelle || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * Lignes du reçu qui peuvent être ce produit (scanné ou photographié), de la plus probable à la moins probable :
+ * [{ i, score }]. Une ligne déjà reliée à ce produit vaut 1 ; les lignes « hors produit » et les lignes ✓ d'un
+ * autre produit sont écartées.
+ */
+export function candidatsLignes(lignes = [], { texte = '', articleId = null } = {}) {
+  return lignes.map((l, i) => {
+    const etat = etatLigne(l);
+    if (etat === 'hors') return null;
+    if (articleId && l.articleId === articleId) return { i, score: 1 };
+    if (etat === 'ok') return null;
+    const score = ressemblance(texte, texteLigne(l));
+    return score >= 0.34 ? { i, score } : null;
+  }).filter(Boolean).sort((a, b) => b.score - a.score || a.i - b.i);
+}
+
+/**
+ * Ligne choisie sans rien demander, seulement si elle se détache nettement (score ≥ 0,6 et 0,25 d'avance),
+ * ou si les meilleures sont le même article imprimé deux fois (deux « OASIS JUS POMME »). Sinon null : on demande.
+ */
+export function choixEvident(c, lignes = []) {
+  if (!c.length) return null;
+  const [a, b] = c;
+  if (a.score < 0.6) return null;
+  if (!b || a.score - b.score >= 0.25 || memeLibelle(lignes[a.i], lignes[b.i])) return a.i;
+  return null;
+}
+
+/** La ligne i et les lignes identiques du même reçu (même libellé, produit) : on les associe ensemble. */
+export const lignesIdentiques = (lignes = [], i) => lignes.map((l, j) => j)
+  .filter((j) => j === i || (memeLibelle(lignes[j], lignes[i]) && etatLigne(lignes[j]) !== 'hors'));
+
 /** Prix payé en texte d'offre : « 4,99 $ » ou « 2,14 $/kg ». null si rien de payé. */
 export function offreLigne(l, mode) {
   const taux = /(\d+[.,]\d{2})\s*\$?\s*\/\s*(kg|lb)/i.exec(l?.poids || '');

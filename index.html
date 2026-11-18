@@ -105,6 +105,18 @@ button.icone { font-size: 20px; width: 44px; height: 44px; border-radius: 10px; 
 .liste-arret li::before { content: "•"; position: absolute; left: 0; color: var(--doux); }
 .liste-arret li .doux { white-space: nowrap; }
 .alerte { border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+/* Reçu : une ligne par produit, état ✓ / ! / ✗ */
+.rc-liste { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--ligne); }
+.rc-l { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--ligne); cursor: pointer; font-size: 14px; }
+.rc-nom { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-px { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rc-et { flex: none; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
+.rc-et.ok { background: var(--vert-fond); color: var(--vert); }
+.rc-et.ver { background: var(--ambre-fond); color: var(--ambre); }
+.rc-et.non { background: var(--rouge-fond); color: var(--rouge); }
+.rc-et.hors { background: var(--gris-fond); color: var(--doux); }
+.rc-l.hors .rc-nom, .rc-l.hors .rc-px { color: var(--doux); }
+.rc-det { list-style: none; padding: 8px 4px 12px 32px; font-size: 13px; border-bottom: 1px solid var(--ligne); }
 .alerte.ambre { background: var(--ambre-fond); color: var(--ambre); }
 .alerte.rouge { background: var(--rouge-fond); color: var(--rouge); }
 .alerte.vert { background: var(--vert-fond); color: var(--vert); }

@@ -107,6 +107,31 @@ async function demarrerCamera(video, surCode) {
   return () => ctrl.stop();
 }
 
+/** Ouvre la caméra et rend le premier code-barres lu (ou tapé) ; null si on ferme la fenêtre. */
+export function lireCode(titre = 'Scanner un code-barres') {
+  return new Promise((ok) => {
+    let fini = false;
+    const fin = (code) => { if (fini) return; fini = true; arret?.(); arret = null; quandFermee(null); ok(code); };
+    ouvrirModale(titre, `<video class="scan" id="video" playsinline muted></video>
+      <p class="doux" id="etatScan">Démarrage de la caméra…</p>
+      <div class="rang" style="margin-top:8px"><input id="codeManuel" inputmode="numeric" placeholder="ou tape le code (8 à 14 chiffres)"><button class="btn sec" id="okCode">OK</button></div>`, async (c) => {
+      const traiter = (code) => {
+        code = String(code).replace(/\D/g, '');
+        if (!/^\d{8,14}$/.test(code)) { toast('Code invalide'); return; }
+        bip(); fin(code);
+      };
+      $('#okCode', c).onclick = () => traiter($('#codeManuel', c).value);
+      quandFermee(() => fin(null));
+      try {
+        const stop = await demarrerCamera($('#video', c), traiter);
+        if (fini) stop(); else { arret = stop; $('#etatScan', c).textContent = 'Vise le code-barres du produit.'; }
+      } catch {
+        $('#etatScan', c).textContent = 'Caméra indisponible : tape le code sous l\'image.';
+      }
+    });
+  });
+}
+
 /** Ouvre le lecteur. surArticle(article) est appelé pour chaque produit reconnu et confirmé. */
 /**
  * Ouvre le lecteur. surArticle(article) est appelé pour chaque produit reconnu et confirmé.
