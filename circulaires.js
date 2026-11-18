@@ -435,9 +435,11 @@ export function monterCirculaires(conteneur, opts) {
       } else if (l.statut === 'termine') {
         corps = `<div class="c-doux">${b.lues ?? 0}/${b.pages ?? 0} pages lues${b.illisibles ? ` · ${b.illisibles} illisible(s) à reprendre` : ''}${b.erreurs ? ` · ${b.erreurs} en erreur` : ''}
           · <b>${b.ecrits ?? 0}</b> écrits · <b>${b.a_valider ?? 0}</b> à valider · ${b.autres ?? 0} autres · coût ${argent(l.cout)}</div>`;
+      } else if (l.statut === 'en_attente') {
+        corps = '<div class="c-doux">En attente : Claude Code le lira quand tu le demanderas (« lis mes circulaires »).</div>';
       } else corps = '<div class="c-doux">Annulé : ses prix sont marqués « annulés » (rien n\'est supprimé).</div>';
       return `<div class="c-circ" data-lot="${l.id}"><div class="c-rang"><b class="c-grandir">${esc(dateCourte(l.envoye_le || l.cree_le))} ${esc(heure(l.envoye_le || l.cree_le))}</b>
-        <span class="c-pastille">${{ envoye: 'en cours', termine: 'terminé', annule: 'annulé' }[l.statut] || l.statut}</span>
+        <span class="c-pastille">${{ en_attente: 'en attente de lecture', envoye: 'en cours', termine: 'terminé', annule: 'annulé' }[l.statut] || l.statut}</span>
         ${l.statut !== 'annule' ? '<button class="c-btn d" data-annuler-lot>Annuler ce lot</button>' : ''}</div>${corps}</div>`;
     }).join('')}</div>`;
   }
