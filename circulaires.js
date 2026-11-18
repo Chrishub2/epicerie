@@ -46,13 +46,17 @@ export function nomBanniere(b) {
   return SOURCES_CIRC.find((s) => s.banniere === b)?.nom || b;
 }
 
+/** Clé d'un lien appris : « banniere|nom_cle|article ». */
+export const cleLien = (l) => `${l.banniere}|${l.nom_cle}|${l.article_id}`;
+
 /**
  * Liens appris à confirmer (spec : journal/SPEC-apprentissage-liens.md, § 3).
  * appris : lignes de appris_circulaires ; offres : { banniere, nom_cle, nom, cree_le } ; articles : catalogue.
  * Garde origine 'auto', confirme null, decision 'lien' ; nom = dernier rabais de ce nom_cle et bannière, sinon nom_cle.
+ * dejaTraites : Set de cleLien déjà confirmés ou refusés pendant la session (la base peut encore les renvoyer un moment).
  * Rend [{ banniere, nom_cle, article_id, format, nom, banniereNom, produit, libelle }], les plus récents d'abord.
  */
-export function liensAConfirmer(appris, offres, articles) {
+export function liensAConfirmer(appris, offres, articles, dejaTraites = null) {
   const dernier = new Map();
   for (const o of offres || []) {
     const k = `${o.banniere}|${o.nom_cle}`, d = dernier.get(k);
@@ -60,7 +64,7 @@ export function liensAConfirmer(appris, offres, articles) {
   }
   const parId = new Map((articles || []).map((a) => [a.id, a]));
   return (appris || [])
-    .filter((l) => l.origine === 'auto' && l.confirme === null && l.decision === 'lien')
+    .filter((l) => l.origine === 'auto' && l.confirme === null && l.decision === 'lien' && !dejaTraites?.has(cleLien(l)))
     .sort((a, b) => String(b.maj || '').localeCompare(String(a.maj || '')))
     .map((l) => {
       const nom = dernier.get(`${l.banniere}|${l.nom_cle}`)?.nom || l.nom_cle;
@@ -251,7 +255,7 @@ export function monterCirculaires(conteneur, opts) {
   const { sb, foyer, hote = 'app', source = 'telephone' } = opts;
   const message = opts.message || toastSimple;
   const articles = () => (opts.articles?.() || []).filter((a) => !a.supprime);
-  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true, liens: null, liensOuverts: true };
+  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true, liens: null, liensOuverts: true, liensTraites: new Set() };
   conteneur.innerHTML = `<div class="circ" data-hote="${hote}"><p class="c-doux">Chargement des circulaires…</p></div>`;
   const racine = conteneur.firstElementChild;
   if (!sb || !foyer) {
@@ -263,14 +267,15 @@ export function monterCirculaires(conteneur, opts) {
   async function charger() {
     try {
       etat.lot = await brouillon(sb, foyer);
-      const [pages, lots, aval, dates] = await Promise.all([
+      const [pages, lots, aval, dates, liens] = await Promise.all([
         sb.from('pages_circulaires').select('*').eq('lot_id', etat.lot.id).order('source').order('circulaire').order('ordre'),
         sb.from('lots_circulaires').select('*').eq('foyer_id', foyer).neq('statut', 'brouillon').order('cree_le', { ascending: false }).limit(6),
         sb.from('offres_circulaires').select('*').eq('foyer_id', foyer).eq('statut', 'a_valider').order('cree_le').limit(300),
         offresDates(sb, foyer).catch(() => null),   // couverture : facultative, n'empêche pas le reste
+        chargerLiens(),                              // liens appris : facultatifs (null si la base n'est pas prête)
       ]);
       etat.offresDates = dates;
-      etat.liens = await chargerLiens();
+      etat.liens = liens && liens.filter((l) => !etat.liensTraites.has(cleLien(l)));   // clic pendant ce chargement
       etat.pages = pages.data || [];
       etat.lots = lots.data || [];
       etat.aValider = aval.data || [];
@@ -301,7 +306,7 @@ export function monterCirculaires(conteneur, opts) {
           .order('cree_le', { ascending: false }).limit(1000);
         offres = r.data || [];   // facultatif : sinon, on montre le nom_cle
       }
-      return liensAConfirmer(data, offres, opts.articles?.() || []);
+      return liensAConfirmer(data, offres, opts.articles?.() || [], etat.liensTraites);
     } catch { return null; }
   }
 
@@ -569,10 +574,16 @@ export function monterCirculaires(conteneur, opts) {
 
   async function confirmerLien(ligne, ok) {
     const { banniere, nomCle, article } = ligne.dataset;
+    const cle = cleLien({ banniere, nom_cle: nomCle, article_id: article });
+    if (etat.liensTraites.has(cle)) return;
+    etat.liensTraites.add(cle);   // dès le clic : un rechargement en vol ne le fait pas revenir (pas de ✓ puis ✗)
     ligne.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     const { error } = await sb.rpc('confirmer_lien', { p_banniere: banniere, p_nom_cle: nomCle, p_article: article, p_ok: ok });
-    if (error) { message(`Refusé : ${error.message}`); ligne.querySelectorAll('button').forEach((b) => { b.disabled = false; }); return; }
-    etat.liens = (etat.liens || []).filter((l) => !(l.banniere === banniere && l.nom_cle === nomCle && l.article_id === article));
+    if (error) {
+      etat.liensTraites.delete(cle);
+      message(`Refusé : ${error.message}`); ligne.querySelectorAll('button').forEach((b) => { b.disabled = false; }); return;
+    }
+    etat.liens = (etat.liens || []).filter((l) => cleLien(l) !== cle);
     message(ok ? 'Lien confirmé' : 'Lien défait pour l\'avenir (les prix déjà écrits restent)');
     rendre(); opts.apresChangement?.();
   }
