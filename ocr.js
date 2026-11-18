@@ -69,14 +69,15 @@ export async function lireEtiquette(blob, etat) {
 export async function lireRecu(blobs, etat, liste = [], attendus = []) {
   const r = await essayerIA('recu', blobs, etat, { ...(liste.length ? { liste } : {}), ...(attendus.length ? { attendus } : {}) });
   // « autre » : l'enseigne peut être plus récente que la fonction IA déployée (ex. Provigo, Walmart) → on la reconnaît dans le nom du magasin
-  if (r) return { banniere: r.banniere && r.banniere !== 'autre' ? r.banniere : (ENSEIGNES.find(([re]) => re.test(`${r.magasin || ''} ${r.adresse || ''}`))?.[1] || null), magasin: r.magasin, adresse: r.adresse, telephone: r.telephone,
-    date: r.date, heure: r.heure, caisse: r.caisse, caissier: r.caissier, transaction: r.transaction,
+  const t = (s) => (s == null || String(s).trim() === '' ? null : s); // texte absent : « "" » (IA) → null
+  if (r) return { banniere: r.banniere && r.banniere !== 'autre' ? r.banniere : (ENSEIGNES.find(([re]) => re.test(`${r.magasin || ''} ${r.adresse || ''}`))?.[1] || null), magasin: t(r.magasin), adresse: t(r.adresse), telephone: t(r.telephone),
+    date: t(r.date), heure: t(r.heure), caisse: t(r.caisse), caissier: t(r.caissier), transaction: t(r.transaction),
     nombreArticles: r.nombre_articles, sousTotal: r.sous_total, total: r.total, tps: r.tps, tvq: r.tvq, economies: r.economies,
-    modePaiement: r.mode_paiement, programmeFidelite: r.programme_fidelite, pointsGagnes: r.points_gagnes, soldePoints: r.solde_points,
+    modePaiement: t(r.mode_paiement), programmeFidelite: t(r.programme_fidelite), pointsGagnes: r.points_gagnes, soldePoints: r.solde_points,
     autres: r.autres || [], verification: r.verification || null, source: 'ia',
-    lignes: (r.lignes || []).map((l) => ({ libelle: l.libelle, nomClair: l.nom_clair, marque: l.marque, format: l.format,
-      code: l.code_barres ? String(l.code_barres).replace(/\D/g, '') || null : null, quantite: l.quantite, poids: l.poids,
-      prixUnitaire: l.prix_unitaire, prix: l.prix_total, rabais: l.rabais, rabaisDejaDeduit: l.rabais_deja_deduit ?? null, taxable: l.taxable, articleListe: l.article_liste, explicationPrix: l.explication_prix || null })) };
+    lignes: (r.lignes || []).map((l) => ({ libelle: l.libelle, nomClair: t(l.nom_clair), marque: t(l.marque), format: t(l.format),
+      code: l.code_barres ? String(l.code_barres).replace(/\D/g, '') || null : null, quantite: l.quantite, poids: t(l.poids),
+      prixUnitaire: l.prix_unitaire, prix: l.prix_total, rabais: l.rabais, rabaisDejaDeduit: l.rabais_deja_deduit ?? null, taxable: t(l.taxable), articleListe: t(l.article_liste), explicationPrix: t(l.explication_prix) })) };
   let texte = '';
   for (const b of blobs) texte += (await lireTexte(b, etat)) + '\n';
   return { ...analyserRecu(texte), texte, source: 'ocr' };
