@@ -1,6 +1,7 @@
 // =====================================================================
 // Épicerie — application principale (mode démo)
 // =====================================================================
+import { estFsa, secteurDe, memeVille, enSecteur } from './secteurs.js';
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
   libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon } from './ui.js';
@@ -1042,14 +1043,23 @@ function vueMagasins(v) {
   const e = S.get();
   let html = `<h2 style="margin-top:0">Mes magasins</h2>
     <p class="doux" style="margin:0 0 8px">Interrupteur = magasin <b>considéré</b> ou <b>ignoré</b> dans les comparaisons, les listes et les paniers (sans le supprimer). Touche un nom pour l'adresse, l'itinéraire ou le retirer. 🏷️ = relevé de prix dans ce magasin.</p>
-    <div class="carte"><h2>Codes postaux</h2>
-    <div>${e.codesPostaux.map((c) => `<span class="pastille" style="font-size:13px;padding:4px 10px">${esc(c.code)} · ${esc(c.libelle)} <a href="#" data-supcp="${esc(c.code)}" aria-label="Retirer">✕</a></span>`).join(' ')}</div>
-    <div class="rang" style="margin-top:8px"><input id="cpCode" placeholder="Code (ex. J3X)" style="max-width:120px"><input id="cpLib" class="grandir" placeholder="Ville"><button class="btn sec" id="cpAjout">Ajouter</button></div></div>`;
+    <div class="carte"><h2>Secteurs</h2>
+    <p class="doux" style="margin:0 0 6px">Une ville couvre toutes ses succursales, peu importe leur code postal.</p>
+    <div>${e.codesPostaux.map((c) => `<span class="pastille" style="font-size:13px;padding:4px 10px">${estFsa(c.code) ? `${esc(c.code)} · ${esc(c.libelle)}` : esc(c.libelle || c.code)} <a href="#" data-supcp="${esc(c.code)}" aria-label="Retirer">✕</a></span>`).join(' ')}</div>
+    <div class="rang" style="margin-top:8px"><input id="cpCode" class="grandir" placeholder="Ville ou code postal (ex. Beloeil, J3X)"><button class="btn sec" id="cpAjout">Ajouter</button></div></div>`;
 
-  for (const c of e.codesPostaux) {
-    const mags = e.magasins.filter((m) => m.codePostal === c.code);
-    html += `<h3 class="titre-cp">${esc(c.code)} — ${esc(c.libelle)}</h3>`;
-    if (!mags.length) html += `<p class="doux">Aucun magasin pour ce code postal.</p>`;
+  // Chaque magasin dans UN seul secteur : d'abord sa ville (plus large), sinon son code postal ; les autres à la fin.
+  const places = new Set();
+  const groupes = e.codesPostaux.map((c) => ({ c, mags: [] }));
+  for (const m of e.magasins) {
+    const g = groupes.find((x) => !estFsa(x.c.code) && enSecteur(m, x.c)) || groupes.find((x) => enSecteur(m, x.c));
+    if (g) { g.mags.push(m); places.add(m.id); }
+  }
+  const autres = e.magasins.filter((m) => !places.has(m.id));
+  if (autres.length) groupes.push({ c: { code: '', libelle: 'Autres magasins' }, mags: autres });
+  for (const { c, mags } of groupes) {
+    html += `<h3 class="titre-cp">${c.code && estFsa(c.code) ? `${esc(c.code)} — ${esc(c.libelle)}` : esc(c.libelle || c.code)}</h3>`;
+    if (!mags.length) html += `<p class="doux">Aucun magasin dans ce secteur.</p>`;
     for (const m of mags) {
       const rp = e.rabaisPerso.find((r) => r.magasinId === m.id && r.actif);
       const actif = m.actif !== false;
@@ -1069,14 +1079,15 @@ function vueMagasins(v) {
   v.innerHTML = html;
 
   $('#cpAjout').onclick = () => {
-    const code = $('#cpCode').value.trim().toUpperCase(); if (!code) return;
-    if (e.codesPostaux.some((c) => c.code === code)) { toast('Déjà là'); return; }
-    S.maj((x) => x.codesPostaux.push({ code, libelle: $('#cpLib').value.trim() || code }));
+    const s = secteurDe($('#cpCode').value); if (!s) return;
+    if (e.codesPostaux.some((c) => c.code === s.code || (!estFsa(c.code) && memeVille(c.code, s.code)))) { toast('Déjà là'); return; }
+    S.maj((x) => x.codesPostaux.push(s));
   };
   $$('[data-supcp]').forEach((a) => a.onclick = (ev) => {
     ev.preventDefault();
     const code = a.dataset.supcp;
-    if (e.magasins.some((m) => m.codePostal === code)) { toast('Retire d\'abord les magasins de ce code postal.'); return; }
+    const c = e.codesPostaux.find((x) => x.code === code);
+    if (c && e.magasins.some((m) => enSecteur(m, c))) { toast('Retire d\'abord les magasins de ce secteur.'); return; }
     S.maj((x) => { x.codesPostaux = x.codesPostaux.filter((c) => c.code !== code); });
   });
   // Décocher = ne plus considérer ce magasin (comparaisons, listes, paniers) sans le supprimer
