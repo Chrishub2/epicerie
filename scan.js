@@ -55,7 +55,7 @@ function appliquerDetails(ar, d) {
   if (d.bio) ar.bio = true;
   if (d.allergenes.length) ar.allergenes = d.allergenes;
 }
-import { assurerArticle, ajouterALaListe, rayonParDefaut, trouverArticle } from './app.js';
+import { assurerArticle, ajouterALaListe, rayonParDefaut, trouverArticle, brancherRayon, texteBoutonRayon } from './app.js';
 import * as P from './produits.js';
 
 const ZXING_URL = 'https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
@@ -257,7 +257,10 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   const nomPropose = p ? (p.product_name_fr || p.product_name || '') : (ecp?.name || '');
   const fmt = formatOFF(p) || (ecp?.size ? formatLisible(ecp.size) : '');
   const details = detailsOFF(p);
-  const rayonId = p ? devinerRayon(p.categories_tags || []) : rayonParDefaut();
+  // Rayon proposé (deviné, ou celui choisi à la main sur la fiche visée) ; modifiable dans le formulaire
+  const cible = cibleId ? S.get().articles.find((x) => x.id === cibleId) : null;
+  let rayonId = cible?.rayonManuel ? cible.rayonId : p ? devinerRayon(p.categories_tags || []) : (cible?.rayonId || rayonParDefaut());
+  let rayonChoisi = false;
   let image = p?.image_front_url || p?.image_url || ecp?.image || '';
   zone.innerHTML = `
     ${ecp ? `<div class="alerte vert">💲 Prix réels trouvés sur épiceries.ca (${esc(argent(ecp.price))} chez ${esc(MAGASINS_EC[ecp.store] ? nomBanniere(MAGASINS_EC[ecp.store]) : ecp.store)}) — ils seront ajoutés.</div>` : ''}
@@ -269,6 +272,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
       ${cibleId ? '' : '<button type="button" class="btn sec" id="sChoix" style="width:100%;margin-top:6px;text-align:left">📚 C\'est un produit de ma liste ou de mon catalogue ▾</button><div id="sPanneau" hidden></div>'}</div>
     <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}"></div>
       <div class="champ grandir"><label>Format</label><input id="sFormat" value="${esc(fmt)}" placeholder="454 g"></div></div>
+    <div class="champ"><label>Rayon</label><button type="button" class="btn sec" id="sRayon" style="width:100%;text-align:left">${esc(texteBoutonRayon(rayonId))}</button><div id="sRayonPanneau" hidden></div></div>
     <div id="sVar"></div>
     <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
     ${image ? '' : '<div id="sPhotos" class="champ"><label>Photo du produit</label><p class="doux">Recherche de photos en ligne…</p></div>'}
@@ -298,16 +302,19 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   }, { aucun: false });
   ['#sNom', '#sMarque', '#sFormat'].forEach((id) => zone.querySelector(id).addEventListener('change', majVar));
   majVar();
+  brancherRayon(zone.querySelector('#sRayon'), zone.querySelector('#sRayonPanneau'), () => rayonId, (id) => { rayonId = id; rayonChoisi = true; });
   zone.querySelector('#sOk').onclick = () => {
     const nom = zone.querySelector('#sNom').value.trim();
     if (!nom) { toast('Entre un nom'); return; }
     const format = zone.querySelector('#sFormat').value.trim();
     const f = analyserFormat(format);
-    if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, p, ec, ecp, variantes, details });
+    if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, rayonChoisi, p, ec, ecp, variantes, details });
       surArticle(S.get().articles.find((x) => x.id === cibleId)); fermerModale(); return; }
     const choixVar = zone.querySelector('[name="sVar"]:checked')?.value || null;
-    const a = assurerArticle(nom, { rayonId, format, uniteRef: f?.base || 'unite', marque: zone.querySelector('#sMarque').value.trim(),
+    const a = assurerArticle(nom, { rayonId, ...(rayonChoisi ? { rayonManuel: true } : {}), format, uniteRef: f?.base || 'unite', marque: zone.querySelector('#sMarque').value.trim(),
       nutriscore: p?.nutriscore_grade?.length === 1 ? p.nutriscore_grade : null, imageUrl: image });
+    // Produit déjà au catalogue : le rayon choisi à la main lui est appliqué
+    if (rayonChoisi && a.rayonId !== rayonId) S.maj((x) => { const ar = x.articles.find((i) => i.id === a.id); if (ar) { ar.rayonId = rayonId; ar.rayonManuel = true; } });
     const lierLiens = (ar) => {
       if (ecp && !(ar.liens || []).some((l) => l.id === ec.id)) {
         ar.liens = [...(ar.liens || []), { id: ec.id, nom: [ecp.brand, ecp.name].filter(Boolean).join(' '), size: ecp.size, image: ecp.image }];
@@ -422,7 +429,7 @@ async function proposerPhotos(code, nomPropose, zone, choisir) {
 }
 
 /** Remplit un article existant avec tout ce que le code-barres a permis de trouver. */
-function remplirFiche(id, { nom, format, f, marque, image, rayonId, p, ec, ecp, variantes, details }) {
+function remplirFiche(id, { nom, format, f, marque, image, rayonId, rayonChoisi, p, ec, ecp, variantes, details }) {
   S.maj((x) => {
     const ar = x.articles.find((i) => i.id === id);
     if (!ar) return;
@@ -432,7 +439,8 @@ function remplirFiche(id, { nom, format, f, marque, image, rayonId, p, ec, ecp, 
     if (image) ar.imageUrl = image; // la photo officielle remplace l'ancienne
     if (p?.nutriscore_grade?.length === 1) ar.nutriscore = p.nutriscore_grade;
     if (details) appliquerDetails(ar, details);
-    if (!ar.rayonManuel && p) ar.rayonId = rayonId; // une catégorie choisie à la main n'est jamais changée
+    if (rayonChoisi) { ar.rayonId = rayonId; ar.rayonManuel = true; }        // choisi dans le formulaire
+    else if (!ar.rayonManuel && p) ar.rayonId = rayonId; // une catégorie choisie à la main n'est jamais changée
     ar.codes = [...new Set([...(ar.codes || []), ...variantes])];
     if (/kirkland/i.test(`${marque || ''} ${nom}`) && !ar.exclusif) ar.exclusif = 'costco';
     if (ecp && !(ar.liens || []).some((l) => l.id === ec.id)) {

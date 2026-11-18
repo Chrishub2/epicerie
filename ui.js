@@ -148,6 +148,49 @@ export function brancherSelecteurProduit(bouton, panneau, surChoix, opts = {}) {
   };
 }
 
+/**
+ * Sélecteur de rayon tactile : touche `bouton` → panneau avec recherche, rayons A→Z (l'actuel coché)
+ * et « ➕ Créer « … » » quand le nom tapé n'existe pas. surChoix({ id }) ou surChoix({ nom }) (nouveau rayon).
+ * actuel() : id du rayon actuel (relu à chaque ouverture).
+ */
+export function brancherSelecteurRayon(bouton, panneau, actuel, surChoix) {
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  const fermer = (p) => { if (p) { p.hidden = true; p.innerHTML = ''; } if (panneauOuvert === p) panneauOuvert = null; };
+  const remplir = (res, q) => {
+    const e = get();
+    const t = norm(q);
+    const id = actuel();
+    const compte = (rid) => e.articles.filter((a) => a.rayonId === rid).length;
+    const rayons = [...e.rayons].filter((r) => !t || norm(r.nom).includes(t)).sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
+    const existe = t && e.rayons.some((r) => norm(r.nom) === t);
+    // Rayons existants d'abord (Entrée choisit le premier) ; « Créer » à la fin si le nom tapé n'existe pas
+    res.innerHTML = `${rayons.map((r) => `<button type="button" class="btn ${r.id === id ? '' : 'sec'}" data-rayon="${r.id}" style="width:100%;text-align:left;margin-top:4px">${r.id === id ? '✓ ' : ''}${esc(r.nom)} <span class="doux" style="font-size:12px">(${compte(r.id)})</span></button>`).join('')}
+      ${t && !existe ? `<button type="button" class="btn" data-nouveau="${esc(q.trim())}" style="width:100%;text-align:left;margin-top:8px">➕ Créer le rayon « ${esc(q.trim())} »</button>` : ''}
+      ${!rayons.length && !t ? '<p class="doux">Aucun rayon : tape un nom pour en créer un.</p>' : ''}`;
+  };
+  bouton.onclick = (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const ouvert = panneauOuvert === panneau && !panneau.hidden;
+    fermer(panneauOuvert);
+    if (ouvert) return;
+    panneauOuvert = panneau;
+    panneau.hidden = false;
+    panneau.innerHTML = `<input class="selFiltre" placeholder="🔎 Chercher un rayon ou taper un nouveau nom…" style="margin-top:6px;width:100%"><div class="selRes" style="max-height:45vh;overflow-y:auto"></div>`;
+    const inp = panneau.querySelector('.selFiltre'), res = panneau.querySelector('.selRes');
+    remplir(res, '');
+    inp.oninput = () => remplir(res, inp.value);
+    inp.onkeydown = (k) => { if (k.key === 'Enter') { k.preventDefault(); res.querySelector('[data-nouveau],[data-rayon]')?.click(); } };
+    panneau.onclick = (e2) => {
+      const o = e2.target.closest('[data-rayon],[data-nouveau]');
+      if (!o) return;
+      e2.preventDefault(); e2.stopPropagation();
+      fermer(panneau);
+      surChoix(o.dataset.rayon ? { id: o.dataset.rayon } : { nom: o.dataset.nouveau });
+    };
+    panneau.scrollIntoView({ block: 'nearest' });
+  };
+}
+
 // ---------------------------------------------------------------------
 // Prix
 // ---------------------------------------------------------------------

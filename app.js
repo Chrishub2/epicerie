@@ -3,7 +3,7 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
-  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin } from './ui.js';
+  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon } from './ui.js';
 import { BANNIERES } from './demo-data.js';
 import { analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
@@ -325,6 +325,9 @@ function optionsArticleListe(ligneId) {
     ${l.indisponible
       ? '<button class="btn" id="oRemettre" style="width:100%;margin-bottom:8px">↩︎ Remettre dans la liste (disponible)</button>'
       : '<button class="btn" id="oIndispo" style="width:100%;margin-bottom:8px">🚫 Pas disponible</button>'}
+    <div class="champ" style="margin-bottom:8px"><label>Rayon</label>
+      <button type="button" class="btn sec" id="oRayon" style="width:100%;text-align:left">${esc(texteBoutonRayon(a.rayonId))}</button>
+      <div id="oRayonPanneau" hidden></div></div>
     <button class="btn danger" id="oRetirer" style="width:100%;margin-bottom:8px">🗑 Retirer de la liste</button>
     <button class="btn sec" id="oAnnuler" style="width:100%">Annuler</button>
     <p class="doux" style="margin-top:8px">« Pas disponible » : l'article reste sur ta liste, regroupé à la fin, pour l'acheter ailleurs ou plus tard.</p>`, (c) => {
@@ -336,6 +339,8 @@ function optionsArticleListe(ligneId) {
       S.maj((x) => { const li = x.liste.find((y) => y.id === ligneId); if (li) delete li.indisponible; });
       fermerModale(); toast(`${a.nom} remis dans la liste`);
     });
+    brancherRayon($('#oRayon', c), $('#oRayonPanneau', c), () => S.get().articles.find((x) => x.id === a.id)?.rayonId,
+      (rid) => { placerDansRayon(a.id, rid); fermerModale(); });
     $('#oRetirer', c).onclick = () => { S.maj((x) => { x.liste = x.liste.filter((y) => y.id !== ligneId); }); fermerModale(); toast(`${a.nom} retiré de la liste`); };
     $('#oAnnuler', c).onclick = () => fermerModale();
   });
@@ -348,7 +353,9 @@ function htmlRayons(items, magId) {
     // Les articles « pas disponibles » sont regroupés à la fin de la liste
     const dans = items.filter(({ l, a }) => a && !l.indisponible && g.ids.includes(a.rayonId));
     if (!dans.length) continue;
-    html += `<section class="rayon"><h3>${esc(g.nom)} <span class="doux">(${dans.length})</span></h3>${dans.map(({ l, a }) => htmlItem(l, a)).join('')}</section>`;
+    const classer = g.ids.includes(rayonParDefaut()) && dans.some(({ a }) => a.rayonId === rayonParDefaut())
+      ? ' <button class="btn sec" data-classer style="padding:2px 10px;font-size:13px;float:right">🗂 Classer</button>' : '';
+    html += `<section class="rayon"><h3>${esc(g.nom)} <span class="doux">(${dans.length})</span>${classer}</h3>${dans.map(({ l, a }) => htmlItem(l, a)).join('')}</section>`;
   }
   return html;
 }
@@ -443,6 +450,7 @@ function vueListe(v) {
   }));
   $('#btnVider')?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !l.coche); }));
   $('#btnRecu').onclick = () => nouveauRecu();
+  $$('[data-classer]', v).forEach((b) => b.onclick = () => classerSansRayon());
   $$('[data-filtre]', v).forEach((b) => b.onclick = () => { filtreMagasin = b.dataset.filtre; rendre(); });
   $$('[data-replier]', v).forEach((b) => b.onclick = () => {
     const k = b.dataset.replier; replies.has(k) ? replies.delete(k) : replies.add(k); rendre();
@@ -688,15 +696,70 @@ function optionsCategories(selection) {
     + '<option value="+">+ Ajouter une catégorie…</option>';
 }
 
-/** Demande un nom et crée la catégorie (ou reprend celle du même nom). Retourne son id, ou null. */
-function ajouterCategorie() {
-  const nom = (prompt('Nom de la nouvelle catégorie :') || '').trim();
+/** Crée le rayon (ou reprend celui du même nom, sans tenir compte des accents). Retourne son id, ou null. */
+export function creerRayon(nom) {
+  nom = String(nom || '').trim();
   if (!nom) return null;
   const exist = S.get().rayons.find((r) => sansAccents(r.nom) === sansAccents(nom));
   if (exist) { toast(`« ${exist.nom} » existe déjà`); return exist.id; }
   const id = S.uid('r');
   S.maj((x) => x.rayons.push({ id, nom: nom.replace(/^./, (k) => k.toUpperCase()) }));
+  toast(`Rayon « ${nom.replace(/^./, (k) => k.toUpperCase())} » créé`);
   return id;
+}
+
+/** Demande un nom et crée la catégorie (ou reprend celle du même nom). Retourne son id, ou null. */
+function ajouterCategorie() {
+  return creerRayon(prompt('Nom de la nouvelle catégorie :') || '');
+}
+
+/** Texte du bouton de rayon : « 🗂 Produits laitiers ▾ ». */
+export function texteBoutonRayon(id) {
+  return `🗂 ${S.get().rayons.find((r) => r.id === id)?.nom || 'Choisir un rayon'} ▾`;
+}
+
+/**
+ * Branche le sélecteur de rayon sur `bouton` / `panneau`. actuel() : id du rayon actuel.
+ * surId(id) reçoit le rayon choisi (créé au besoin) ; le texte du bouton est mis à jour.
+ */
+export function brancherRayon(bouton, panneau, actuel, surId) {
+  brancherSelecteurRayon(bouton, panneau, actuel, (choix) => {
+    const id = choix.id || creerRayon(choix.nom);
+    if (!id) return;
+    bouton.textContent = texteBoutonRayon(id);
+    surId(id);
+  });
+}
+
+/** Déplace un produit dans un rayon, choisi à la main (l'app ne le changera plus automatiquement). */
+function placerDansRayon(articleId, rayonId) {
+  S.maj((x) => { const ar = x.articles.find((i) => i.id === articleId); if (ar) { ar.rayonId = rayonId; ar.rayonManuel = true; } });
+  const e = S.get();
+  toast(`${e.articles.find((a) => a.id === articleId)?.nom || 'Produit'} → ${e.rayons.find((r) => r.id === rayonId)?.nom}`);
+}
+
+/** « 🗂 Classer » : chaque produit de la liste rangé dans Divers, avec son sélecteur de rayon. */
+function classerSansRayon() {
+  const divers = rayonParDefaut();
+  const dessiner = () => {
+    const e = S.get();
+    const lignes = e.liste.filter((l) => !l.coche && e.articles.find((a) => a.id === l.articleId)?.rayonId === divers);
+    if (!lignes.length) { fermerModale(); toast('Tout est classé 👍'); return; }
+    ouvrirModale(`Classer (${lignes.length})`, `<p class="doux" style="margin-top:0">Ces produits sont dans « ${esc(e.rayons.find((r) => r.id === divers)?.nom || 'Divers')} ». Choisis leur rayon, ou tape un nom pour en créer un.</p>
+      ${lignes.map((l) => { const a = e.articles.find((x) => x.id === l.articleId); return `<div class="champ" style="margin-bottom:6px">
+        <label>${esc(a.nom)}</label>
+        <button type="button" class="btn sec" data-classer-art="${a.id}" style="width:100%;text-align:left">${esc(texteBoutonRayon(a.rayonId))}</button>
+        <div data-classer-pan="${a.id}" hidden></div></div>`; }).join('')}
+      <button class="btn sec" id="clFini" style="width:100%;margin-top:8px">Terminé</button>`, (c) => {
+      $$('[data-classer-art]', c).forEach((b) => {
+        const id = b.dataset.classerArt;
+        brancherRayon(b, c.querySelector(`[data-classer-pan="${id}"]`), () => S.get().articles.find((a) => a.id === id)?.rayonId,
+          (rid) => { placerDansRayon(id, rid); if (rid !== divers) dessiner(); });
+      });
+      $('#clFini', c).onclick = () => fermerModale();
+    });
+  };
+  dessiner();
 }
 
 /** Liste des catégories : nombre de produits, ajout, suppression (avec déplacement des produits). */
@@ -854,8 +917,10 @@ export function ficheArticle(articleId, ligneId) {
     <h3 style="margin-top:14px">Fiche</h3>
     ${a.bio || a.allergenes?.length ? `<p class="doux" style="margin:0 0 8px">${[a.bio && '🌱 Bio', a.allergenes?.length && `⚠️ Allergènes : ${a.allergenes.join(', ')}`].filter(Boolean).map(esc).join(' · ')} <span style="font-size:11px">(Open Food Facts)</span></p>` : ''}
     <div class="champ"><label>Nom</label><input id="fNom" value="${esc(a.nom)}"></div>
+    <div class="champ"><label>Rayon ${a.rayonManuel ? '<span class="pastille">choisi par toi</span>' : '<span class="pastille">auto</span>'}</label>
+      <div class="rang"><input type="hidden" id="fRayon" value="${esc(a.rayonId)}"><button type="button" class="btn sec grandir" id="fRayonBtn" style="text-align:left">${esc(texteBoutonRayon(a.rayonId))}</button><button class="icone" id="fGererCat" title="Gérer les rayons" aria-label="Gérer les rayons">⚙️</button></div>
+      <div id="fRayonPanneau" hidden></div></div>
     <div class="rang">
-      <div class="champ grandir"><label>Catégorie (rayon) ${a.rayonManuel ? '<span class="pastille">choisie par toi</span>' : '<span class="pastille">auto</span>'}</label><div class="rang"><select id="fRayon" class="grandir">${optionsCategories(a.rayonId)}</select><button class="icone" id="fGererCat" title="Gérer les catégories" aria-label="Gérer les catégories">⚙️</button></div></div>
       <div class="champ grandir"><label>Comparer au</label><select id="fUnite">
         <option value="kg" ${a.uniteRef === 'kg' ? 'selected' : ''}>$/kg</option>
         <option value="l" ${a.uniteRef === 'l' ? 'selected' : ''}>$/L</option>
@@ -904,18 +969,11 @@ export function ficheArticle(articleId, ligneId) {
       rouvrir();
     });
     $('#fHisto', c).ontoggle = () => { if ($('#fHisto', c).open && !$('#histo', c).dataset.ok) { $('#histo', c).dataset.ok = 1; afficherHistorique(a, $('#histo', c)); } };
-    // Catégorie : appliquée tout de suite ; « + Ajouter une catégorie… » en crée une nouvelle
-    $('#fRayon', c).onchange = () => {
-      const sel = $('#fRayon', c);
-      let id = sel.value;
-      if (id === '+') {
-        id = ajouterCategorie();
-        if (!id) { sel.value = S.get().articles.find((x) => x.id === a.id)?.rayonId || ''; return; }
-        sel.innerHTML = optionsCategories(id);
-      }
-      S.maj((x) => { const ar = x.articles.find((i) => i.id === a.id); if (ar) { ar.rayonId = id; ar.rayonManuel = true; } });
-      toast(`Catégorie : ${S.get().rayons.find((r) => r.id === id)?.nom}`);
-    };
+    // Rayon : appliqué tout de suite ; taper un nom qui n'existe pas propose de créer le rayon
+    brancherRayon($('#fRayonBtn', c), $('#fRayonPanneau', c), () => $('#fRayon', c).value, (id) => {
+      $('#fRayon', c).value = id;
+      placerDansRayon(a.id, id);
+    });
     $('#fGererCat', c).onclick = () => gererCategories(() => ficheArticle(articleId, ligneId));
     $$('[data-ajprix]', c).forEach((b) => b.onclick = () => {
       $('#fAjPrix', c).open = true; $('#pBan', c).value = b.dataset.ajprix; $('#pOffre', c).focus();
