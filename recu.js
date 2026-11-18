@@ -11,7 +11,7 @@ import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normalis
 import * as P from './produits.js';
 import { BANNIERES } from './demo-data.js';
 import { analyserPlu, infosPlu } from './plu.js';
-import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes } from './lignes-recu.js';
+import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes } from './lignes-recu.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -257,7 +257,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   const mag = e.magasins.find((m) => m.banniere === r.banniere && r.magasin && simple(r.magasin).includes(simple(m.nom).split(' ').pop()))
     || e.magasins.find((m) => m.banniere === r.banniere);
   const date = r.date || r.cree.slice(0, 10);
-  const bilan = { relies: 0, coches: 0, prix: 0, completes: 0, nonRelies: 0, bonPrix: 0, ecarts: 0 };
+  const bilan = { relies: 0, coches: 0, prix: 0, completes: 0, nonRelies: 0, bonPrix: 0, ecarts: 0, horsProduits: 0 };
   const lignesListe = new Set(e.liste.map((x) => x.id)); // articles de la liste au moment du reçu
   const relies = new Set();
   const mode = modeRabais(r); // prix imprimés déjà rabais déduits ('net') ou non ('brut')
@@ -269,6 +269,13 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
 
   for (const [i, l] of (r.lignes || []).entries()) {
     etat(`Produit ${i + 1}/${r.lignes.length}…`);
+    // Consigne, coupon, sac, frais : pas un produit (sauf association faite à la main)
+    const nature = natureLigne(l);
+    if (nature !== 'produit' && !(l.manuel && l.articleId)) {
+      bilan.horsProduits++;
+      S.maj((x) => { const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i]; if (ln) ln.nature = nature; });
+      continue;
+    }
     const codes = variantesRecu(l.code);
     const pluL = await infosPlu(l.code); // fruit ou légume : code PLU (4 chiffres, 9 + PLU = bio)
     const etatNow = S.get();
@@ -418,7 +425,7 @@ export async function completerFiches(recuId, fin) {
   return file.length;
 }
 
-export const texteBilan = (b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s)${b.bonPrix != null ? ` · ${b.bonPrix} au bon prix` : ''}${b.ecarts ? ` · ⚠️ ${b.ecarts} payé(s) plus cher` : ''} · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}` : '';
+export const texteBilan = (b) => b ? `${b.relies} produit(s) relié(s) à ton catalogue · ${b.coches} coché(s) sur la liste · ${b.prix} prix payé(s) enregistré(s)${b.bonPrix != null ? ` · ${b.bonPrix} au bon prix` : ''}${b.ecarts ? ` · ⚠️ ${b.ecarts} payé(s) plus cher` : ''} · ${b.completes} fiche(s) complétée(s)${b.nonRelies ? ` · ${b.nonRelies} non relié(s)` : ''}${b.horsProduits ? ` · ${b.horsProduits} consigne(s), coupon(s) ou sac(s) mis à part` : ''}` : '';
 
 const dateCourte = (d) => (d ? new Date(`${d}T12:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }) : '');
 
@@ -494,14 +501,20 @@ export function htmlDetail(r) {
   const champ = (lib, val) => (val != null && val !== '' ? `<tr><td class="doux">${esc(lib)}</td><td>${esc(String(val))}</td></tr>` : '');
   const v = r.statut === 'lu' ? verifierRecu(r) : null;
   const mode = modeRabais(r);
+  const cons = consignes(r.lignes || []);
+  const NATURE = { consigne: '♻️ Consigne', coupon: '🎟️ Coupon', sac: '🛍️ Sac', frais: '🧾 Frais' };
   const verdict = !v ? '<div class="alerte">⏳ Pas encore lu (en attente du réseau).</div>'
     : v.ok ? `<div class="alerte vert">✅ Reçu complet et bien lu — ${esc(v.resume)}</div>`
     : `<div class="alerte">⚠️ À vérifier : ${v.problemes.map(esc).join(' ')}${v.resume ? `<br><span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
-  const lignes = (r.lignes || []).map((l) => {
+  const lignes = (r.lignes || []).map((l, i) => {
+    const nat = natureLigne(l);
+    if (nat !== 'produit' && !(l.manuel && l.articleId)) {
+      return `<tr class="doux"><td>${NATURE[nat]} <span style="font-size:12px">· ${esc(l.libelle)}</span></td><td class="pu">${argent(l.prix)}</td></tr>`;
+    }
     const a = l.articleId && e.articles.find((x) => x.id === l.articleId);
     const nom = l.nomClair || l.nomEnLigne || l.libelle;
     return `<tr><td>${a ? '✓ ' : ''}<b>${esc(nom)}</b>${a && simple(a.nom) !== simple(nom) ? ` <span class="doux">→ ${esc(a.nom)}</span>` : ''}
-        <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? (analyserPlu(l.code) ? ` · PLU ${esc(analyserPlu(l.code).plu)}${analyserPlu(l.code).bio ? ' bio' : ''}` : ` · code ${esc(l.code)}`) : ''}${l.marque ? ` · ${esc(l.marque)}` : ''}${l.format || l.formatEnLigne ? ` · ${esc(l.format || l.formatEnLigne)}` : ''}${l.poids ? ` · ${esc(l.poids)}` : pesee(l) ? ` · ${String(pesee(l).qte).replace('.', ',')} kg (pesé)` : l.quantite > 1 ? ` · qté ${l.quantite}` : ''}${l.taxable ? ` · taxe ${esc(l.taxable)}` : ''}</div></td>
+        <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? (analyserPlu(l.code) ? ` · PLU ${esc(analyserPlu(l.code).plu)}${analyserPlu(l.code).bio ? ' bio' : ''}` : ` · code ${esc(l.code)}`) : ''}${l.marque ? ` · ${esc(l.marque)}` : ''}${l.format || l.formatEnLigne ? ` · ${esc(l.format || l.formatEnLigne)}` : ''}${l.poids ? ` · ${esc(l.poids)}` : pesee(l) ? ` · ${String(pesee(l).qte).replace('.', ',')} kg (pesé)` : l.quantite > 1 ? ` · qté ${l.quantite}` : ''}${l.taxable ? ` · taxe ${esc(l.taxable)}` : ''}${cons[i] ? ` · + consigne ${argent(cons[i])}` : ''}</div></td>
       <td class="pu">${argent(l.prix)}${l.rabais ? `<div style="color:var(--vert);font-size:12px">${mode === 'net' ? `économie ${argent(l.rabais)} (déjà déduite)` : `−${argent(l.rabais)}`}</div>` : ''}</td></tr>`;
   }).join('');
   return `${verdict}

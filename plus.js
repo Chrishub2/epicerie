@@ -13,6 +13,7 @@ import { ajouterTache } from './attente.js';
 import * as Sync from './sync.js';
 import * as P from './produits.js';
 import { monterCirculaires } from './circulaires.js';
+import { natureLigne } from './lignes-recu.js';
 
 const JSBARCODE = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
 const VALEUR_POINT = { pc_optimum: 0.001, scene_plus: 0.01, metro_moi: 0.01 }; // $ par point (indicatif, à valider)
@@ -589,7 +590,7 @@ function associerRecu(id) {
   const nomDe = (aid) => e.articles.find((a) => a.id === aid)?.nom || '';
   const libelleChoix = (nom) => nom ? `🛒 ${esc(nom)}` : '— aucun produit —';
   ouvrirModale('Associer les produits', `<p class="doux">Pour chaque ligne de la facture, touche la case pour choisir le produit dans ta liste d'épicerie ou ton catalogue (ou tape un nouveau nom pour le créer). Laisse « aucun produit » si ce n'est pas un produit (sac, consigne…). Je recompare ensuite les prix et je cherche le code-barres en ligne.</p>
-    ${r.lignes.map((l, i) => `<div class="carte" style="padding:8px;margin-bottom:6px">
+    ${r.lignes.map((l, i) => natureLigne(l) !== 'produit' && !(l.manuel && l.articleId) ? '' : `<div class="carte" style="padding:8px;margin-bottom:6px">
       <div class="rang"><b class="grandir">${esc(l.nomClair || l.libelle)}</b><b>${argent(l.prix)}</b></div>
       <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? ` · code ${esc(l.code)}` : ''}</div>
       <button type="button" class="btn sec" data-as="${i}" data-nom="${esc(nomDe(l.articleId))}" style="width:100%;margin-top:6px;text-align:left">${libelleChoix(nomDe(l.articleId))} ▾</button>

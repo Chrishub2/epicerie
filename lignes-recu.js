@@ -69,6 +69,34 @@ export const prixParArticle = (l, mode) => montantNet(l, mode) / (num(l.quantite
 
 const virgule = (x) => x.toFixed(2).replace('.', ',');
 
+// Lignes qui ne sont pas des produits : ni reliées au catalogue, ni comptées « non reliées ».
+const NATURES = [
+  ['consigne', /^\+?\s*(d[eé]p(?:[oô]t)?|consignes?)\b/i],              // « +DEP ALUM », « DÉPÔT », « CONSIGNE »
+  ['consigne', /\bd[eé]p(?:[oô]t)?\s+(alum|pet|verre|plast|can|bout)/i],
+  ['coupon', /^(coupons?|bon de r[eé]duction)\b/i],
+  ['sac', /^sacs?\b|\bsacs? (plastique|r[eé]utilisables?|papier)\b/i],
+  ['frais', /^([eé]co-?frais|frais (environnement|[eé]co|de service))\b/i],
+];
+
+/** Nature d'une ligne de reçu : 'consigne' | 'coupon' | 'sac' | 'frais' | 'produit'. */
+export function natureLigne(l) {
+  const t = String(l?.libelle || '').trim();
+  for (const [n, re] of NATURES) if (re.test(t)) return n;
+  return 'produit';
+}
+
+/** Consigne de chaque produit : { index du produit: montant } (au Québec, la consigne suit la boisson). */
+export function consignes(lignes = []) {
+  const out = {};
+  let dernier = -1;
+  lignes.forEach((l, i) => {
+    const n = natureLigne(l);
+    if (n === 'produit') dernier = i;
+    else if (n === 'consigne' && dernier >= 0) out[dernier] = Math.round(((out[dernier] || 0) + num(l.prix)) * 100) / 100;
+  });
+  return out;
+}
+
 /** Prix payé en texte d'offre : « 4,99 $ » ou « 2,14 $/kg ». null si rien de payé. */
 export function offreLigne(l, mode) {
   const taux = /(\d+[.,]\d{2})\s*\$?\s*\/\s*(kg|lb)/i.exec(l?.poids || '');
