@@ -124,12 +124,8 @@ function note(texte, action) {
 // Modifications (mode démo seulement) + historique
 // ---------------------------------------------------------------------
 /** Mode réel : rien ne s'écrit avant l'étape C4. Retourne true (et prévient) si l'action doit être bloquée. */
-/** Mode réel : la fusion reste bloquée (elle déplace des prix, protégés en ajout seulement) — étape C5. */
-function lectureSeule(action = '') {
-  if (MODE !== 'reel' || action !== 'fusion') return false;
-  note('Fusionner de vraies fiches arrive à l\'étape C5 : la fusion déplace des prix, qui sont protégés. En attendant : « Pas des doublons », ou corrige les fiches une à une.');
-  return true;
-}
+/** Plus rien n'est bloqué en mode réel depuis la v63 : la fusion recopie les prix (jamais modifiés). Gardé pour les appels existants. */
+function lectureSeule() { return false; }
 let nLot = 0;
 /** Applique une modification d'un champ. Retourne l'entrée d'historique. */
 function modifier(articleId, champ, apres, source = 'console', lot = null) {
@@ -143,6 +139,13 @@ function modifier(articleId, champ, apres, source = 'console', lot = null) {
     a.codes = (a.codes || []).map((c) => (c === avant ? nouveau : c));
     for (const v of a.variantes || []) v.codes = (v.codes || []).map((c) => (c === avant ? nouveau : c));
     apres = nouveau;
+  } else if (champ === 'codesTous') {
+    avant = codesDe(a);
+    const garder = new Set(apres), ajoutes = apres.filter((c) => !avant.includes(c));
+    a.codes = [...new Set([...(a.codes || []).filter((c) => garder.has(c)), ...ajoutes])];
+    for (const v of a.variantes || []) v.codes = (v.codes || []).filter((c) => garder.has(c));
+    const pref = variantePref(a);
+    if (pref && ajoutes.length) pref.codes = [...new Set([...(pref.codes || []), ...ajoutes])];
   } else {
     avant = a[champ];
     if (apres === '' && champ !== 'nom') delete a[champ]; else a[champ] = apres;
@@ -162,10 +165,14 @@ function restaurer(h) {
   reanalyser(); rendre();
   note(`Valeur restaurée sur « ${esc((ARTS.get(h.articleId)?.nom || h.nom).trim())} »`);
 }
-function libelleChamp(c) { return { nom: 'Nom', marque: 'Marque', format: 'Format', uniteRef: 'Unité de comparaison', rayonId: 'Rayon', code: 'Code-barres', codes: 'Codes-barres', imageUrl: 'Photo', liens: 'Lien épiceries.ca (prix)', fusion: 'Fusion', pasDoublon: 'Pas un doublon' }[c] || c; }
+function libelleChamp(c) { return { nom: 'Nom', marque: 'Marque', format: 'Format', uniteRef: 'Unité de comparaison', rayonId: 'Rayon', code: 'Code-barres', codes: 'Codes-barres', imageUrl: 'Photo', liens: 'Lien épiceries.ca (prix)', fusion: 'Fusion', pasDoublon: 'Pas un doublon',
+  local: 'Local (Québec)', bio: 'Bio', exclusif: 'Vendu seulement chez', nutriscore: 'Nutri-Score', allergenes: 'Allergènes', codesTous: 'Codes-barres' }[c] || c; }
 function valeurLisible(champ, v) {
   if (champ === 'imageUrl' && v) return `<img class="vignette image" src="${esc(v)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
-  if (champ === 'codes' && Array.isArray(v)) return v.length ? `<span class="mono">${v.map(esc).join(', ')}</span>` : '<span class="discret">(aucun)</span>';
+  if (typeof v === 'boolean') return v ? 'Oui' : 'Non';
+  if (champ === 'exclusif') return v ? esc(BANNIERES[v] || v) : 'Toutes les bannières';
+  if (champ === 'allergenes' && Array.isArray(v)) return v.length ? esc(v.join(', ')) : '<span class="discret">(aucun)</span>';
+  if ((champ === 'codes' || champ === 'codesTous') && Array.isArray(v)) return v.length ? `<span class="mono">${v.map(esc).join(', ')}</span>` : '<span class="discret">(aucun)</span>';
   if (champ === 'liens' && Array.isArray(v)) return v.length ? esc(v.map((l) => l.nom).join(' · ')) : '<span class="discret">(aucun)</span>';
   if (v == null || v === '') return '<span class="discret">(vide)</span>';
   if (champ === 'rayonId') return esc(rayonNom(v));
@@ -372,7 +379,8 @@ function vueCatalogue(t) {
   const f = ui.filtre;
   const etats = [['tous', 'Tous'], ['acompleter', 'À compléter'], ['probleme', 'Avec problème'], ['p1', 'Critiques'], ['selection', 'Sélection']];
   t.innerHTML = `
-    <div class="entete-vue"><h1>Catalogue</h1><span class="muet" id="compteCat"></span></div>
+    <div class="entete-vue"><h1>Catalogue</h1><span class="muet" id="compteCat"></span><span style="flex:1"></span>
+      <button class="btn principal" id="btnFusion" title="Coche 2 produits ou plus dans la première colonne, puis clique ici">🔗 Fusionner</button></div>
     <div class="outils">
       <input class="champ" id="filtreTexte" placeholder="Filtrer : nom, marque, code, id…" value="${esc(f.texte)}" aria-label="Filtrer">
       <select class="champ" id="filtreRayon" aria-label="Rayon"><option value="">Tous les rayons</option>${E.rayons.map((r) => `<option value="${r.id}" ${r.id === f.rayon ? 'selected' : ''}>${esc(r.nom)}</option>`).join('')}</select>
@@ -383,6 +391,7 @@ function vueCatalogue(t) {
     </div>
     <div class="selection" id="barreSel"></div>
     <div id="hoteTable" style="flex:1;min-height:0;display:flex"></div>`;
+  $('#btnFusion', t).onclick = () => ouvrirFusion([...ui.selection]);
   const tv = new TableVirtuelle($('#hoteTable', t), {
     colonnes: COLONNES, cle: (a) => a.id, vide: 'Aucun produit ne correspond. Retire un filtre pour élargir.',
     classes: (a) => (ui.selection.has(a.id) ? 'choisie' : '') + (ui.articleOuvert === a.id ? ' focus' : ''),
@@ -488,12 +497,14 @@ function barreSelection() {
     <button class="btn petit" data-lot="rayonId">Changer le rayon…</button>
     <button class="btn petit" data-lot="marque">Changer la marque…</button>
     <button class="btn petit" data-lot="uniteRef">Changer l'unité de comparaison…</button>
+    <button class="btn petit principal" id="lotFusion" ${n < 2 ? 'disabled title="Coche au moins 2 produits"' : ''}>🔗 Fusionner…</button>
     <button class="btn petit" id="lotComparer" ${n < 2 || n > 4 ? 'disabled title="Choisis 2 à 4 produits"' : ''}>⇄ Comparer</button>
     <button class="btn petit" id="lotExport">Exporter CSV</button>
     <button class="btn petit danger" id="lotSupprimer">🗑 Supprimer…</button>
     <span style="flex:1"></span><button class="btn petit" id="lotVider">Tout désélectionner</button>`;
   b.querySelectorAll('[data-lot]').forEach((x) => x.onclick = () => modifierEnLot(x.dataset.lot));
   $('#lotComparer').onclick = () => { ui.comparer = [...ui.selection]; ui.cibleFusion = ui.comparer[0]; aller('comparer'); };
+  $('#lotFusion').onclick = () => ouvrirFusion([...ui.selection]);
   $('#lotVider').onclick = () => { ui.selection.clear(); tableCourante?.rafraichir(); barreSelection(); };
   $('#lotExport').onclick = exporterCsv;
   $('#lotSupprimer').onclick = () => supprimerProduits([...ui.selection]);
@@ -611,7 +622,7 @@ function rendreDetail() {
   const tousPu = pus.map((x) => x.pu);
   const [minPu, maxPu] = [Math.min(...tousPu), Math.max(...tousPu)];
   const hist = MODE === 'reel' ? histoBase.filter((h) => h.type === 'article' && h.id === a.id) : historique.filter((h) => h.articleId === a.id);
-  const champ = (cle, label, valeur, type) => `<label>${label}</label><div class="valeur editable" data-champ="${cle}" data-type="${type}" tabindex="0" title="Cliquer pour modifier">${valeur || '<span class="vide">vide</span>'}</div>`;
+  const champ = (cle, label, valeur, type) => `<label>${label}</label><div class="valeur editable" data-champ="${cle}" data-type="${type}" tabindex="0" title="Cliquer pour modifier">${valeur || '<span class="vide">vide</span>'}<span aria-hidden="true" style="margin-left:auto;color:var(--texte-3);font-size:12px">✎</span></div>`;
   zone.innerHTML = `
     <div class="tete-detail">
       ${vignette(a, true)}
@@ -628,13 +639,20 @@ function rendreDetail() {
     </div>
     <div class="sections">
     ${pbs.length ? `<section class="section large"><h3>Problèmes <span class="n">${pbs.length}</span></h3>${pbs.map(carteProbleme).join('')}</section>` : ''}
-    <section class="section"><h3>Fiche</h3>
+    <section class="section"><h3>Fiche <span class="discret" style="font-weight:400;font-size:12px;text-transform:none;letter-spacing:0">· clique une valeur (✎) pour la modifier</span></h3>
       <div class="grille-champs">
         ${champ('nom', 'Nom', esc(a.nom), 'texte')}
         ${champ('marque', 'Marque ★', esc(a.marque || ''), 'texte')}
         ${champ('format', 'Format ★', a.format ? `${esc(a.format)} <span class="discret">${esc(formatLisible(a.format) !== a.format ? '= ' + formatLisible(a.format) : '')}</span>` : '', 'texte')}
         ${champ('uniteRef', 'Comparé', 'au ' + (UNITES[a.uniteRef] || '?'), 'unite')}
         ${champ('rayonId', 'Rayon', esc(rayonNom(a.rayonId)), 'rayon')}
+        ${champ('local', 'Local 🍁', a.local ? 'Oui (Québec)' : 'Non', 'ouinon')}
+        ${champ('bio', 'Bio', a.bio ? 'Oui' : 'Non', 'ouinon')}
+        ${champ('exclusif', 'Vendu seulement chez', a.exclusif ? esc(BANNIERES[a.exclusif] || a.exclusif) : 'Toutes les bannières', 'banniere')}
+        ${champ('nutriscore', 'Nutri-Score', a.nutriscore ? esc(String(a.nutriscore).toUpperCase()) : '', 'nutri')}
+        ${champ('allergenes', 'Allergènes', esc((a.allergenes || []).join(', ')), 'liste')}
+        ${champ('codesTous', 'Codes-barres', codesDe(a).length ? `<span class="mono">${codesDe(a).map(esc).join(', ')}</span>` : '', 'codes')}
+        ${champ('imageUrl', 'Photo (adresse)', a.imageUrl ? `<span class="discret" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">${esc(a.imageUrl)}</span>` : '', 'texte')}
         <label>Manque</label><div class="valeur">${comp.manquants.length ? comp.manquants.map((m) => `<span class="badge alerte">${m.icone} ${m.texte}</span>`).join(' ') : '<span class="badge ok">Rien</span>'}</div>
       </div>
       <p class="discret" style="margin:8px 0 0;font-size:12px">★ = variante habituelle. Pendant la transition, la fiche est la référence et la variante ★ en est le miroir (même règle que le téléphone).</p>
@@ -728,6 +746,11 @@ function editerChampDetail(el, a) {
   if (el.querySelector('[data-edit]')) return;
   const ctl = type === 'rayon' ? `<select class="cellule-edit" data-edit>${optionsRayons(a.rayonId)}</select>`
     : type === 'unite' ? `<select class="cellule-edit" data-edit>${Object.entries(UNITES).map(([k, l]) => `<option value="${k}" ${k === a.uniteRef ? 'selected' : ''}>au ${l}</option>`).join('')}</select>`
+    : type === 'ouinon' ? `<select class="cellule-edit" data-edit><option value="1" ${a[champ] ? 'selected' : ''}>Oui</option><option value="0" ${a[champ] ? '' : 'selected'}>Non</option></select>`
+    : type === 'banniere' ? `<select class="cellule-edit" data-edit><option value="">Toutes les bannières</option>${Object.entries(BANNIERES).map(([k, l]) => `<option value="${k}" ${k === a.exclusif ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+    : type === 'nutri' ? `<select class="cellule-edit" data-edit><option value="">—</option>${['a', 'b', 'c', 'd', 'e'].map((k) => `<option value="${k}" ${k === String(a.nutriscore || '').toLowerCase() ? 'selected' : ''}>${k.toUpperCase()}</option>`).join('')}</select>`
+    : type === 'liste' ? `<input class="cellule-edit" data-edit value="${esc((a[champ] || []).join(', '))}" placeholder="séparés par des virgules">`
+    : type === 'codes' ? `<input class="cellule-edit mono" data-edit value="${esc(codesDe(a).join(', '))}" placeholder="codes séparés par des virgules">`
     : `<input class="cellule-edit" data-edit value="${esc(a[champ] || '')}">`;
   el.innerHTML = ctl;
   const c = el.firstElementChild; c.focus(); c.select?.();
@@ -735,8 +758,24 @@ function editerChampDetail(el, a) {
   let fini = false;
   const valider = () => {
     if (fini) return; fini = true;
-    const v = champ === 'nom' ? c.value.replace(/\s+/g, ' ').trim() : c.value.trim();
+    let v = champ === 'nom' ? c.value.replace(/\s+/g, ' ').trim() : c.value.trim();
     if (champ === 'nom' && !v) { note('Le nom ne peut pas être vide.'); rendreDetail(); return; }
+    // Valeur saisie → valeur de la fiche selon le type de champ
+    if (type === 'ouinon') v = v === '1';
+    else if (type === 'liste') { v = [...new Set(v.split(',').map((x) => x.trim()).filter(Boolean))]; if (!v.length) v = ''; }
+    else if (type === 'codes') {
+      v = [...new Set(v.split(/[\s,;]+/).map((x) => x.replace(/\D/g, '')).filter(Boolean))];
+      const mauvais = v.filter((x) => x.length < 4 || x.length > 14);
+      if (mauvais.length) { note(`Code invalide : ${esc(mauvais.join(', '))} (4 à 14 chiffres)`); fini = false; c.focus(); return; }
+    }
+    if (type === 'codes' || type === 'liste' || type === 'ouinon') {
+      const avant = type === 'codes' ? codesDe(a) : type === 'ouinon' ? !!a[champ] : (a[champ] || '');
+      if (JSON.stringify(avant) === JSON.stringify(v === '' ? (type === 'liste' && Array.isArray(avant) ? [] : '') : v)) { rendreDetail(); return; }
+      const h = modifier(a.id, champ, v);
+      reanalyser(); rendreNav(); majSynchro(); rendreDetail(); ui.remplirCatalogue && ui.vue === 'catalogue' && ui.remplirCatalogue();
+      note(`${libelleChamp(champ)} modifié`, { libelle: 'Annuler', faire: () => restaurer(h) });
+      return;
+    }
     if (champ === 'rayonId' && v === NOUVEAU_RAYON) {
       creerRayon().then((id) => {
         if (!id) { rendreDetail(); return; }
@@ -1038,19 +1077,142 @@ function vueComparer(t) {
     historique.unshift({ id: historique.length + 1, quand: new Date().toISOString(), articleId: arts[0].id, nom: arts[0].nom, champ: 'pasDoublon', avant: null, apres: arts.map((a) => a.id).join(' + '), source: 'console' });
     reanalyser(); ui.comparer = []; aller('boite'); note('Marqués comme produits différents : ils ne seront plus proposés.');
   };
-  $('#fusionner').onclick = () => lectureSeule('fusion') || modale('Confirmer la fusion', `<p>Fusionner ${arts.length - 1} fiche(s) dans « <b>${nomCourt(ARTS.get(ui.cibleFusion))}</b> » ?</p>
-    <p class="muet">Maquette : la fusion utilise la même fonction que le téléphone (<span class="mono">fusionner</span>). Elle peut être annulée tant que c'est la dernière opération. En phase 4, chaque fiche retirée reste dans l'historique de la base.</p>`, [
-    ['Annuler', 'fermer'],
-    ['Fusionner', 'principal', () => {
-      const instantane = structuredClone({ articles: E.articles, prix: E.prix, liste: E.liste, photos: E.photos, recus: E.recus });
-      const sources = arts.filter((a) => a.id !== ui.cibleFusion).map((a) => a.id);
-      fusionner(E, ui.cibleFusion, sources);
-      historique.unshift({ id: historique.length + 1, quand: new Date().toISOString(), articleId: ui.cibleFusion, nom: ARTS.get(ui.cibleFusion).nom, champ: 'fusion', avant: sources.join(' + '), apres: ui.cibleFusion, source: 'console', instantane, n: historique.length });
-      reanalyser(); const cible = ui.cibleFusion; ui.comparer = []; ouvrirArticle(cible); aller('catalogue');
-      note(`${sources.length} fiche(s) fusionnée(s)`, { libelle: 'Annuler', faire: () => annulerFusion(historique.find((h) => h.champ === 'fusion' && h.apres === cible && !h.restauree)) });
-    }],
-  ]);
+  $('#fusionner').onclick = () => ouvrirFusion(arts.map((a) => a.id), ui.cibleFusion);
 }
+/**
+ * Fenêtre « Fusionner » : choisir la fiche à garder (nom, rayon, photo), voir ce qui sera déplacé, confirmer.
+ * Les autres fiches deviennent des formats/marques (variantes) de la fiche gardée.
+ */
+function ouvrirFusion(ids, cibleDefaut) {
+  const arts = [...new Set(ids)].map((id) => ARTS.get(id)).filter(Boolean);
+  if (arts.length < 2) { note('Coche au moins 2 produits dans la première colonne du catalogue, puis clique « 🔗 Fusionner ».'); return; }
+  if (arts.length > 8) { note('Fusionne au plus 8 produits à la fois.'); return; }
+  const poids = (a) => compDe(a).ok * 1000 + (A.prixParArticle.get(a.id)?.length || 0);
+  let cible = arts.some((a) => a.id === cibleDefaut) ? cibleDefaut : [...arts].sort((x, y) => poids(y) - poids(x))[0].id;
+  const m = modale(`Fusionner ${arts.length} produits`, `
+    <p class="muet" style="margin-top:0">Choisis la fiche à <b>garder</b> : son nom, son rayon et sa photo restent. Les autres deviennent des formats/marques de cette fiche.</p>
+    <table class="mini-table"><tr><th>Garder</th><th>Produit</th><th>Marque</th><th>Format</th><th>Rayon</th><th>Prix</th><th>Codes</th></tr>
+      ${arts.map((a) => `<tr><td><input type="radio" name="fuCible" value="${a.id}" ${a.id === cible ? 'checked' : ''}></td><td>${nomCourt(a)}</td><td>${esc(a.marque || '—')}</td><td>${esc(a.format || '—')}</td><td>${esc(rayonNom(a.rayonId))}</td><td class="mono">${A.prixParArticle.get(a.id)?.length || 0}</td><td class="mono">${codesDe(a).length}</td></tr>`).join('')}</table>
+    <div class="proposition" id="fuApercu" style="margin-top:12px;display:block"></div>
+    <p class="discret" style="font-size:12px;margin-bottom:0">${MODE === 'reel'
+      ? 'Les prix sont protégés (ajout seulement) : chaque prix est recopié sur la fiche gardée et l\'original est marqué « annulé – fusion », sans être effacé. Les fiches retirées restent restaurables depuis l\'Historique.'
+      : 'Démo : rien n\'est envoyé. La fusion peut être annulée tant que c\'est la dernière opération.'}</p>`, [
+    ['Annuler', 'fermer'],
+    ['🔗 Fusionner', 'principal', () => { executerFusion(cible, arts.filter((a) => a.id !== cible).map((a) => a.id)); }],
+  ]);
+  const maj = () => {
+    const autres = arts.filter((a) => a.id !== cible);
+    const ap = apercuFusion(E, autres.map((a) => a.id));
+    const idsAutres = new Set(autres.map((a) => a.id));
+    ap.prix = (E.prix || []).filter((p) => idsAutres.has(p.articleId) && !p.annule).length; // seuls les prix actifs sont recopiés
+    m.querySelector('#fuApercu').innerHTML = `On garde « <b>${nomCourt(ARTS.get(cible))}</b> ». Elle reçoit ${ap.variantes} format(s)/marque(s) avec leurs codes-barres et noms de reçus, ${ap.prix} prix et ${ap.lignesListe} ligne(s) de liste (additionnées si en double). ${autres.length > 1 ? `Les ${autres.length} autres fiches sont retirées` : 'L\'autre fiche est retirée'} du catalogue : ${autres.map((a) => `« ${nomCourt(a)} »`).join(', ')}.`;
+  };
+  m.querySelectorAll('[name="fuCible"]').forEach((r) => r.onchange = () => { cible = r.value; maj(); });
+  maj();
+}
+function executerFusion(cibleId, sourceIds) {
+  if (MODE === 'reel') { fusionnerReel(cibleId, sourceIds); return; }
+  const instantane = structuredClone({ articles: E.articles, prix: E.prix, liste: E.liste, photos: E.photos, recus: E.recus });
+  fusionner(E, cibleId, sourceIds);
+  historique.unshift({ id: historique.length + 1, quand: new Date().toISOString(), articleId: cibleId, nom: ARTS.get(cibleId)?.nom || cibleId, champ: 'fusion', avant: sourceIds.join(' + '), apres: cibleId, source: 'console', instantane, n: historique.length });
+  for (const id of sourceIds) ui.selection.delete(id);
+  reanalyser(); ui.comparer = []; ouvrirArticle(cibleId); aller('catalogue'); barreSelection();
+  note(`${sourceIds.length} fiche(s) fusionnée(s)`, { libelle: 'Annuler', faire: () => annulerFusion(historique.find((h) => h.champ === 'fusion' && h.apres === cibleId && !h.restauree)) });
+}
+/**
+ * Fusion dans la vraie base, sans jamais modifier ni effacer un prix (ajout seulement) :
+ * 1) la fiche gardée reçoit les variantes (codes-barres, noms de reçus), les codes et les liens ;
+ * 2) chaque prix actif d'une fiche retirée est recopié sur la fiche gardée (copieDe), puis l'original
+ *    est marqué annulé (annuleRaison « fusion », remplacePar) — la base accepte l'ajout de clés ;
+ * 3) liste, recettes, reçus, photos et relevés pointent vers la fiche gardée (lignes en double additionnées) ;
+ * 4) les fiches retirées sont supprimées en douceur (fusionneDans), restaurables depuis l'Historique.
+ * Puis tout est relu dans la base. Rejouer une fusion interrompue ne double rien.
+ */
+async function fusionnerReel(cibleId, sourceIds) {
+  const cible = ARTS.get(cibleId);
+  const ids = new Set(sourceIds.filter((id) => id !== cibleId));
+  const sources = [...ids].map((id) => ARTS.get(id)).filter(Boolean);
+  if (!cible || !sources.length || !source?.foyer) return;
+  if (attente.size) { note('Un enregistrement est en cours : réessaie dans quelques secondes.'); return; }
+  etatSynchro('local', `Fusion en cours… ${sources.length + 1} fiches`);
+  const problemes = [];
+  const garderVersion = (o, v) => Object.defineProperty(o, '_version', { value: v, enumerable: false, writable: true, configurable: true });
+  const ecrire = async (type, o, supprime = false) => {
+    try { const v = await source.ecrire(type, o.id, o, o._version ?? null, 'console', supprime); garderVersion(o, v); mesEcritures.add(`${o.id}:${v}`); return true; }
+    catch (err) { problemes.push(`${type} ${String(o.nom || o.libelle || o.id).trim()} : ${err.conflit ? 'modifié ailleurs entre-temps' : err.message}`); return false; }
+  };
+  // Copie fidèle de la valeur en base (pas de la valeur retravaillée en mémoire), avec sa version
+  const vers = (o) => { const c = JSON.parse(JSON.stringify(o._base ?? o)); garderVersion(c, o._version ?? null); return c; };
+  const nouvelId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  // 1) fiche gardée
+  const nc = vers(cible);
+  for (const sa of sources) {
+    const s = sa._base ?? sa;
+    const dejaLa = new Set((nc.variantes || []).map((v) => v.id));
+    nc.variantes = [...(nc.variantes || []), ...(s.variantes || []).filter((v) => !dejaLa.has(v.id))];
+    nc.codes = [...new Set([...(nc.codes || []), ...(s.codes || [])])];
+    const liens = [...(nc.liens || [])];
+    for (const li of s.liens || []) if (!liens.some((x) => x.id === li.id)) liens.push(li);
+    if (liens.length) nc.liens = liens;
+    if (s.local) nc.local = true;
+    if (!nc.imageUrl && s.imageUrl) nc.imageUrl = s.imageUrl;
+  }
+  if (!(await ecrire('article', nc))) {
+    etatSynchro('erreur', 'Fusion non faite');
+    modale('Fusion non faite', `<p>La fiche gardée n'a pas pu être enregistrée. Rien n'a été changé.</p><ul>${problemes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul><p class="muet">Recharge la page puis réessaie.</p>`, [['Fermer', 'fermer']]);
+    return;
+  }
+  // 2) prix : copie sur la fiche gardée, original annulé (jamais modifié ni effacé)
+  let nPrix = 0;
+  const lot = nouvelId('fu');
+  for (const p of (E.prix || []).filter((x) => ids.has(x.articleId) && !x.annule)) {
+    const c = vers(p);
+    c.id = nouvelId('pf'); c.articleId = cibleId; c.copieDe = p.id; c.fusion = lot; delete c.annule;
+    garderVersion(c, null);
+    if (!(await ecrire('prix', c))) continue;
+    const orig = vers(p);
+    Object.assign(orig, { annule: true, annuleRaison: 'fusion', remplacePar: c.id });
+    if (await ecrire('prix', orig)) nPrix++;
+  }
+  // 3) références : liste (doublons non cochés additionnés), recettes, reçus, photos, relevés
+  let principale = (E.liste || []).find((l) => l.articleId === cibleId && !l.coche) || null;
+  let ajout = 0;
+  for (const l of (E.liste || []).filter((x) => ids.has(x.articleId))) {
+    if (!l.coche && principale) { if (await ecrire('liste', vers(l), true)) ajout += Number(l.quantite) || 1; continue; }
+    const c = vers(l); c.articleId = cibleId;
+    if (await ecrire('liste', c) && !c.coche) principale = c;
+  }
+  if (ajout && principale) { const c = vers(principale); c.quantite = (Number(c.quantite) || 1) + ajout; await ecrire('liste', c); }
+  for (const r of (E.recettes || []).filter((x) => (x.ingredients || []).some((i) => ids.has(i.articleId)))) {
+    const c = vers(r); for (const i of c.ingredients || []) if (ids.has(i.articleId)) i.articleId = cibleId; await ecrire('recette', c);
+  }
+  for (const r of (E.recus || []).filter((x) => (x.lignes || []).some((l) => ids.has(l.articleId)))) {
+    const c = vers(r); for (const l of c.lignes || []) if (ids.has(l.articleId)) l.articleId = cibleId; await ecrire('recu', c);
+  }
+  for (const [type, coll] of [['photo', 'photos'], ['releve', 'releves']]) {
+    for (const o of (E[coll] || []).filter((x) => ids.has(x.articleId))) { const c = vers(o); c.articleId = cibleId; await ecrire(type, c); }
+  }
+  // 4) fiches retirées (suppression douce, restaurables)
+  let nRetirees = 0;
+  for (const sa of sources) { const c = vers(sa); c.fusionneDans = cibleId; if (await ecrire('article', c, true)) nRetirees++; }
+  // Relecture complète : la console repart de ce que la base contient vraiment
+  try {
+    const lignes = await source.chargerObjets();
+    E = construireEtat(lignes, source.membres);
+    histoBase = await source.chargerHistorique();
+  } catch (err) { problemes.push(`relecture : ${err.message}`); }
+  for (const id of ids) ui.selection.delete(id);
+  reanalyser(); ui.comparer = []; ouvrirArticle(cibleId); aller('catalogue'); barreSelection();
+  if (problemes.length) {
+    etatSynchro('erreur', `Fusion incomplète · ${problemes.length} élément(s)`);
+    modale('Fusion incomplète', `<p>${nRetirees} fiche(s) retirée(s), ${nPrix} prix recopié(s). Pas fait :</p><ul>${problemes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul><p class="muet">Tu peux relancer la même fusion : ce qui est déjà fait n'est pas refait.</p>`, [['Fermer', 'fermer']]);
+  } else {
+    etatSynchro('ok', `Fusionné · ${heure(new Date().toISOString())}`);
+    note(`${nRetirees} fiche(s) fusionnée(s) dans « ${nomCourt(ARTS.get(cibleId))} » · ${nPrix} prix recopié(s)`);
+  }
+}
+
 function annulerFusion(h) {
   if (!h?.instantane) return;
   if (historique[0] !== h) { note('Annulation impossible : d\'autres modifications ont suivi. (En phase 4 : restauration depuis l\'historique de la base.)'); return; }
