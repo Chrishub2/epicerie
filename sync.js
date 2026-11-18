@@ -17,7 +17,7 @@ import { envoyerParPaquets } from './envoi.js';
 const COLLECTIONS = {
   article: 'articles', liste: 'liste', prix: 'prix', magasin: 'magasins', rayon: 'rayons',
   recette: 'recettes', livre: 'livres', carte: 'cartes', point: 'points', rabais: 'rabaisPerso',
-  photo: 'photos', recu: 'recus', releve: 'releves', cp: 'codesPostaux',
+  photo: 'photos', recu: 'recus', releve: 'releves', cp: 'codesPostaux', alerte: 'alertes',
 };
 const cleDe = (type, o) => (type === 'cp' ? o.code : o.id);
 // Réglages partagés du foyer (un seul objet)
@@ -143,7 +143,7 @@ export async function deconnecter() {
 export async function creerFoyer(nomFoyer, prenom, garderDonnees) {
   if (!garderDonnees) {
     S.maj((e) => {
-      for (const c of ['articles', 'liste', 'prix', 'recettes', 'livres', 'cartes', 'points', 'photos', 'recus', 'releves']) e[c] = [];
+      for (const c of ['articles', 'liste', 'prix', 'recettes', 'livres', 'cartes', 'points', 'photos', 'recus', 'releves', 'alertes']) e[c] = [];
       e.fileAttente = [];
     });
   }

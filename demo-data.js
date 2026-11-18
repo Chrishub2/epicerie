@@ -129,6 +129,7 @@ export function etatDemo() {
     version: 4,
     codesPostaux: CODES_POSTAUX_REELS.map((c) => ({ ...c })),
     alertesMasquees: [],
+    alertes: [],   // alertes synchronisées (ex. agent d'envoi des circulaires) : { id, type, titre, message, cree_le, lue }
     magasins,
     rayons,
     ordreRayons: {},

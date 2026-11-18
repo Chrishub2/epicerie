@@ -6,6 +6,7 @@
 // Aucune écriture directe : envoi, décisions et annulations passent par les fonctions de la base
 // (envoyer_lot, decider_offre, annuler_offre, annuler_lot) — mêmes règles pour le téléphone et la console.
 // =====================================================================
+import { couverture, tableauHtml, jourQuebec } from './couverture-circulaires.js';
 
 /** Sources de circulaires (même liste que le serveur : supabase/functions/lire-circulaires/rapprochement.js). */
 export const SOURCES_CIRC = [
@@ -47,6 +48,20 @@ export async function compterAValider(sb, foyer) {
   if (!sb || !foyer) return 0;
   const { count } = await sb.from('offres_circulaires').select('id', { count: 'exact', head: true }).eq('foyer_id', foyer).eq('statut', 'a_valider');
   return count || 0;
+}
+
+/** Offres de circulaires encore utiles (fin ≥ hier, heure du Québec) : lignes { source, debut, fin }, par pages de 1 000. */
+async function offresDates(sb, foyer) {
+  const [a, m, j] = jourQuebec().split('-').map(Number);
+  const hier = new Date(Date.UTC(a, m - 1, j - 1)).toISOString().slice(0, 10);
+  const out = [];
+  for (let debut = 0; ; debut += 1000) {
+    const { data, error } = await sb.from('offres_circulaires').select('source,debut,fin').eq('foyer_id', foyer)
+      .not('debut', 'is', null).gte('fin', hier).order('id').range(debut, debut + 999);
+    if (error) throw new Error(error.message);
+    out.push(...(data || []));
+    if (!data || data.length < 1000) return out;
+  }
 }
 
 async function brouillon(sb, foyer) {
@@ -170,6 +185,13 @@ const CSS = `
 .circ .c-tableau { overflow-x: auto; }
 .circ .c-confirmer { border: 1px solid var(--c-erreur); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
 .circ input[type=checkbox] { width: 18px; height: 18px; flex: none; }
+.circ .c-couv summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.circ .c-couv .cv-table { max-width: 420px; margin-top: 6px; }
+.circ .c-couv th { text-align: left; font-weight: 600; padding: 4px; color: var(--c-doux); }
+.circ .c-couv th + th, .circ .c-couv td + td { text-align: center; }
+.circ .c-couv td { padding: 4px; }
+.circ .c-couv .cv-oui { color: var(--c-accent); font-weight: 700; cursor: help; }
+.circ .c-couv .cv-non { color: var(--c-doux); }
 `;
 
 /** Petit message en bas de l'écran (console : l'app a déjà le sien). */
@@ -195,7 +217,7 @@ export function monterCirculaires(conteneur, opts) {
   const { sb, foyer, hote = 'app', source = 'telephone' } = opts;
   const message = opts.message || toastSimple;
   const articles = () => (opts.articles?.() || []).filter((a) => !a.supprime);
-  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '' };
+  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true };
   conteneur.innerHTML = `<div class="circ" data-hote="${hote}"><p class="c-doux">Chargement des circulaires…</p></div>`;
   const racine = conteneur.firstElementChild;
   if (!sb || !foyer) {
@@ -207,11 +229,13 @@ export function monterCirculaires(conteneur, opts) {
   async function charger() {
     try {
       etat.lot = await brouillon(sb, foyer);
-      const [pages, lots, aval] = await Promise.all([
+      const [pages, lots, aval, dates] = await Promise.all([
         sb.from('pages_circulaires').select('*').eq('lot_id', etat.lot.id).order('source').order('circulaire').order('ordre'),
         sb.from('lots_circulaires').select('*').eq('foyer_id', foyer).neq('statut', 'brouillon').order('cree_le', { ascending: false }).limit(6),
         sb.from('offres_circulaires').select('*').eq('foyer_id', foyer).eq('statut', 'a_valider').order('cree_le').limit(300),
+        offresDates(sb, foyer).catch(() => null),   // couverture : facultative, n'empêche pas le reste
       ]);
+      etat.offresDates = dates;
       etat.pages = pages.data || [];
       etat.lots = lots.data || [];
       etat.aValider = aval.data || [];
@@ -253,12 +277,20 @@ export function monterCirculaires(conteneur, opts) {
         <p class="c-doux">Charge tes captures d'écran, PDF ou photos de circulaires, bannière par bannière, puis touche <b>Envoyer</b>.
           Le brouillon est partagé : tu peux commencer sur le téléphone et finir à l'ordinateur. « auto » : la bannière a aussi des prix automatiques (épiceries.ca).</p>
         ${etat.occupe ? `<p class="c-doux">⏳ ${esc(etat.occupe)}</p>` : ''}
+        ${blocCouverture()}
         <div class="c-sources">${SOURCES_CIRC.map(carteSource).join('')}</div>
       </div>
       ${blocAValider()}
       ${blocLots()}
       ${blocAutres()}`;
     brancher();
+  }
+
+  /** Tableau courante / suivante (✓ : la circulaire est dans ta base ; la bulle donne les dates et le nombre de rabais). */
+  function blocCouverture() {
+    if (!etat.offresDates) return '';
+    return `<details class="c-couv" ${etat.couvOuverte ? 'open' : ''}><summary>Couverture : courante / suivante</summary>
+      ${tableauHtml(couverture(etat.offresDates, SOURCES_CIRC, jourQuebec()))}</details>`;
   }
 
   function carteSource(s) {
@@ -354,6 +386,7 @@ export function monterCirculaires(conteneur, opts) {
 
   // --- Actions ---------------------------------------------------------
   function brancher() {
+    racine.querySelector('.c-couv')?.addEventListener('toggle', (ev) => { etat.couvOuverte = ev.currentTarget.open; });
     racine.querySelectorAll('[data-charger]').forEach((inp) => inp.onchange = () => charger_(inp.dataset.charger, Number(inp.dataset.circ), [...inp.files]));
     racine.querySelectorAll('[data-retirer]').forEach((b) => b.onclick = () => retirer(b.dataset.retirer));
     racine.querySelectorAll('[data-autre]').forEach((b) => b.onclick = () => {

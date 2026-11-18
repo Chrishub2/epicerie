@@ -212,6 +212,10 @@ function alertesListe() {
     else if (j < 0) out.push({ cle: `rpexp:${r.id}:${r.expiration}`, classe: 'rouge', action, html: `Le rabais ${esc(mag?.nom || '')} est expiré.` });
     else if (j <= 7) out.push({ cle: `rp7:${r.id}:${r.expiration}`, classe: 'ambre', action, html: `📅 Rabais ${esc(mag?.nom || '')} (${esc(r.description)}) : expire dans ${j} j.` });
   }
+  // Alertes synchronisées (ex. circulaires envoyées en retard par l'agent) : OK → lue sur tous les appareils
+  for (const a of (e.alertes || []).filter((x) => !x.lue)) {
+    out.push({ cle: `alerte:${a.id}`, classe: 'rouge', action: `alerte:${a.id}`, html: `📰 <b>${esc(a.titre)}</b> — ${esc(a.message)} <u>OK</u>` });
+  }
   const attente = nbEnAttente();
   if (attente) out.push({ cle: `attente:${attente}`, classe: 'ambre', action: 'attente', html: `⏳ ${attente} photo(s) en attente de lecture (réseau). Tire l'écran vers le bas ou touche ici pour réessayer.` });
   return out.filter((x) => !masquees.has(x.cle)).map((x) =>
@@ -223,6 +227,10 @@ function alertesListe() {
 function agir(action) {
   const [type, id, extra] = action.split(':');
   if (type === 'attente') { toast('Nouvel essai…'); traiterFile().then(() => rendre()); return; }
+  if (type === 'alerte') {
+    S.maj((e) => { const a = (e.alertes || []).find((x) => x.id === id); if (a) a.lue = true; });
+    rendre(); return;
+  }
   if (type === 'fiche') ficheArticle(id, extra);
   if (type === 'rabais') {
     allerOnglet('plus', { section: 'rabais' });
