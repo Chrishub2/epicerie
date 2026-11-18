@@ -35,7 +35,7 @@ export function vuePlus(v) {
   const e = S.get();
   const st = Sync.etatSync();
   const menu = [
-    ['circulaires', '📰', 'Circulaires de la semaine', 'Charge tes captures par bannière, puis envoie : les rabais sont lus pour toi'],
+    ['circulaires', '📰', 'Circulaires de la semaine', 'Charge tes captures par bannière, puis envoie : Claude les lit sur le PC quand tu le lui demandes'],
     ['foyer', '👪', 'Mon foyer et partage', st.foyer ? `Partagé · ${st.membres.length} membre(s)` : st.connecte ? 'Connecté — crée ou joins ton foyer' : 'Connecte-toi pour partager la liste et activer l\'IA'],
     ['releve', '🏷️', 'Relevé de prix en magasin', 'Photographie des étiquettes pour ton inventaire de prix, sans rien acheter'],
     ['recus', '🧾', 'Mes reçus', `${(e.recus || []).length} reçu(s) · prends-les en photo après l'épicerie`],

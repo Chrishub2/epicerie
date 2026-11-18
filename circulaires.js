@@ -1,8 +1,9 @@
 // =====================================================================
 // Circulaires de la semaine (app v55) — même écran dans l'app (Plus → Circulaires) et dans la console.
 // Chris charge ses captures (images ou PDF) par bannière dans un BROUILLON partagé du foyer,
-// puis touche « Envoyer ». Le serveur (fonction lire-circulaires) lit, relie et écrit les rabais sûrs ;
-// les douteux reviennent ici, « À valider ». Spec : journal/SPEC-circulaires.md
+// puis touche « Envoyer ». Le lot passe « en attente de lecture » : la lecture se fait sur le PC, quand Chris
+// dit « lis mes circulaires » à Claude (abonnement, 0 $ d'API) ; les rabais sûrs sont écrits, les douteux
+// reviennent ici, « À valider ». Spec : journal/SPEC-circulaires.md, journal/SPEC-lecture-claude-code.md
 // Aucune écriture directe : envoi, décisions et annulations passent par les fonctions de la base
 // (envoyer_lot, decider_offre, annuler_offre, annuler_lot) — mêmes règles pour le téléphone et la console.
 // =====================================================================
@@ -332,7 +333,7 @@ export function monterCirculaires(conteneur, opts) {
         <div class="c-rang"><h2 class="c-grandir">📰 Circulaires de la semaine</h2>
           <button class="c-btn p" data-envoyer ${n && !etat.occupe ? '' : 'disabled'}>Envoyer ${n ? `(${n} page${n > 1 ? 's' : ''})` : ''}</button></div>
         <p class="c-doux">Charge tes captures d'écran, PDF ou photos de circulaires, bannière par bannière, puis touche <b>Envoyer</b>.
-          Le brouillon est partagé : tu peux commencer sur le téléphone et finir à l'ordinateur. « auto » : la bannière a aussi des prix automatiques (épiceries.ca).</p>
+          La lecture se fait quand tu le demandes à Claude sur le PC (« lis mes circulaires »). Le brouillon est partagé : tu peux commencer sur le téléphone et finir à l'ordinateur. « auto » : la bannière a aussi des prix automatiques (épiceries.ca).</p>
         ${etat.occupe ? `<p class="c-doux">⏳ ${esc(etat.occupe)}</p>` : ''}
         ${blocCouverture()}
         <div class="c-sources">${SOURCES_CIRC.map(carteSource).join('')}</div>
@@ -551,10 +552,10 @@ export function monterCirculaires(conteneur, opts) {
 
   async function envoyer() {
     etat.occupe = 'Envoi…'; rendre();
-    const { data, error } = await sb.rpc('envoyer_lot', { p_lot: etat.lot.id });
+    const { data, error } = await sb.rpc('envoyer_lot', { p_lot: etat.lot.id, p_attendre: true });
     etat.occupe = '';
     if (error) { message(`Envoi refusé : ${error.message}`); rendre(); return; }
-    message(`Envoyé : ${data} page(s). La lecture continue même si tu fermes l'app.`);
+    message(`Envoyé : ${data} page(s). Elles seront lues quand tu diras « lis mes circulaires » à Claude sur le PC.`);
     etat.pages = []; etat.urls.clear();
     Object.keys(etat).filter((k) => k.startsWith('plus_')).forEach((k) => delete etat[k]);
     await charger();
