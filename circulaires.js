@@ -41,6 +41,36 @@ const heure = (iso) => (iso ? new Date(iso).toLocaleTimeString('fr-CA', { hour: 
 const argent = (x) => `${Number(x || 0).toFixed(2).replace('.', ',')} $`;
 const nomSource = (id) => SOURCE[id]?.nom || id;
 
+/** Nom lisible d'une bannière (la première source qui la porte : maxi → « Maxi »). */
+export function nomBanniere(b) {
+  return SOURCES_CIRC.find((s) => s.banniere === b)?.nom || b;
+}
+
+/**
+ * Liens appris à confirmer (spec : journal/SPEC-apprentissage-liens.md, § 3).
+ * appris : lignes de appris_circulaires ; offres : { banniere, nom_cle, nom, cree_le } ; articles : catalogue.
+ * Garde origine 'auto', confirme null, decision 'lien' ; nom = dernier rabais de ce nom_cle et bannière, sinon nom_cle.
+ * Rend [{ banniere, nom_cle, article_id, format, nom, banniereNom, produit, libelle }], les plus récents d'abord.
+ */
+export function liensAConfirmer(appris, offres, articles) {
+  const dernier = new Map();
+  for (const o of offres || []) {
+    const k = `${o.banniere}|${o.nom_cle}`, d = dernier.get(k);
+    if (o.nom && (!d || String(o.cree_le || '') > String(d.cree_le || ''))) dernier.set(k, o);
+  }
+  const parId = new Map((articles || []).map((a) => [a.id, a]));
+  return (appris || [])
+    .filter((l) => l.origine === 'auto' && l.confirme === null && l.decision === 'lien')
+    .sort((a, b) => String(b.maj || '').localeCompare(String(a.maj || '')))
+    .map((l) => {
+      const nom = dernier.get(`${l.banniere}|${l.nom_cle}`)?.nom || l.nom_cle;
+      const banniereNom = nomBanniere(l.banniere);
+      const produit = parId.get(l.article_id)?.nom || `produit introuvable (${l.article_id})`;
+      const libelle = `${nom} (${banniereNom}) → ${produit}${l.format ? ` · ${l.format}` : ''}`;
+      return { banniere: l.banniere, nom_cle: l.nom_cle, article_id: l.article_id, format: l.format || null, nom, banniereNom, produit, libelle };
+    });
+}
+
 // ---------------------------------------------------------------------
 // Données (Supabase) — utilisables par l'app et la console
 // ---------------------------------------------------------------------
@@ -186,6 +216,10 @@ const CSS = `
 .circ .c-confirmer { border: 1px solid var(--c-erreur); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
 .circ input[type=checkbox] { width: 18px; height: 18px; flex: none; }
 .circ .c-couv summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.circ .c-liens summary { cursor: pointer; }
+.circ .c-liens summary h2 { display: inline; }
+.circ .c-lien { padding-top: 8px; border-top: 1px solid var(--c-trait); }
+.circ .c-lien .c-btn { min-width: 40px; }
 .circ .c-couv .cv-table { max-width: 420px; margin-top: 6px; }
 .circ .c-couv th { text-align: left; font-weight: 600; padding: 4px; color: var(--c-doux); }
 .circ .c-couv th + th, .circ .c-couv td + td { text-align: center; }
@@ -217,7 +251,7 @@ export function monterCirculaires(conteneur, opts) {
   const { sb, foyer, hote = 'app', source = 'telephone' } = opts;
   const message = opts.message || toastSimple;
   const articles = () => (opts.articles?.() || []).filter((a) => !a.supprime);
-  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true };
+  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true, liens: null, liensOuverts: true };
   conteneur.innerHTML = `<div class="circ" data-hote="${hote}"><p class="c-doux">Chargement des circulaires…</p></div>`;
   const racine = conteneur.firstElementChild;
   if (!sb || !foyer) {
@@ -236,6 +270,7 @@ export function monterCirculaires(conteneur, opts) {
         offresDates(sb, foyer).catch(() => null),   // couverture : facultative, n'empêche pas le reste
       ]);
       etat.offresDates = dates;
+      etat.liens = await chargerLiens();
       etat.pages = pages.data || [];
       etat.lots = lots.data || [];
       etat.aValider = aval.data || [];
@@ -251,6 +286,23 @@ export function monterCirculaires(conteneur, opts) {
     } catch (err) { message(`Circulaires : ${err.message}`); }
     if (!arrete) rendre();
     planifier();
+  }
+
+  /** Liens appris à confirmer. null si la requête échoue (ex. colonnes origine/confirme pas encore créées) : la section ne s'affiche pas. */
+  async function chargerLiens() {
+    try {
+      const { data, error } = await sb.from('appris_circulaires').select('banniere,nom_cle,article_id,decision,format,n,maj,origine,confirme')
+        .eq('foyer_id', foyer).eq('origine', 'auto').is('confirme', null).eq('decision', 'lien').order('maj', { ascending: false }).limit(300);
+      if (error || !data) return null;
+      let offres = [];
+      const cles = [...new Set(data.map((l) => l.nom_cle))];
+      if (cles.length) {
+        const r = await sb.from('offres_circulaires').select('banniere,nom_cle,nom,cree_le').eq('foyer_id', foyer).in('nom_cle', cles)
+          .order('cree_le', { ascending: false }).limit(1000);
+        offres = r.data || [];   // facultatif : sinon, on montre le nom_cle
+      }
+      return liensAConfirmer(data, offres, opts.articles?.() || []);
+    } catch { return null; }
   }
 
   async function vignettes() {
@@ -281,6 +333,7 @@ export function monterCirculaires(conteneur, opts) {
         <div class="c-sources">${SOURCES_CIRC.map(carteSource).join('')}</div>
       </div>
       ${blocAValider()}
+      ${blocLiens()}
       ${blocLots()}
       ${blocAutres()}`;
     brancher();
@@ -353,6 +406,19 @@ export function monterCirculaires(conteneur, opts) {
     </div>`;
   }
 
+  /** Liens appris tout seuls par la lecture : déjà utilisés, Chris les confirme (✓) ou les défait pour l'avenir (✗). */
+  function blocLiens() {
+    if (!etat.liens?.length) return '';
+    return `<details class="c-bloc c-liens" ${etat.liensOuverts ? 'open' : ''}><summary><h2>🧠 Liens appris à confirmer (${etat.liens.length})</h2></summary>
+      <p class="c-doux">La lecture a appris ces liens toute seule et s'en sert déjà. ✓ : c'est bien ce produit. ✗ : je défais le lien pour l'avenir (les prix déjà écrits restent).</p>
+      ${etat.liens.map((l) => `<div class="c-rang c-lien" data-banniere="${esc(l.banniere)}" data-nom-cle="${esc(l.nom_cle)}" data-article="${esc(l.article_id)}">
+        <span class="c-grandir">${esc(l.libelle)}</span>
+        <button type="button" class="c-btn p" data-confirmer-lien="1" aria-label="Confirmer le lien" title="Confirmer le lien">✓</button>
+        <button type="button" class="c-btn d" data-confirmer-lien="0" aria-label="Refuser le lien (les prix déjà écrits restent)" title="Refuser le lien (les prix déjà écrits restent)">✗</button>
+      </div>`).join('')}
+    </details>`;
+  }
+
   function blocLots() {
     if (!etat.lots.length) return '';
     return `<div class="c-bloc"><h2>Envois récents</h2>${etat.lots.map((l) => {
@@ -387,6 +453,8 @@ export function monterCirculaires(conteneur, opts) {
   // --- Actions ---------------------------------------------------------
   function brancher() {
     racine.querySelector('.c-couv')?.addEventListener('toggle', (ev) => { etat.couvOuverte = ev.currentTarget.open; });
+    racine.querySelector('.c-liens')?.addEventListener('toggle', (ev) => { etat.liensOuverts = ev.currentTarget.open; });
+    racine.querySelectorAll('[data-confirmer-lien]').forEach((b) => b.onclick = () => confirmerLien(b.closest('.c-lien'), b.dataset.confirmerLien === '1'));
     racine.querySelectorAll('[data-charger]').forEach((inp) => inp.onchange = () => charger_(inp.dataset.charger, Number(inp.dataset.circ), [...inp.files]));
     racine.querySelectorAll('[data-retirer]').forEach((b) => b.onclick = () => retirer(b.dataset.retirer));
     racine.querySelectorAll('[data-autre]').forEach((b) => b.onclick = () => {
@@ -497,6 +565,16 @@ export function monterCirculaires(conteneur, opts) {
     etat.aValider = etat.aValider.filter((o) => o.id !== id);
     if (!silencieux) { message({ valider: 'Rabais enregistré', refuser: 'Noté : ce n\'est pas ce produit', ignorer: 'Ignoré' }[decision]); rendre(); opts.apresChangement?.(); }
     return true;
+  }
+
+  async function confirmerLien(ligne, ok) {
+    const { banniere, nomCle, article } = ligne.dataset;
+    ligne.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    const { error } = await sb.rpc('confirmer_lien', { p_banniere: banniere, p_nom_cle: nomCle, p_article: article, p_ok: ok });
+    if (error) { message(`Refusé : ${error.message}`); ligne.querySelectorAll('button').forEach((b) => { b.disabled = false; }); return; }
+    etat.liens = (etat.liens || []).filter((l) => !(l.banniere === banniere && l.nom_cle === nomCle && l.article_id === article));
+    message(ok ? 'Lien confirmé' : 'Lien défait pour l\'avenir (les prix déjà écrits restent)');
+    rendre(); opts.apresChangement?.();
   }
 
   async function validerSelection() {
