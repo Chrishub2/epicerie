@@ -8,7 +8,7 @@ import { BANNIERES } from './demo-data.js';
 import { analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
-import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve } from './plus.js';
+import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
@@ -18,7 +18,7 @@ import { surveillerMisesAJour } from './maj.js';
 surveillerMisesAJour(); // « Mise à jour disponible — Oui / Non »
 import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle, remplacerArticle } from './manuscrit.js';
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
-import { htmlVerdictListe, htmlDernierAchat } from './recu.js';
+import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { compterAValider } from './circulaires.js';
 
@@ -829,6 +829,7 @@ export function ficheArticle(articleId, ligneId) {
       ? `<div class="alerte ambre" style="margin-bottom:10px">À compléter (${c.ok}/${c.total}) : ${c.manquants.map((m) => `${m.icone} ${esc(m.texte)}`).join(' · ')}${c.alertes.map((t) => `<br>⚠️ ${esc(t)}`).join('')}</div>` : ''; })()}
     ${htmlDernierAchat(l?.recu?.absent ? null : (l?.recu || a.dernierAchat), a.id)}
     ${l?.recu?.absent ? `<div class="alerte" style="margin-bottom:10px">🧾 Ce produit n'est pas sur la facture du ${esc(l.recu.date || '')}${l.recu.banniere ? ` (${esc(nomBanniere(l.recu.banniere))})` : ''}.</div>` : ''}
+    ${htmlAchats(a.id)}
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a, { avecManquants: true })}
     <div class="carte" style="margin-top:8px;background:var(--gris-fond)">
@@ -959,6 +960,8 @@ export function ficheArticle(articleId, ligneId) {
       fermerModale(); toast('Enregistré');
     };
     $('#fPhoto', c).onclick = () => photoProduit(a.id);
+    // Mes achats : toucher un achat ouvre son reçu
+    $$('[data-achat-recu]', c).forEach((li) => { li.onclick = () => ouvrirDetailRecu(li.dataset.achatRecu); });
     // Scan pour CET article : remplit nom, marque, format, catégorie, photo, code et vrais prix
     $('#fScan', c).onclick = () => ouvrirScan((trouve) => {
       if (trouve && trouve.id !== a.id && ligneId) {

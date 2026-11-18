@@ -11,7 +11,8 @@ import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normalis
 import * as P from './produits.js';
 import { BANNIERES } from './demo-data.js';
 import { analyserPlu, infosPlu } from './plu.js';
-import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes, reporterAssociations, etatLigne } from './lignes-recu.js';
+import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes, reporterAssociations, etatLigne,
+  texteFiche, indexBase, chercherDansBase, achatsDuProduit, resumeAchats } from './lignes-recu.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -257,7 +258,7 @@ export function htmlLigne(r, i) {
     l.rabais ? (mode === 'net' ? `Économie ${argent(l.rabais)} (déjà déduite)` : `Rabais −${argent(l.rabais)}`) : '',
     cons ? `+ consigne ${argent(cons)}` : '',
   ].filter(Boolean);
-  const v = a?.dernierAchat?.recuId === r.id ? a.dernierAchat : null;
+  const v = l.verdict || (a?.dernierAchat?.recuId === r.id ? a.dernierAchat : null);
   const etat = etatLigne(l);
   return `<div>${morceaux.join('<br>')}</div>
     ${a ? `<div style="margin-top:4px">${etat === 'ok' ? '✓ Associé' : '! Associé (à vérifier)'} à <b>${esc(a.nom)}</b>${a.marque ? ` · ${esc(a.marque)}` : ''}</div>`
@@ -313,6 +314,10 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   const anciens = new Set((e.prix || []).filter((p) => p.recuId === recuId && !p.annule).map((p) => p.id));
   const gardes = new Set();
   const { infosCode } = await import('./scan.js');
+  // Ta base, prête pour la recherche : fiches + noms des produits vus dans les prix (épiceries.ca, circulaires…)
+  const nomsPrix = new Map();
+  (e.prix || []).forEach((p) => { if (p.nomProduit && !p.annule) (nomsPrix.get(p.articleId) || nomsPrix.set(p.articleId, new Set()).get(p.articleId)).add(p.nomProduit); });
+  const base = indexBase(e.articles.map((a) => ({ id: a.id, nom: a.nom, texte: texteFiche(a, [...(nomsPrix.get(a.id) || [])]) })));
 
   for (const [i, l] of (r.lignes || []).entries()) {
     etat(`Produit ${i + 1}/${r.lignes.length}…`);
@@ -330,7 +335,11 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     // ⓪ association faite à la main (prioritaire)
     let a = l.manuel && l.articleId && etatNow.articles.find((x) => x.id === l.articleId);
     let v = null; // variante exacte (marque + format), quand elle est certaine
-    if (l.manuel && !l.articleId) { bilan.nonRelies++; continue; } // « aucun » choisi à la main
+    if (l.manuel && !l.articleId) { // « aucun produit » choisi à la main : ce nom de reçu ne doit plus rien relier
+      bilan.nonRelies++;
+      S.maj((x) => P.retenirAlias(x, null, null, r.banniere, l.libelle));
+      continue;
+    }
     // Source du lien (écran du reçu : ✓ sûr pour manuel / code / plu / alias, ! à vérifier pour liste / nom)
     let lien = a ? 'manuel' : null;
     const source = (s) => { if (a && !lien) lien = s; };
@@ -346,9 +355,12 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     if (!a) a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
       && etatNow.liste.some((li) => li.articleId === x.id));
     source('liste');
+    // ③b ta base : nom en clair + marque comparés à tout ce qu'elle sait des fiches (à vérifier)
+    if (!a) { const t = chercherDansBase(l, base); if (t) a = etatNow.articles.find((x) => x.id === t.id) || null; }
+    source('base');
     // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
     // (lien deviné : on ne l'apprend pas comme nom de reçu, pour ne pas répéter une erreur)
-    let devine = lien === 'liste';
+    let devine = lien === 'liste' || lien === 'base';
     if (!a && pluL) { a = parNom(`${pluL.produit} ${pluL.variete}`, etatNow); devine = !!a; } // nom officiel du PLU
     if (!a) { a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow); devine = !!a; }
     source('nom');
@@ -365,7 +377,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       bilan.nonRelies++;
       S.maj((x) => {
         const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
-        if (ln) { ln.articleId = null; delete ln.varianteId; delete ln.lien; } // plus de lien (ancien lien périmé effacé)
+        if (ln) { ln.articleId = null; delete ln.varianteId; delete ln.lien; delete ln.verdict; } // plus de lien (ancien lien périmé effacé)
         if (ln && info) Object.assign(ln, { nomEnLigne: info.nom || null, imageUrl: info.image || null, formatEnLigne: info.format || null });
         if (ln && pluL && !ln.nomEnLigne) ln.nomEnLigne = pluL.nom; // le nom officiel aide à l'associer à la main
       });
@@ -432,7 +444,10 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       x.liste.filter((y) => y.articleId === ar.id && lignesListe.has(y.id)).forEach((y) => { y.recu = verdict; });
       ar.dernierAchat = verdict;
       const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
-      if (ln) { ln.articleId = ar.id; ln.lien = lien; if (va) ln.varianteId = va.id; }
+      if (ln) {
+        ln.articleId = ar.id; ln.lien = lien; if (va) ln.varianteId = va.id;
+        ln.verdict = { statut: verdict.statut, paye: verdict.paye ?? null, attendu: verdict.attendu ?? null, unite: verdict.unite || '' };
+      }
     });
     if (offre && r.banniere) bilan.prix++;
     if (coche) bilan.coches++;
@@ -536,6 +551,22 @@ function htmlPreuve(v, articleId) {
   return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--ligne)"><b>🔎 Preuve du prix affiché</b>${morceaux.join('')}</div>`;
 }
 
+/** Fiche produit : « Mes achats », chaque achat avec sa date, son magasin, sa quantité et son prix payé (touche → son reçu). */
+export function htmlAchats(articleId) {
+  const achats = achatsDuProduit(S.get().recus || [], articleId);
+  if (!achats.length) return '';
+  const s = resumeAchats(achats);
+  const annee = new Date().getFullYear();
+  const quand = (d) => (d ? new Date(`${d}T12:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short', ...(Number(d.slice(0, 4)) !== annee ? { year: 'numeric' } : {}) }) : '?');
+  const lignes = achats.map((a) => `<li class="rc-l ${a.sur ? 'ok' : 'verifier'}" data-achat-recu="${esc(a.recuId)}">
+      <span class="rc-et ${a.sur ? 'ok' : 'ver'}">${a.sur ? '✓' : '!'}</span>
+      <span class="rc-nom">${esc(quand(a.date))} · ${esc(a.banniere ? nomBanniere(a.banniere) : a.magasin || 'Magasin ?')} · ${a.poids ? esc(a.poids) : `×${a.quantite}`}${a.prixUnitaire && (a.poids || a.quantite > 1) ? ` · ${esc(a.prixUnitaire)}` : ''}${a.verdict?.statut === 'plus' ? ' ⚠️' : ''}</span>
+      <span class="rc-px">${argent(a.paye)}</span></li>`).join('');
+  return `<h3>🧾 Mes achats (${s.n})</h3>
+    <p class="doux" style="margin:0 0 4px">Total payé ${argent(s.total)} · dernier achat le ${esc(quand(s.dernier))}${s.intervalle != null ? ` · environ tous les ${s.intervalle} jours (hypothèse, n = ${s.nDates} dates)` : ''}. Touche un achat pour ouvrir son reçu.</p>
+    <ul class="rc-liste" style="margin-bottom:10px">${lignes}</ul>`;
+}
+
 /** Bloc de la fiche produit : détail du dernier achat et explication de l'écart. */
 export function htmlDernierAchat(v, articleId) {
   if (!v || v.absent) return '';
@@ -580,6 +611,7 @@ export function htmlDetail(r) {
   }).join('');
   return `${verdict}
     ${r.bilan ? `<p class="doux">${esc(texteBilan(r.bilan))}</p>` : ''}
+    ${r.applique ? `<div class="alerte ${compte.verifier || compte.aucun ? 'ambre' : 'vert'}">Reconnaissance terminée : ✓ ${compte.ok} · ! ${compte.verifier} · ✗ ${compte.aucun}${compte.verifier || compte.aucun ? ' — touche les ! et ✗ pour les confirmer ou les corriger, ou scanne les produits en main.' : ' — tout est associé.'}</div>` : ''}
     <h3>Produits (${(r.lignes || []).length}) <span class="doux" style="font-weight:400">· ✓ ${compte.ok} · ! ${compte.verifier} · ✗ ${compte.aucun}</span></h3>
     <p class="doux" style="margin:0 0 4px">Touche une ligne pour la voir ou la corriger.</p>
     ${lignes ? `<ul class="rc-liste">${lignes}</ul>` : '<p class="doux">Aucune ligne reconnue.</p>'}

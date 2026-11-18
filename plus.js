@@ -623,13 +623,12 @@ function retirerCoches() {
   return n;
 }
 
-/** Après avoir rempli la liste : propose de compléter les fiches sans photo (une à la fois), puis montre le reçu. */
-async function apresApplication(id) {
-  const R = await import('./recu.js');
-  if (navigator.onLine && (await R.aCompleter(id)).length) {
-    toast('Complétons les fiches : touche le bon produit pour chacune (ou « Plus tard »).');
-    R.completerFiches(id, () => ouvrirDetailRecu(id));
-  } else ouvrirDetailRecu(id);
+/**
+ * Après la reconnaissance automatique (codes, PLU, noms appris, liste, ta base, ressemblance) :
+ * montre directement le reçu (✓ / ! / ✗). Rien de manuel n'est imposé ; « Compléter les fiches » reste un bouton.
+ */
+function apresApplication(id) {
+  ouvrirDetailRecu(id);
 }
 
 /** Association manuelle : pour chaque ligne du reçu, choisis l'article (catalogue) ou tape un nouveau nom. */
@@ -686,7 +685,7 @@ async function enregistrerRecu(blobs, lu, lienListe = null) {
 }
 
 /** Fenêtre de détail d'un reçu : verdict, reçu entier, toutes les informations lues. */
-async function ouvrirDetailRecu(id) {
+export async function ouvrirDetailRecu(id) {
   const R = await import('./recu.js');
   const r = (S.get().recus || []).find((x) => x.id === id);
   if (!r) return;

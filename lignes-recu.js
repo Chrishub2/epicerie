@@ -120,7 +120,7 @@ export function reporterAssociations(anciennes = [], nouvelles = []) {
 }
 
 /** Liens jugés sûrs : fait à la main, code-barres, PLU, nom déjà confirmé chez cette bannière. */
-export const LIENS_SURS = ['manuel', 'code', 'plu', 'alias'];
+export const LIENS_SURS = ['manuel', 'code', 'plu', 'alias']; // « liste » (IA), « base », « nom », « ancien » : à vérifier
 
 /**
  * État d'une ligne pour l'écran du reçu :
@@ -181,6 +181,104 @@ export function choixEvident(c, lignes = []) {
 /** La ligne i et les lignes identiques du même reçu (même libellé, produit) : on les associe ensemble. */
 export const lignesIdentiques = (lignes = [], i) => lignes.map((l, j) => j)
   .filter((j) => j === i || (memeLibelle(lignes[j], lignes[i]) && etatLigne(lignes[j]) !== 'hors'));
+
+// ---------------------------------------------------------------------
+// Recherche dans ta base : tout ce qu'elle sait de chaque fiche (nom, marque, variantes,
+// noms des enseignes vus dans les prix, noms de reçus appris). Elle s'enrichit à chaque
+// prix relevé, reçu associé ou code scanné.
+// ---------------------------------------------------------------------
+const MOTS_VIDES = new Set(['avec', 'pour', 'les', 'des', 'une', 'aux', 'sans', 'and', 'the', 'sur', 'par', 'paquet', 'format', 'emballage']);
+const motsUtiles = (s) => motsDe(s).filter((m) => !MOTS_VIDES.has(m));
+const pareil = (m, t) => m.startsWith(t) || t.startsWith(m);
+
+/** Texte d'une fiche pour la recherche : nom, marque, variantes, liens, noms vus dans les prix, noms de reçus appris. */
+export function texteFiche(a, nomsPrix = []) {
+  const v = (a?.variantes || []).flatMap((x) => [x.marque, x.nom, ...(x.alias || []).map((y) => y.libelle)]);
+  return [a?.nom, a?.marque, ...v, ...(a?.liens || []).map((l) => l.nom), ...nomsPrix].filter(Boolean).join(' ');
+}
+
+/** Prépare la recherche : fiches = [{ id, nom, texte }]. Les mots rares (marques, « Love Crunch ») pèsent plus que « fromage ». */
+export function indexBase(fiches = []) {
+  const docs = fiches.map((f) => ({ id: f.id, nom: f.nom || '', mots: [...new Set(motsUtiles(f.texte))] }));
+  const df = new Map();
+  docs.forEach((d) => d.mots.forEach((m) => df.set(m, (df.get(m) || 0) + 1)));
+  return { docs, df, n: docs.length };
+}
+
+/**
+ * Fiche de ta base qui correspond à une ligne de reçu (nom en clair + marque), ou null.
+ * Retenue seulement si : score ≥ 0,75 (mots pondérés par leur rareté), au moins 2 mots retrouvés
+ * (ou tout le nom de la fiche retrouvé), la marque imprimée retrouvée, et 0,15 d'avance sur la suivante.
+ */
+export function chercherDansBase(ligne, index) {
+  if (!index?.n) return null;
+  const requete = [...new Set(motsUtiles(`${ligne?.nomClair || ligne?.libelle || ''} ${ligne?.marque || ''}`))];
+  if (!requete.length) return null;
+  const marque = motsUtiles(ligne?.marque);
+  const poids = requete.map((m) => {
+    let d = 0;
+    for (const [k, c] of index.df) if (pareil(m, k)) d = Math.max(d, c);
+    return d ? 1 + Math.log(index.n / d) : 1; // mot inconnu de ta base : ne prouve rien, pèse peu
+  });
+  const total = poids.reduce((s, x) => s + x, 0);
+  const notes = index.docs.map((d) => {
+    const trouve = requete.map((m) => d.mots.some((t) => pareil(m, t)));
+    const nb = trouve.filter(Boolean).length;
+    const score = trouve.reduce((s, ok, k) => s + (ok ? poids[k] : 0), 0) / total;
+    const nomFiche = motsUtiles(d.nom);
+    const nomRetrouve = nomFiche.length > 0 && nomFiche.every((m) => requete.some((t) => pareil(m, t)));
+    const marqueOk = !marque.length || marque.some((m) => d.mots.some((t) => pareil(m, t)));
+    return { id: d.id, score, valide: marqueOk && (nb >= 2 || nomRetrouve) };
+  }).filter((x) => x.valide && x.score > 0).sort((a, b) => b.score - a.score);
+  const [a, b] = notes;
+  if (!a || a.score < 0.75 || (b && a.score - b.score < 0.15)) return null;
+  return { id: a.id, score: Math.round(a.score * 100) / 100 };
+}
+
+// ---------------------------------------------------------------------
+// Historique d'achat d'un produit, tiré des reçus (une seule source : le reçu ; rien n'est recopié).
+// ---------------------------------------------------------------------
+/**
+ * Achats d'un produit : une entrée par ligne de reçu reliée à ce produit, la plus récente d'abord.
+ * { recuId, ligne, date, heure, banniere, magasin, transaction, libelle, varianteId, quantite, poids,
+ *   paye (montant réellement payé), prixUnitaire (« 4,99 $ » ou « 2,14 $/kg »), economie, consigne, sur, verdict }
+ */
+export function achatsDuProduit(recus = [], articleId) {
+  const out = [];
+  for (const r of recus || []) {
+    if (!r?.lignes?.length || !articleId) continue;
+    const mode = modeRabais(r);
+    const cons = consignes(r.lignes);
+    r.lignes.forEach((l, i) => {
+      if (l.articleId !== articleId || etatLigne(l) === 'hors') return;
+      const p = pesee(l);
+      out.push({
+        recuId: r.id, ligne: i, date: r.date || String(r.cree || '').slice(0, 10) || null, heure: r.heure || null,
+        banniere: r.banniere || null, magasin: r.magasin || null, transaction: r.transaction || null,
+        libelle: l.libelle, varianteId: l.varianteId || null,
+        quantite: p ? null : num(l.quantite) || 1, poids: p ? `${String(p.qte).replace('.', ',')} ${p.unite}` : null,
+        paye: Math.round(montantNet(l, mode) * 100) / 100, prixUnitaire: offreLigne(l, mode),
+        economie: num(l.rabais), consigne: cons[i] || 0, sur: etatLigne(l) === 'ok', verdict: l.verdict || null,
+      });
+    });
+  }
+  return out.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.heure || '').localeCompare(String(a.heure || '')));
+}
+
+/**
+ * Résumé des achats : nombre, total payé, dernière date, et intervalle moyen entre deux dates d'achat.
+ * L'intervalle est une hypothèse, donnée seulement avec au moins 3 dates (n affiché).
+ */
+export function resumeAchats(achats = []) {
+  const dates = [...new Set(achats.map((a) => a.date).filter(Boolean))].sort();
+  const total = Math.round(achats.reduce((s, a) => s + num(a.paye), 0) * 100) / 100;
+  let intervalle = null;
+  if (dates.length >= 3) {
+    const ecarts = dates.slice(1).map((d, k) => (Date.parse(d) - Date.parse(dates[k])) / 864e5);
+    intervalle = Math.round(ecarts.reduce((s, x) => s + x, 0) / ecarts.length);
+  }
+  return { n: achats.length, nDates: dates.length, total, dernier: dates[dates.length - 1] || null, intervalle };
+}
 
 /** Prix payé en texte d'offre : « 4,99 $ » ou « 2,14 $/kg ». null si rien de payé. */
 export function offreLigne(l, mode) {
