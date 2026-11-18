@@ -11,6 +11,7 @@ import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normalis
 import * as P from './produits.js';
 import { BANNIERES } from './demo-data.js';
 import { analyserPlu, infosPlu } from './plu.js';
+import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes } from './lignes-recu.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -55,22 +56,22 @@ export function attendusListe() {
 }
 
 /** Compare le prix payé (ligne de reçu) au prix affiché ; explique l'écart avec des règles simples + l'IA. */
-function comparerPrix(l, ar, att, r) {
-  const offre = offreLigne(l);
+function comparerPrix(l, ar, att, r, mode = modeRabais(r)) {
+  const offre = offreLigne(l, mode);
   const date = r.date || r.cree.slice(0, 10);
   const base = { recuId: r.id, date, banniere: r.banniere, offrePayee: offre, explicationIA: l.explicationPrix || null };
   if (!offre) return { ...base, statut: 'inconnu' };
   const np = normaliser(offre, ar.format, ar.uniteRef);
   let paye = null, attendu = null, unite = '';
-  if (att && l.poids && np.prixUnitaire != null) {           // produit pesé : on compare au kg
+  if (att && estPese(l) && np.prixUnitaire != null) {        // produit pesé : on compare au kg
     paye = np.prixUnitaire; attendu = att.pu; unite = att.uniteRef === 'kg' ? '/kg' : att.uniteRef === 'l' ? '/L' : '';
   } else if (att && att.prixArticle != null) {               // à l'unité : prix d'un article
-    paye = ((Number(l.prix) || 0) - (Number(l.rabais) || 0)) / (Number(l.quantite) || 1); attendu = att.prixArticle;
+    paye = prixParArticle(l, mode); attendu = att.prixArticle;
   } else if (att && np.prixUnitaire != null) {               // sinon : au kg / L / unité
     paye = np.prixUnitaire; attendu = att.pu; unite = att.uniteRef === 'kg' ? '/kg' : att.uniteRef === 'l' ? '/L' : '/unité';
   }
   if (paye == null) {
-    const p = ((Number(l.prix) || 0) - (Number(l.rabais) || 0)) / (Number(l.quantite) || 1);
+    const p = estPese(l) ? null : prixParArticle(l, mode);
     return { ...base, statut: 'inconnu', paye: p, explication: ['Aucun prix n\'était affiché dans l\'app pour comparer.'] };
   }
   const ecart = paye - attendu;
@@ -83,7 +84,7 @@ function comparerPrix(l, ar, att, r) {
     else if (att.type === 'circulaire' && statut === 'plus') raisons.push('Le prix affiché était un prix en rabais : il n\'a peut-être pas été appliqué à la caisse.');
     const fL = analyserFormat(l.format), fA = analyserFormat(ar.format);
     if (fL && fA && fL.base === fA.base && Math.abs(fL.total - fA.total) / fA.total > 0.05) raisons.push(`Format sur la facture (${formatLisible(l.format)}) différent de ta fiche (${formatLisible(ar.format)}).`);
-    if (l.rabais) raisons.push(`Un rabais de ${argent(l.rabais)} a été appliqué à la caisse.`);
+    if (l.rabais) raisons.push(`Un rabais de ${argent(l.rabais)} a été appliqué à la caisse${mode === 'net' ? ' (déjà déduit du prix imprimé)' : ''}.`);
     if (att.source === 'epiceries_ca') raisons.push('Le prix affiché vient d\'épiceries.ca (en ligne) : il peut différer de ta succursale.');
     if (att.source === 'demo') raisons.push('Le prix affiché était un prix de démonstration.');
     if (statut === 'plus' && !att.ailleurs) raisons.push('Si le prix à la caisse dépasse le prix affiché en magasin, la Politique d\'exactitude des prix s\'applique : article gratuit jusqu\'à 15 $, sinon 15 $ de rabais. Garde ton reçu.');
@@ -118,14 +119,17 @@ export function verifierRecu(r) {
   const somme = lignes.reduce((s, l) => s + (Number(l.prix) || 0), 0);
   const rabais = lignes.reduce((s, l) => s + (Number(l.rabais) || 0), 0);
   let concorde = null;
-  if (r.sousTotal != null && lignes.length) {
-    concorde = Math.abs(somme - r.sousTotal) <= ECART_MAX || Math.abs(somme - rabais - r.sousTotal) <= ECART_MAX;
-    if (!concorde) problemes.push(`La somme des produits lus (${argent(somme - rabais)}) ne correspond pas au sous-total imprimé (${argent(r.sousTotal)}) : une section manque ou une ligne est mal lue.`);
+  const cible = cibleLignes(r); // sous-total imprimé, sinon total − taxes
+  const mode = modeRabais(r);
+  if (cible != null && lignes.length) {
+    concorde = Math.abs(somme - cible) <= ECART_MAX || Math.abs(somme - rabais - cible) <= ECART_MAX;
+    if (!concorde) problemes.push(`La somme des produits lus (${argent(mode === 'net' ? somme : somme - rabais)}) ne correspond pas au ${r.sousTotal != null ? 'sous-total imprimé' : 'total moins les taxes'} (${argent(cible)}) : une section manque ou une ligne est mal lue.`);
   }
-  const nbQte = lignes.reduce((s, l) => s + (l.poids ? 1 : Number(l.quantite) || 1), 0);
+  const nbQte = lignes.reduce((s, l) => s + nbArticles(l), 0);
   const ok = !problemes.length && v.complet !== false && v.lisible !== false;
   const resume = `${lignes.length} produit(s) lu(s)${r.nombreArticles != null ? ` (le reçu en annonce ${r.nombreArticles}${Math.round(nbQte) !== r.nombreArticles ? ` ; j'en compte ${Math.round(nbQte)} avec les quantités` : ''})` : ''}`
-    + `${r.total != null ? ` · total ${argent(r.total)}` : ''}${concorde ? ' · la somme des lignes concorde avec le sous-total' : ''}.`;
+    + `${r.total != null ? ` · total ${argent(r.total)}` : ''}${concorde ? ` · la somme des lignes concorde avec le ${r.sousTotal != null ? 'sous-total' : 'total moins les taxes'}` : ''}`
+    + `${rabais > 0 ? (mode === 'net' ? ' · rabais déjà déduits des prix imprimés' : mode === 'brut' ? ' · rabais soustraits des prix' : ' · impossible de confirmer si les rabais sont déjà déduits') : ''}.`;
   return { ok, problemes: [...new Set(problemes)], resume };
 }
 
@@ -241,16 +245,6 @@ export async function relireRecu(recuId) {
   return lu;
 }
 
-/** Prix d'une ligne en texte d'offre (« 4,99 $ » ou « 4,39 $/kg »). */
-function offreLigne(l) {
-  const m = /([\d]+[.,]\d{2})\s*\$?\s*\/\s*(kg|lb)/i.exec(l.poids || '');
-  if (m) return `${m[1].replace('.', ',')} $/${m[2].toLowerCase()}`;
-  const net = (Number(l.prix) || 0) - (Number(l.rabais) || 0);
-  const q = Number(l.quantite) || 1;
-  if (net <= 0) return null;
-  return `${(net / q).toFixed(2).replace('.', ',')} $`;
-}
-
 /**
  * Relie chaque ligne du reçu à un article (liste puis code-barres), enregistre le prix payé,
  * coche l'article acheté et complète les fiches (code, marque, format, photo) par une recherche en ligne.
@@ -266,6 +260,11 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   const bilan = { relies: 0, coches: 0, prix: 0, completes: 0, nonRelies: 0, bonPrix: 0, ecarts: 0 };
   const lignesListe = new Set(e.liste.map((x) => x.id)); // articles de la liste au moment du reçu
   const relies = new Set();
+  const mode = modeRabais(r); // prix imprimés déjà rabais déduits ('net') ou non ('brut')
+  // Nouvelle application (relecture, correction) : les prix déjà tirés de ce reçu qui ne
+  // correspondent plus à une ligne seront annulés (gardés, mais ignorés : ajout seulement).
+  const anciens = new Set((e.prix || []).filter((p) => p.recuId === recuId && !p.annule).map((p) => p.id));
+  const gardes = new Set();
   const { infosCode } = await import('./scan.js');
 
   for (const [i, l] of (r.lignes || []).entries()) {
@@ -308,7 +307,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     }
     bilan.relies++;
     relies.add(a.id);
-    const offre = offreLigne(l);
+    const offre = offreLigne(l, mode);
     // Quelle marque/format a été achetée ? (code, nom appris, marque + format… sinon la ★)
     const fmtLigne = l.format || info?.format, marqueLigne = l.marque || info?.marque;
     const artNow = S.get().articles.find((y) => y.id === a.id) || a;
@@ -317,7 +316,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     // Prix payé comparé au prix affiché de la MÊME marque/format (son format à elle), avant d'ajouter le prix payé
     const vChoisie = choixV.variante;
     const formatAchat = vChoisie?.format || choixV.nouvelle?.format || artNow.format;
-    const verdict = comparerPrix(l, { ...artNow, format: formatAchat }, prixAttendu(artNow, r.banniere, vChoisie?.id || (choixV.nouvelle ? 'nouvelle' : null)), r);
+    const verdict = comparerPrix(l, { ...artNow, format: formatAchat }, prixAttendu(artNow, r.banniere, vChoisie?.id || (choixV.nouvelle ? 'nouvelle' : null)), r, mode);
     if (verdict.statut === 'ok' || verdict.statut === 'moins') bilan.bonPrix++;
     if (verdict.statut === 'plus') bilan.ecarts++;
     // Pas de code-barres ni sur la facture ni dans la fiche : recherche en ligne (sinon mention dans la fiche)
@@ -349,9 +348,16 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       if (info?.ecp && !(ar.liens || []).some((k) => k.id === info.ec.id)) {
         ar.liens = [...(ar.liens || []), { id: info.ec.id, nom: [info.ecp.brand, info.ecp.name].filter(Boolean).join(' '), size: info.ecp.size, image: info.ecp.image }];
       }
-      if (offre && r.banniere && !x.prix.some((p) => p.recuId === recuId && p.articleId === ar.id)) {
-        x.prix.push({ id: S.uid('p'), articleId: ar.id, varianteId: va?.id, banniere: r.banniere, magasinId: mag?.id, offre, format: va?.format || ar.format,
-          type: l.rabais ? 'circulaire' : 'regulier', fin: null, source: 'recu', recuId, observeLe: date });
+      if (offre && r.banniere) {
+        // Même prix déjà tiré de ce reçu (application précédente) : on le garde ; sinon on l'ajoute
+        const meme = x.prix.find((p) => anciens.has(p.id) && !gardes.has(p.id) && p.articleId === ar.id && p.offre === offre);
+        if (meme) gardes.add(meme.id);
+        else {
+          const id = S.uid('p');
+          gardes.add(id);
+          x.prix.push({ id, articleId: ar.id, varianteId: va?.id, banniere: r.banniere, magasinId: mag?.id, offre, format: va?.format || ar.format,
+            type: l.rabais ? 'circulaire' : 'regulier', fin: null, source: 'recu', recuId, observeLe: date });
+        }
       }
       const li = x.liste.find((y) => y.articleId === ar.id && !y.coche);
       if (li) { li.coche = true; li.cocheLe = new Date().toISOString(); coche = true; }
@@ -368,6 +374,11 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   S.maj((x) => {
     x.liste.filter((y) => lignesListe.has(y.id) && !relies.has(y.articleId) && (!y.recu || y.recu.absent))
       .forEach((y) => { y.recu = { recuId, date, banniere: r.banniere, absent: true }; });
+  });
+  // Anciens prix de ce reçu qui ne correspondent plus (rabais ou pesée recalculés, ligne changée)
+  S.maj((x) => {
+    x.prix.filter((p) => anciens.has(p.id) && !gardes.has(p.id) && !p.annule)
+      .forEach((p) => { p.annule = true; p.annuleRaison = 'prix du reçu recalculé'; });
   });
   S.maj((x) => { const rc = x.recus.find((y) => y.id === recuId); if (rc) { rc.applique = new Date().toISOString(); rc.bilan = bilan; } });
   return bilan;
@@ -482,6 +493,7 @@ export function htmlDetail(r) {
   const e = S.get();
   const champ = (lib, val) => (val != null && val !== '' ? `<tr><td class="doux">${esc(lib)}</td><td>${esc(String(val))}</td></tr>` : '');
   const v = r.statut === 'lu' ? verifierRecu(r) : null;
+  const mode = modeRabais(r);
   const verdict = !v ? '<div class="alerte">⏳ Pas encore lu (en attente du réseau).</div>'
     : v.ok ? `<div class="alerte vert">✅ Reçu complet et bien lu — ${esc(v.resume)}</div>`
     : `<div class="alerte">⚠️ À vérifier : ${v.problemes.map(esc).join(' ')}${v.resume ? `<br><span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
@@ -489,8 +501,8 @@ export function htmlDetail(r) {
     const a = l.articleId && e.articles.find((x) => x.id === l.articleId);
     const nom = l.nomClair || l.nomEnLigne || l.libelle;
     return `<tr><td>${a ? '✓ ' : ''}<b>${esc(nom)}</b>${a && simple(a.nom) !== simple(nom) ? ` <span class="doux">→ ${esc(a.nom)}</span>` : ''}
-        <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? (analyserPlu(l.code) ? ` · PLU ${esc(analyserPlu(l.code).plu)}${analyserPlu(l.code).bio ? ' bio' : ''}` : ` · code ${esc(l.code)}`) : ''}${l.marque ? ` · ${esc(l.marque)}` : ''}${l.format || l.formatEnLigne ? ` · ${esc(l.format || l.formatEnLigne)}` : ''}${l.quantite > 1 ? ` · qté ${l.quantite}` : ''}${l.poids ? ` · ${esc(l.poids)}` : ''}${l.taxable ? ` · taxe ${esc(l.taxable)}` : ''}</div></td>
-      <td class="pu">${argent(l.prix)}${l.rabais ? `<div style="color:var(--vert);font-size:12px">−${argent(l.rabais)}</div>` : ''}</td></tr>`;
+        <div class="doux" style="font-size:12px">${esc(l.libelle)}${l.code ? (analyserPlu(l.code) ? ` · PLU ${esc(analyserPlu(l.code).plu)}${analyserPlu(l.code).bio ? ' bio' : ''}` : ` · code ${esc(l.code)}`) : ''}${l.marque ? ` · ${esc(l.marque)}` : ''}${l.format || l.formatEnLigne ? ` · ${esc(l.format || l.formatEnLigne)}` : ''}${l.poids ? ` · ${esc(l.poids)}` : pesee(l) ? ` · ${String(pesee(l).qte).replace('.', ',')} kg (pesé)` : l.quantite > 1 ? ` · qté ${l.quantite}` : ''}${l.taxable ? ` · taxe ${esc(l.taxable)}` : ''}</div></td>
+      <td class="pu">${argent(l.prix)}${l.rabais ? `<div style="color:var(--vert);font-size:12px">${mode === 'net' ? `économie ${argent(l.rabais)} (déjà déduite)` : `−${argent(l.rabais)}`}</div>` : ''}</td></tr>`;
   }).join('');
   return `${verdict}
     ${r.bilan ? `<p class="doux">${esc(texteBilan(r.bilan))}</p>` : ''}

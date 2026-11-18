@@ -76,7 +76,7 @@ export async function lireRecu(blobs, etat, liste = [], attendus = []) {
     autres: r.autres || [], verification: r.verification || null, source: 'ia',
     lignes: (r.lignes || []).map((l) => ({ libelle: l.libelle, nomClair: l.nom_clair, marque: l.marque, format: l.format,
       code: l.code_barres ? String(l.code_barres).replace(/\D/g, '') || null : null, quantite: l.quantite, poids: l.poids,
-      prixUnitaire: l.prix_unitaire, prix: l.prix_total, rabais: l.rabais, taxable: l.taxable, articleListe: l.article_liste, explicationPrix: l.explication_prix || null })) };
+      prixUnitaire: l.prix_unitaire, prix: l.prix_total, rabais: l.rabais, rabaisDejaDeduit: l.rabais_deja_deduit ?? null, taxable: l.taxable, articleListe: l.article_liste, explicationPrix: l.explication_prix || null })) };
   let texte = '';
   for (const b of blobs) texte += (await lireTexte(b, etat)) + '\n';
   return { ...analyserRecu(texte), texte, source: 'ocr' };
