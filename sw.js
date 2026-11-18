@@ -11,6 +11,7 @@ const CACHE = 'epicerie-v65';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'couverture.js', 'demo-data.js',
   'ui.js', 'comparer.js', 'circulaires.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'lignes-recu.js', 'plu.js', 'plu.json', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
   'retouche.js', 'maj.js', 'secteurs.js', 'scan.js', 'recettes.js', 'plus.js', 'envoi.js', 'manifest.webmanifest', 'icone.svg',
+  'icone-192.png', 'icone-512.png', 'apple-touch-icon.png',
   // Skins (même liste que FICHIERS_SKINS dans skins/skins.js)
   'skins/skins.js', 'skins/pro.css', 'skins/etiquette.css', 'skins/ludique.css', 'skins/potager.css', 'skins/doux.css',
   'skins/party.css', 'skins/futuriste.css', 'skins/metal.css', 'skins/electro.css', 'skins/musique.css', 'skins/sport.css'];

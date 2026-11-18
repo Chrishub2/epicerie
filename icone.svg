@@ -1,1 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#1f7a4d"/><path d="M120 150h40l40 190h170l36-140H190" fill="none" stroke="#fff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/><circle cx="220" cy="390" r="26" fill="#fff"/><circle cx="350" cy="390" r="26" fill="#fff"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="fond" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2fa968"/><stop offset="1" stop-color="#15603b"/>
+    </linearGradient>
+    <radialGradient id="lueur" cx="0.3" cy="0.2" r="0.8">
+      <stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sac" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6e2b8"/><stop offset="1" stop-color="#e3c48a"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#fond)"/><rect width="512" height="512" rx="112" fill="url(#lueur)"/>
+  <g transform="translate(256 266) scale(.9) translate(-256 -256)">
+  <!-- ombre sous le sac -->
+  <ellipse cx="256" cy="412" rx="128" ry="16" fill="#0b3d24" opacity=".35"/>
+  <!-- poireau / laitue -->
+  <circle cx="196" cy="214" r="46" fill="#5fb83f"/>
+  <circle cx="226" cy="186" r="40" fill="#7fd257"/>
+  <circle cx="176" cy="180" r="30" fill="#4ea333"/>
+  <!-- carotte -->
+  <g transform="rotate(14 352 190)">
+    <path d="M336 250 L352 118 L368 250 Z" fill="#ff8a2a" stroke="#e86f10" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M352 120 C340 96 336 86 342 74 M352 120 C352 94 354 82 362 72 M352 120 C364 100 372 94 382 90" fill="none" stroke="#3f9a2c" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <!-- pomme -->
+  <circle cx="290" cy="206" r="44" fill="#e8423b"/>
+  <circle cx="276" cy="192" r="11" fill="#fff" opacity=".35"/>
+  <path d="M292 164 q2 -14 8 -22" stroke="#6b3d1e" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M300 152 q22 -10 34 4 q-20 12 -34 -4 z" fill="#4ea333"/>
+  <!-- sac -->
+  <path d="M146 236 H366 L352 398 Q350 410 338 410 H174 Q162 410 160 398 Z" fill="url(#sac)"/>
+  <path d="M146 236 H366 L363 268 H149 Z" fill="#d9b571"/>
+  <path d="M212 300 q44 30 88 0" stroke="#b8904a" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <!-- étiquette rabais -->
+  <g transform="rotate(-18 356 360)">
+    <path d="M318 326 H384 Q394 326 394 336 V384 Q394 394 384 394 H318 L296 360 Z" fill="#ffcc33" stroke="#e0a800" stroke-width="4" stroke-linejoin="round"/>
+    <circle cx="314" cy="360" r="7" fill="#15603b"/>
+    <text x="356" y="376" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="44" fill="#15603b">%</text>
+  </g>
+  </g>
+</svg>

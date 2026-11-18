@@ -43,6 +43,7 @@ const STYLE = `
 .mg-rang { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .mg table input.champ { width: 100%; }
 .mg td.ctr { text-align: center; }
+.mg td.nw, .mg td.nw * { white-space: nowrap; }
 .mg tr.inactif td { opacity: .55; }
 .mg-cp { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 10px; border: 1px solid var(--trait); border-radius: 99px; margin: 0 6px 6px 0; }
 /* La zone prend la largeur de la rangée de recherche : « Ajouter » s'aligne sous « Ajouter à la main », pas au bord de l'écran. */
@@ -50,6 +51,7 @@ const STYLE = `
 .mg-res { display: grid; gap: 6px; }
 .mg-res:empty { display: none; }
 .mg-zone > .mg-res, .mg-zone > .mg-tuile { width: 0; min-width: 100%; }   /* suivent la largeur de la rangée sans l'élargir */
+.mg-tuile.accent { border-style: solid; border-color: var(--etiquette); }
 .mg-tuile { display: grid; gap: 8px; padding: 10px 12px; border: 1px dashed var(--trait-fort); border-radius: var(--rayon); background: var(--surface-2); }
 .mg-res > div { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--trait); border-radius: var(--rayon); }
 .mg-res > div > span:first-child { flex: 1; min-width: 0; }
@@ -95,7 +97,7 @@ export function vueMagasins(t, ctx) {
           <select class="champ" id="mgRayon" title="Rayon de la recherche Auto">${[10, 15, 25, 40].map((k) => `<option value="${k}" ${k === (ui.rayon || RAYON_KM) ? 'selected' : ''}>${k} km</option>`).join('')}</select>
           <button class="btn" id="mgMain">✎ Ajouter à la main</button></div>
         <div class="mg-res" id="mgRes">${ui.message ? `<p class="muet">${esc(ui.message)}</p>` : ''}${(ui.resultats || []).map((r, i) => `<div>
-          <span><b>${esc(r.nom)}</b><br><span class="muet">${esc(r.adresse)}</span></span>
+          <span><b>${esc(r.nom)}</b><br><span class="muet">${esc(r.adresse)}</span></span>${r.km != null ? `<span class="muet" style="white-space:nowrap">${r.km.toFixed(1).replace('.', ',')} km</span>` : ''}
           ${E.magasins.some((m) => m.adresse === r.adresse) ? '<span class="badge ok">déjà ajoutée</span>' : `<button class="btn petit principal" data-ajres="${i}">Ajouter</button>`}</div>`).join('')}</div>
         <div class="mg-tuile">
           <div class="mg-rang"><b>🗺️ Avec Google Maps</b>
@@ -177,18 +179,25 @@ export function vueMagasins(t, ctx) {
   $('#mgVille').oninput = (ev) => { ui.ville = ev.target.value; };
   $('#mgVille').onkeydown = (ev) => { if (ev.key === 'Enter') $('#mgChercher').click(); };
 
+  // Chercher : on situe la ville (abréviations comprises), puis la bannière dans un rayon de RAYON_CHERCHER km, triée par distance.
   $('#mgChercher').onclick = async () => {
     ui.ban = $('#mgBan').value; ui.ville = $('#mgVille').value.trim();
     if (!ui.ville) { ctx.note('Entre une ville ou un code postal.'); return; }
     $('#mgRes').innerHTML = '<p class="muet">Recherche…</p>';
-    let res = [];
-    try { res = await chercherSuccursales(nomBan(ui.ban), ui.ville); } catch { ui.message = 'Recherche impossible (réseau). Réessaie ou ajoute à la main.'; ui.resultats = []; vueMagasins(t, ctx); return; }
-    const estCode = /^[a-z]\d[a-z]/i.test(ui.ville);
-    const meme = estCode ? res.filter((r) => r.fsa.toUpperCase() === ui.ville.slice(0, 3).toUpperCase()) : res.filter((r) => sansAccents(r.ville) === sansAccents(ui.ville));
-    ui.message = !res.length ? 'Rien trouvé. Essaie une ville voisine, ou ajoute-la à la main.'
-      : !meme.length ? `Aucune succursale exactement à ${ui.ville} ; voici les plus proches :` : '';
-    ui.resultats = (meme.length ? meme : res).map((r) => ({ ...r, banniere: ui.ban }));
+    let res = [], centre = null;
+    try {
+      centre = await geocoder(ui.ville);
+      res = centre ? await chercherAutour(nomBan(ui.ban), centre, RAYON_CHERCHER) : await chercherSuccursales(nomBan(ui.ban), ui.ville);
+    } catch { ui.message = 'Recherche impossible (réseau). Réessaie, ou utilise Google Maps ci-dessous.'; ui.resultats = []; vueMagasins(t, ctx); return; }
+    res.sort((a, b) => (a.km ?? 0) - (b.km ?? 0));
+    const memeVilleQue = res.filter((r) => memeVille(r.ville, ui.ville));
+    ui.message = !res.length
+      ? `OpenStreetMap ne connaît aucun ${nomBan(ui.ban)} à moins de ${RAYON_CHERCHER} km de ${ui.ville} (ses données sont incomplètes, surtout pour les pharmacies). Utilise « Avec Google Maps » juste en dessous.`
+      : !memeVilleQue.length ? `Aucun ${nomBan(ui.ban)} trouvé exactement à ${ui.ville} dans OpenStreetMap ; voici les plus proches. S'il en existe un, utilise « Avec Google Maps » ci-dessous.` : '';
+    ui.resultats = res.map((r) => ({ ...r, banniere: ui.ban }));
+    ui.surligneGoogle = !memeVilleQue.length;
     vueMagasins(t, ctx);
+    if (ui.surligneGoogle) t.querySelector('.mg-tuile')?.classList.add('accent');
   };
   $$('[data-ajres]').forEach((b) => b.onclick = () => {
     const r = ui.resultats[Number(b.dataset.ajres)];
@@ -327,6 +336,10 @@ export function vueMagasins(t, ctx) {
 }
 
 const RAYON_KM = 15;
+const RAYON_CHERCHER = 8;   // « Chercher » : une bannière autour de la ville
+/** « 2026-11-15 » → « 15 nov. 2026 » (un seul bloc, jamais coupé). */
+const dateCourte = (iso) => { const d = /^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? new Date(`${iso}T12:00:00`) : null;
+  return d ? esc(d.toLocaleDateString('fr-CA', { day: 'numeric', month: 'short', year: 'numeric' })) : esc(iso || ''); };
 /** Magasins imprimés sur les reçus (en-tête : nom, adresse, téléphone), regroupés. */
 export function magasinsDesRecus(E) {
   const grp = new Map();
@@ -372,17 +385,17 @@ export function blocReferences(E) {
     && (memeVille(villeAdresse(m.adresse), villeAdresse(g.adresse)) || m.adresse === g.adresse))
     || E.magasins.find((m) => m.banniere === g.banniere && fsaDe(g.adresse) && m.codePostal === fsaDe(g.adresse));
   const tableMags = `<h3 style="margin:0 0 6px">Magasins vus sur tes reçus</h3>
-    <table class="mini-table"><thead><tr><th style="width:120px">Bannière</th><th>Nom imprimé</th><th>Adresse imprimée</th><th style="width:110px">Téléphone</th><th style="width:90px">Reçus</th><th style="width:230px">Ta succursale</th></tr></thead><tbody>
+    <table class="mini-table"><thead><tr><th style="width:120px">Bannière</th><th>Nom imprimé</th><th>Adresse imprimée</th><th style="width:110px">Téléphone</th><th style="width:130px">Reçus</th><th style="width:230px">Ta succursale</th></tr></thead><tbody>
     ${mags.map((g, i) => { const m = lien(g); return `<tr><td>${pastille(g.banniere)}</td><td><b>${esc(g.nom)}</b>${g.programme ? ` <span class="badge">${esc(g.programme)}</span>` : ''}</td>
-      <td>${esc(g.adresse)}</td><td class="mono">${esc(g.telephone)}</td><td>${g.n} <span class="muet">· ${esc(g.dernier)}</span></td>
+      <td>${esc(g.adresse)}</td><td class="mono">${esc(g.telephone)}</td><td class="nw">${g.n} <span class="muet">· ${dateCourte(g.dernier)}</span></td>
       <td>${m ? `${esc(m.nom)} <span class="muet">(même code postal)</span>` : `<button class="btn petit principal" data-creer-ref="${i}">+ Créer cette succursale</button>`}</td></tr>`; }).join('')}
     </tbody></table>`;
   const groupes = nomsImprimes(E).map(({ banniere, noms }) => {
     const relies = noms.filter((x) => x.produit).length;
     return `<details style="margin-top:12px"><summary><b>Noms imprimés — ${esc(nomBan(banniere))}</b> <span class="muet">${noms.length} nom(s) · ${relies} relié(s) à un produit</span></summary>
-      <table class="mini-table" style="margin-top:6px"><thead><tr><th>Nom imprimé sur le reçu</th><th>Produit relié</th><th style="width:70px">Fois</th><th style="width:110px">Dernier prix</th></tr></thead><tbody>
+      <table class="mini-table" style="margin-top:6px"><thead><tr><th>Nom imprimé sur le reçu</th><th>Produit relié</th><th style="width:70px">Fois</th><th style="width:170px">Dernier prix</th></tr></thead><tbody>
       ${noms.map((x) => `<tr><td class="mono">${esc(x.libelle)}</td><td>${x.produit ? esc(x.produit) : `<span class="muet">${esc(x.clair || '—')} · non relié</span>`}</td>
-        <td>${x.fois}</td><td class="mono">${x.prix != null ? `${Number(x.prix).toFixed(2).replace('.', ',')} $` : '—'} <span class="muet">${esc(x.date)}</span></td></tr>`).join('')}
+        <td>${x.fois}</td><td class="nw"><span class="mono">${x.prix != null ? `${Number(x.prix).toFixed(2).replace('.', ',')} $` : '—'}</span> <span class="muet">${dateCourte(x.date)}</span></td></tr>`).join('')}
       </tbody></table></details>`;
   }).join('');
   return tableMags + groupes + '<p class="muet" style="margin:10px 0 0">Lecture seule : pour relier un nom à un autre produit, ouvre le reçu (Plus → Mes reçus) sur le téléphone.</p>';
@@ -417,9 +430,25 @@ export function distanceKm(a, b) {
 
 /** Ville ou code postal → { lat, lng } (OpenStreetMap, 1 requête). */
 async function geocoder(lieu) {
-  const p = new URLSearchParams({ q: `${lieu}, Québec`, format: 'jsonv2', limit: 1, countrycodes: 'ca' });
-  const j = await (await fetch(`https://nominatim.openstreetmap.org/search?${p}`)).json();
-  return j[0] ? { lat: Number(j[0].lat), lng: Number(j[0].lon) } : null;
+  // « mont st-hilaire » n'est pas trouvé tel quel : on essaie aussi « Mont-Saint-Hilaire »
+  const essais = [...new Set([developperVille(lieu), lieu])];
+  for (const q of essais) {
+    const p = new URLSearchParams({ q: `${q}, Québec`, format: 'jsonv2', limit: 1, countrycodes: 'ca' });
+    const j = await (await fetch(`https://nominatim.openstreetmap.org/search?${p}`)).json();
+    if (j[0]) return { lat: Number(j[0].lat), lng: Number(j[0].lon) };
+  }
+  return null;
+}
+
+/** « mont st-hilaire » → « Mont-Saint-Hilaire », « ste julie » → « Sainte-Julie ». Un code postal reste tel quel. */
+export function developperVille(t) {
+  const x = String(t ?? '').trim();
+  if (/^[a-z]\d[a-z]/i.test(x)) return x.toUpperCase();
+  return x.toLowerCase()
+    .replace(/\bste?\b\.?/g, (m) => (m.startsWith('ste') ? 'sainte' : 'saint'))
+    .split(/[\s-]+/).filter(Boolean)
+    .map((w) => (['de', 'du', 'des', 'la', 'le', 'sur', 'en'].includes(w) ? w : w[0].toUpperCase() + w.slice(1)))
+    .join('-');
 }
 
 /** Résultat OpenStreetMap → succursale ; null si ce n'est pas un commerce de cette bannière (ex. station de métro). */
