@@ -11,6 +11,7 @@ import { normaliserProduits, variantesActives, variantePref, completude, codesDe
 import { SourceSupabase, construireEtat, differences, COLLECTIONS } from './source.js';
 import { chercherProduit, besoinsPour } from './recherche.js';
 import { monterCirculaires, compterAValider } from '../circulaires.js';
+import { surveillerMisesAJourConsole } from './maj-console.js';
 
 // ---------------------------------------------------------------------
 // Outils
@@ -61,8 +62,8 @@ function optionsRayons(sel) {
     + `<option value="${NOUVEAU_RAYON}">➕ Nouveau rayon…</option>`;
 }
 /** Demande un nom, crée le rayon (ou reprend celui du même nom, accents ignorés) et l'enregistre. Retourne son id, ou null. */
-async function creerRayon() {
-  const nom = (prompt('Nom du nouveau rayon :') || '').replace(/\s+/g, ' ').trim();
+async function creerRayon(nomDonne) {
+  const nom = (nomDonne ?? prompt('Nom du nouveau rayon :') ?? '').replace(/\s+/g, ' ').trim();
   if (!nom) return null;
   const exist = E.rayons.find((r) => sansAccents(r.nom).trim() === sansAccents(nom));
   if (exist) { note(`« ${exist.nom} » existe déjà : il est choisi.`); return exist.id; }
@@ -678,8 +679,51 @@ function etincelle(xs, min, max) {
     ${xs.map((x) => `<circle cx="${sx(x.p.observeLe).toFixed(1)}" cy="${sy(x.pu).toFixed(1)}" r="${susp.has(x.p.id) ? 2.4 : 1.4}" fill="${susp.has(x.p.id) ? 'var(--erreur)' : 'var(--etiquette)'}" vector-effect="non-scaling-stroke"><title>${x.p.observeLe} · ${esc(x.p.offre)} · ${x.p.source}</title></circle>`).join('')}</svg>`;
 }
 
+/**
+ * Fenêtre « Rayon de … » : champ « Nouveau rayon » + bouton « ➕ Créer ce rayon » en haut,
+ * puis les rayons existants (A→Z, l'actuel en jaune). Taper filtre la liste. Un clic applique.
+ */
+function choisirRayon(id) {
+  const a = ARTS.get(id);
+  if (!a) return;
+  const m = modale(`Rayon de « ${a.nom.trim()} »`, `
+    <label class="muet" for="rayonNouveau" style="display:block;margin-bottom:6px">Nouveau rayon</label>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <input class="champ" id="rayonNouveau" placeholder="Ex. Autre, Épices, Sauces du monde…" style="flex:1" autocomplete="off">
+      <button class="btn principal" id="rayonCreer">➕ Créer ce rayon</button></div>
+    <div class="muet" style="margin-bottom:6px">Ou choisis un rayon existant (actuel : <b>${esc(rayonNom(a.rayonId))}</b>)</div>
+    <div id="rayonListe" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px"></div>`, [['Fermer', 'fermer']]);
+  const input = m.querySelector('#rayonNouveau'), liste = m.querySelector('#rayonListe');
+  const appliquer = (rid) => {
+    m.remove();
+    if (!rid || rid === a.rayonId) return;
+    const h = modifier(a.id, 'rayonId', rid);
+    reanalyser(); rendre();
+    note(`${esc(a.nom.trim())} → ${esc(rayonNom(rid))}`, { libelle: 'Annuler', faire: () => restaurer(h) });
+  };
+  const dessiner = () => {
+    const t = sansAccents(input.value).trim();
+    const rs = [...E.rayons].filter((r) => !t || sansAccents(r.nom).includes(t)).sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
+    liste.innerHTML = rs.map((r) => `<button class="btn${r.id === a.rayonId ? ' principal' : ''}" data-rayon="${r.id}" style="justify-content:flex-start;text-align:left">${esc(r.nom)}</button>`).join('')
+      || '<span class="discret">Aucun rayon de ce nom : clique « ➕ Créer ce rayon ».</span>';
+    liste.querySelectorAll('[data-rayon]').forEach((b) => b.onclick = () => appliquer(b.dataset.rayon));
+  };
+  const creer = async () => {
+    const nom = input.value.trim();
+    if (!nom) { note('Écris le nom du nouveau rayon.'); input.focus(); return; }
+    const rid = await creerRayon(nom); // même nom (accents ignorés) → le rayon existant est repris
+    if (rid) appliquer(rid);
+  };
+  input.oninput = dessiner;
+  input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); creer(); } };
+  m.querySelector('#rayonCreer').onclick = creer;
+  dessiner();
+  input.focus();
+}
+
 function editerChampDetail(el, a) {
   if (lectureSeule()) return;
+  if (el.dataset.champ === 'rayonId') { choisirRayon(a.id); return; } // fenêtre claire plutôt qu'un petit menu
   const champ = el.dataset.champ, type = el.dataset.type;
   if (el.querySelector('[data-edit]')) return;
   const ctl = type === 'rayon' ? `<select class="cellule-edit" data-edit>${optionsRayons(a.rayonId)}</select>`
@@ -753,6 +797,7 @@ function actionProbleme(p, act) {
   } else if (act === 'comparer') {
     ui.comparer = [...p.cibles]; ui.cibleFusion = p.cibles[0]; aller('comparer');
   } else if (act === 'ouvrir') ouvrirArticle(p.cibles[0]);
+  else if (act === 'corriger' && p.code === 'rayon_divers') choisirRayon(p.cibles[0]);
   else if (act === 'corriger') corrigerChamp(p.cibles[0], CHAMP_A_CORRIGER[p.code]);
 }
 // ---------------------------------------------------------------------
@@ -871,7 +916,7 @@ function vueBoite(t) {
   t.querySelectorAll('[data-regle]').forEach((x) => x.onclick = () => { b.regle = x.dataset.regle; b.selection.clear(); vueBoite(t); });
   const cols = [
     { cle: 'sel', titre: '', largeur: 34, rendu: (p) => `<input type="checkbox" class="case" data-sel ${b.selection.has(p.cle) ? 'checked' : ''} aria-label="Sélectionner">` },
-    { cle: 'act', titre: 'Action', largeur: 168, rendu: (p) => `${p.correction ? '<button class="btn petit principal" data-act="appliquer" title="Appliquer la correction proposée">✓ Appliquer</button> ' : ''}${!p.correction && CHAMP_A_CORRIGER[p.code] ? '<button class="btn petit" data-act="corriger" title="Ouvrir la fiche sur ce champ">✎ Corriger</button> ' : ''}${p.cibles.length > 1 ? '<button class="btn petit" data-act="comparer" title="Comparer">⇄</button> ' : ''}<button class="btn petit" data-act="ignorer" title="Écarter ce problème">✕</button>` },
+    { cle: 'act', titre: 'Action', largeur: 220, rendu: (p) => `${p.correction ? '<button class="btn petit principal" data-act="appliquer" title="Appliquer la correction proposée">✓ Appliquer</button> ' : ''}${CHAMP_A_CORRIGER[p.code] && (!p.correction || p.code === 'rayon_divers') ? `<button class="btn petit" data-act="corriger" title="${p.code === 'rayon_divers' ? 'Choisir ou créer un rayon' : 'Ouvrir la fiche sur ce champ'}">✎ ${p.code === 'rayon_divers' ? 'Rayon' : 'Corriger'}</button> ` : ''}${p.cibles.length > 1 ? '<button class="btn petit" data-act="comparer" title="Comparer">⇄</button> ' : ''}<button class="btn petit" data-act="ignorer" title="Écarter ce problème">✕</button>` },
     { cle: 'prod', titre: 'Produit(s)', largeur: 200, souple: true, rendu: (p) => p.cibles.map((id) => nomCourt(ARTS.get(id))).join(' <span class="discret">·</span> ') },
     { cle: 'pb', titre: 'Problème', largeur: 280, rendu: (p) => esc(p.probleme) },
     { cle: 'corr', titre: 'Correction proposée', largeur: 200, rendu: (p) => (p.correction ? `<span class="badge ia">Proposé</span> ${esc(p.correction.texte)}` : `<span class="discret">${p.cibles.length > 1 ? 'À comparer' : CHAMP_A_CORRIGER[p.code] ? 'À corriger (✎)' : p.code === 'prix_aberrant' ? 'À vérifier (✕ si le prix est bon)' : 'Au téléphone (scan, photo, prix)'}</span>`) },
@@ -1546,3 +1591,6 @@ function ecranConnexion(message = '') {
   };
   $('#formConnexion input').focus();
 }
+
+// « Mise à jour disponible — Oui / Non » quand une nouvelle version de la console est publiée
+surveillerMisesAJourConsole();
