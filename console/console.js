@@ -54,6 +54,27 @@ const ui = {
 const articleParId = () => new Map(E.articles.map((a) => [a.id, a]));
 let ARTS = articleParId();
 const rayonNom = (id) => E.rayons.find((r) => r.id === id)?.nom || '—';
+const NOUVEAU_RAYON = '__nouveau__';
+/** Options du menu des rayons (A→Z), avec « ➕ Nouveau rayon… » à la fin. */
+function optionsRayons(sel) {
+  return [...E.rayons].sort((x, y) => x.nom.localeCompare(y.nom, 'fr')).map((r) => `<option value="${r.id}" ${r.id === sel ? 'selected' : ''}>${esc(r.nom)}</option>`).join('')
+    + `<option value="${NOUVEAU_RAYON}">➕ Nouveau rayon…</option>`;
+}
+/** Demande un nom, crée le rayon (ou reprend celui du même nom, accents ignorés) et l'enregistre. Retourne son id, ou null. */
+async function creerRayon() {
+  const nom = (prompt('Nom du nouveau rayon :') || '').replace(/\s+/g, ' ').trim();
+  if (!nom) return null;
+  const exist = E.rayons.find((r) => sansAccents(r.nom).trim() === sansAccents(nom));
+  if (exist) { note(`« ${exist.nom} » existe déjà : il est choisi.`); return exist.id; }
+  const r = { id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nom: nom.replace(/^./, (k) => k.toUpperCase()) };
+  if (MODE === 'reel' && source?.foyer) {
+    try { const v = await source.ecrire('rayon', r.id, r, null, 'console'); mesEcritures.add(`${r.id}:${v}`); }
+    catch (err) { note(`Rayon non créé : ${err.message}`); return null; }
+  }
+  E.rayons.push(r);
+  note(`Rayon « ${r.nom} » créé`);
+  return r.id;
+}
 
 function reanalyser() {
   normaliserProduits(E);
@@ -309,7 +330,7 @@ function compDe(a) {
 }
 function celluleEdit(a, champ) {
   if (ui.edition?.id !== a.id || ui.edition.champ !== champ) return null;
-  if (champ === 'rayonId') return `<select class="cellule-edit" data-edit>${E.rayons.map((r) => `<option value="${r.id}" ${r.id === a.rayonId ? 'selected' : ''}>${esc(r.nom)}</option>`).join('')}</select>`;
+  if (champ === 'rayonId') return `<select class="cellule-edit" data-edit>${optionsRayons(a.rayonId)}</select>`;
   if (champ === 'uniteRef') return `<select class="cellule-edit" data-edit>${Object.entries(UNITES).map(([k, l]) => `<option value="${k}" ${k === a.uniteRef ? 'selected' : ''}>au ${l}</option>`).join('')}</select>`;
   return `<input class="cellule-edit" data-edit value="${esc(a[champ] || '')}">`;
 }
@@ -438,6 +459,10 @@ function editerCellule(id, champ) {
   if (ch?.tagName === 'SELECT') { try { ch.showPicker?.(); } catch { /* navigateur sans showPicker : le menu reste visible, un clic l'ouvre */ } }
 }
 function validerEdition(valeur) {
+  if (ui.edition?.champ === 'rayonId' && valeur === NOUVEAU_RAYON) {
+    creerRayon().then((id) => { if (id) validerEdition(id); else { ui.edition = null; tableCourante?.rafraichir(); } });
+    return;
+  }
   const ed = ui.edition; ui.edition = null;
   if (!ed) return;
   const a = ARTS.get(ed.id);
@@ -488,7 +513,7 @@ function modifierEnLot(champ) {
   if (lectureSeule()) return;
   const ids = [...ui.selection];
   const champSaisie = champ === 'rayonId'
-    ? `<select class="champ" id="valLot">${E.rayons.map((r) => `<option value="${r.id}">${esc(r.nom)}</option>`).join('')}</select>`
+    ? `<select class="champ" id="valLot">${optionsRayons()}</select>`
     : champ === 'uniteRef' ? `<select class="champ" id="valLot">${Object.entries(UNITES).map(([k, l]) => `<option value="${k}">au ${l}</option>`).join('')}</select>`
     : '<input class="champ" id="valLot" placeholder="Nouvelle marque" style="width:280px">';
   const m = modale(`${libelleChamp(champ)} — ${ids.length} produit(s)`, `
@@ -498,6 +523,7 @@ function modifierEnLot(champ) {
     ['Appliquer', 'principal', () => {
       const v = $('#valLot').value.trim();
       if (champ === 'marque' && !v) { note('Écris une marque.'); return false; }
+      if (v === NOUVEAU_RAYON) { note('Choisis un rayon.'); return false; }
       const lot = ++nLot;
       let n = 0;
       for (const id of ids) if ((ARTS.get(id)[champ] ?? '') !== v) { modifier(id, champ, v, 'console', lot); n++; }
@@ -514,6 +540,12 @@ function modifierEnLot(champ) {
       ${changes.length > 200 ? `<p class="discret">… et ${changes.length - 200} autres.</p>` : ''}`;
   };
   $('#valLot', m).addEventListener('input', apercu); $('#valLot', m).addEventListener('change', apercu);
+  if (champ === 'rayonId') $('#valLot', m).addEventListener('change', async (ev) => {
+    if (ev.target.value !== NOUVEAU_RAYON) return;
+    const id = await creerRayon();
+    ev.target.innerHTML = optionsRayons(id || undefined); if (id) ev.target.value = id;
+    apercu();
+  });
   apercu();
   $('#valLot', m).focus();
 }
@@ -650,7 +682,7 @@ function editerChampDetail(el, a) {
   if (lectureSeule()) return;
   const champ = el.dataset.champ, type = el.dataset.type;
   if (el.querySelector('[data-edit]')) return;
-  const ctl = type === 'rayon' ? `<select class="cellule-edit" data-edit>${E.rayons.map((r) => `<option value="${r.id}" ${r.id === a.rayonId ? 'selected' : ''}>${esc(r.nom)}</option>`).join('')}</select>`
+  const ctl = type === 'rayon' ? `<select class="cellule-edit" data-edit>${optionsRayons(a.rayonId)}</select>`
     : type === 'unite' ? `<select class="cellule-edit" data-edit>${Object.entries(UNITES).map(([k, l]) => `<option value="${k}" ${k === a.uniteRef ? 'selected' : ''}>au ${l}</option>`).join('')}</select>`
     : `<input class="cellule-edit" data-edit value="${esc(a[champ] || '')}">`;
   el.innerHTML = ctl;
@@ -661,6 +693,13 @@ function editerChampDetail(el, a) {
     if (fini) return; fini = true;
     const v = champ === 'nom' ? c.value.replace(/\s+/g, ' ').trim() : c.value.trim();
     if (champ === 'nom' && !v) { note('Le nom ne peut pas être vide.'); rendreDetail(); return; }
+    if (champ === 'rayonId' && v === NOUVEAU_RAYON) {
+      creerRayon().then((id) => {
+        if (!id) { rendreDetail(); return; }
+        c.innerHTML = optionsRayons(id); c.value = id; fini = false; valider();
+      });
+      return;
+    }
     if ((a[champ] ?? '') === v) { rendreDetail(); return; }
     const h = modifier(a.id, champ, v);
     reanalyser(); rendreNav(); majSynchro(); rendreDetail(); ui.remplirCatalogue && ui.vue === 'catalogue' && ui.remplirCatalogue();
@@ -684,7 +723,7 @@ function carteProbleme(p) {
     ${p.correction ? `<div class="proposition"><span class="badge ia">Proposé</span>${esc(p.correction.texte)}${p.impact ? `<span class="discret" style="margin-left:auto">${esc(p.impact)}</span>` : ''}</div>` : (p.impact ? `<div class="discret" style="font-size:12px;margin-top:4px">${esc(p.impact)}</div>` : '')}
     <div class="actions">
       ${p.correction ? `<button class="btn petit principal" data-act="appliquer">${peutLot ? 'Appliquer' : 'Appliquer quand même'}</button>` : ''}
-      ${!p.correction && CHAMP_A_CORRIGER[p.code] ? '<button class="btn petit" data-act="corriger">✎ Corriger</button>' : ''}
+      ${CHAMP_A_CORRIGER[p.code] && (!p.correction || p.code === 'rayon_divers') ? `<button class="btn petit" data-act="corriger">✎ ${p.code === 'rayon_divers' ? 'Choisir un autre rayon' : 'Corriger'}</button>` : ''}
       ${p.cibles.length > 1 ? '<button class="btn petit" data-act="comparer">⇄ Comparer</button>' : ''}
       ${p.code === 'prix_aberrant' ? '<button class="btn petit" data-act="ouvrir">Voir les prix</button>' : ''}
       <button class="btn petit" data-act="ignorer" title="Ne plus afficher ce problème">${p.cibles.length > 1 ? 'Pas des doublons' : 'Pas un problème'}</button>
