@@ -176,7 +176,7 @@ export function apercuFusion(e, sourceIds) {
   const sources = (e.articles || []).filter((a) => ids.has(a.id));
   return {
     variantes: sources.reduce((n, a) => n + variantesActives(a).length, 0),
-    prix: (e.prix || []).filter((p) => ids.has(p.articleId)).length,
+    prix: (e.prix || []).filter((p) => ids.has(p.articleId) && !p.annule).length, // seuls les prix actifs suivent
     lignesListe: (e.liste || []).filter((l) => ids.has(l.articleId)).length,
     autres: refs.length,
   };
@@ -186,6 +186,10 @@ export function apercuFusion(e, sourceIds) {
  * Fusionne des produits dans `cibleId` : leurs variantes (avec leurs prix, codes et alias)
  * deviennent des variantes de la cible ; tout ce qui les pointait pointe vers la cible ;
  * deux lignes de liste non cochées du même produit sont additionnées. Les sources sont retirées.
+ * Prix : la base les garde en AJOUT SEULEMENT (une modification est refusée). Chaque prix actif est donc
+ * recopié sur la cible (copieDe) et l'original est annulé par ajout de clés (annule, annuleRaison 'fusion',
+ * remplacePar). Exception : un prix encore en attente de lecture (photo hors ligne) est simplement déplacé,
+ * ce que la base permet. Même méthode que la console (v63).
  */
 export function fusionner(e, cibleId, sourceIds) {
   const cible = e.articles.find((a) => a.id === cibleId);
@@ -202,7 +206,17 @@ export function fusionner(e, cibleId, sourceIds) {
     if (s.local) cible.local = true;
     if (!cible.imageUrl && s.imageUrl) cible.imageUrl = s.imageUrl;
   }
-  for (const o of references(e)) if (ids.has(o.articleId)) o.articleId = cibleId;
+  const copies = [];
+  for (const p of e.prix || []) {
+    if (!ids.has(p.articleId) || p.annule) continue;
+    if (p.enAttente) { p.articleId = cibleId; continue; }
+    const id = 'pf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    copies.push({ ...JSON.parse(JSON.stringify(p)), id, articleId: cibleId, copieDe: p.id });
+    Object.assign(p, { annule: true, annuleRaison: 'fusion', remplacePar: id });
+  }
+  if (copies.length) e.prix.push(...copies);
+  const prix = new Set(e.prix || []);
+  for (const o of references(e)) if (ids.has(o.articleId) && !prix.has(o)) o.articleId = cibleId; // les prix sont traités au-dessus
   // Lignes de liste en double (non cochées) → une seule, quantités additionnées
   const vues = new Map();
   e.liste = (e.liste || []).filter((l) => {
