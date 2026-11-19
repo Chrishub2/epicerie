@@ -18,6 +18,7 @@ const COLLECTIONS = {
   article: 'articles', liste: 'liste', prix: 'prix', magasin: 'magasins', rayon: 'rayons',
   recette: 'recettes', livre: 'livres', carte: 'cartes', point: 'points', rabais: 'rabaisPerso',
   photo: 'photos', recu: 'recus', releve: 'releves', cp: 'codesPostaux', alerte: 'alertes',
+  banniere: 'bannieres',   // registre de bannières (extension Flipp 1.5), lu seulement
 };
 const cleDe = (type, o) => (type === 'cp' ? o.code : o.id);
 // Réglages partagés du foyer (un seul objet)

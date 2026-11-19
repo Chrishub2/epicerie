@@ -2,6 +2,7 @@
 // Épicerie — application principale (mode démo)
 // =====================================================================
 import { estFsa, secteurDe, memeVille, enSecteur } from './secteurs.js';
+import { appliquerRegistre } from './bannieres-registre.js';
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
   libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive, magasinsActifs } from './ui.js';
@@ -107,6 +108,7 @@ setTimeout(async () => {
 })();
 
 export function rendre() {
+  appliquerRegistre(S.get().bannieres);   // bannières ajoutées depuis Flipp : disponibles dans Magasins
   majEntete();
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
   document.body.classList.toggle('onglet-liste', onglet === 'liste');

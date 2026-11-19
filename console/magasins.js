@@ -6,13 +6,15 @@
 // reçues en temps réel par les téléphones. Retirer = suppression douce (supprime = true), restaurable.
 // =====================================================================
 import { BANNIERES } from '../demo-data.js';
+import { appliquerRegistre } from '../bannieres-registre.js';
 import { estFsa, fsaDe, secteurDe, villeAdresse, memeVille, enSecteur } from '../secteurs.js';
 export { secteurDe, villeAdresse, memeVille, enSecteur };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sansAccents = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const uid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-const BANS = Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement);
+// Fonction (pas une constante) : les bannières du registre (extension Flipp 1.5) s'ajoutent après le chargement.
+const bans = () => Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement);
 const nomBan = (b) => BANNIERES[b]?.nom || b;
 // Logos : mêmes pastilles que l'app (app/ui.js LOGOS + styles de app/index.html) ; autres bannières : couleur de la bannière.
 const LOGOS = { iga: 'IGA', super_c: 'SUPER C', metro: 'metro', maxi: 'maxi', costco: 'COSTCO', jean_coutu: 'Jean Coutu', provigo: 'provigo', walmart: 'Walmart ✱' };
@@ -69,20 +71,21 @@ const STYLE = `
  */
 export function vueMagasins(t, ctx) {
   const E = ctx.etat();
+  appliquerRegistre(E.bannieres);   // bannières ajoutées depuis Flipp : disponibles ici
   E.magasins ||= []; E.codesPostaux ||= []; E.rabaisPerso ||= [];
   const ui = (vueMagasins.ui ||= { ban: 'super_c', ville: '', resultats: null, message: '' });
 
   const mags = [...E.magasins].sort((a, b) => nomBan(a.banniere).localeCompare(nomBan(b.banniere), 'fr') || a.nom.localeCompare(b.nom, 'fr'));
   const actifs = (b) => E.magasins.filter((m) => m.banniere === b && m.actif !== false).length;
-  const sans = BANS.filter(([k]) => !actifs(k)).length;
+  const sans = bans().filter(([k]) => !actifs(k)).length;
 
   t.innerHTML = `<style>${STYLE}</style><div class="mg" style="display:flex;flex-direction:column;height:100%">
     <div class="entete-vue"><h1>Magasins et références</h1>
-      <span class="muet">${E.magasins.length} succursale(s) · ${BANS.length - sans}/${BANS.length} bannières couvertes${ctx.reel ? '' : ' · démo (rien n\'est écrit)'}</span></div>
+      <span class="muet">${E.magasins.length} succursale(s) · ${bans().length - sans}/${bans().length} bannières couvertes${ctx.reel ? '' : ' · démo (rien n\'est écrit)'}</span></div>
     <div class="defile">
       <div class="panneau"><h2>Bannières</h2>
         <p class="muet" style="margin:0 0 10px">Une bannière <b>sans succursale active</b> ne compte pas dans Comparer, et ses rabais de circulaire ne s'affichent pas. Clique « + » pour en chercher une.</p>
-        <div class="mg-bans">${BANS.map(([k]) => { const n = actifs(k); return `<div class="mg-carte ${n ? '' : 'vide'}">${pastille(k)}
+        <div class="mg-bans">${bans().map(([k]) => { const n = actifs(k); return `<div class="mg-carte ${n ? '' : 'vide'}">${pastille(k)}
           ${n ? `<span class="n">${n}</span>` : '<span class="badge alerte">sans succursale</span>'}
           <button class="btn petit" data-ajban="${k}" title="Chercher une succursale ${esc(nomBan(k))}">+</button></div>`; }).join('')}</div></div>
 
@@ -90,7 +93,7 @@ export function vueMagasins(t, ctx) {
         <p class="muet" style="margin:0 0 10px">Bannière + ville ou code postal : je cherche les succursales et leurs adresses (OpenStreetMap, 1 recherche par clic). Pas trouvée ? Ajoute-la à la main.</p>
         <div class="mg-zone">
         <div class="mg-rang">
-          <select class="champ" id="mgBan">${BANS.map(([k, b]) => `<option value="${k}" ${k === ui.ban ? 'selected' : ''}>${esc(b.nom)}</option>`).join('')}</select>
+          <select class="champ" id="mgBan">${bans().map(([k, b]) => `<option value="${k}" ${k === ui.ban ? 'selected' : ''}>${esc(b.nom)}</option>`).join('')}</select>
           <input class="champ" id="mgVille" placeholder="Ville ou code postal (ex. Varennes, J3X)" value="${esc(ui.ville)}">
           <button class="btn principal" id="mgChercher">🔎 Chercher</button>
           <button class="btn" id="mgAuto" title="Toutes les bannières autour de cette ville : une liste à cocher">✨ Auto</button>
@@ -215,10 +218,10 @@ export function vueMagasins(t, ctx) {
       const centre = await geocoder(a.lieu);
       if (!centre) { a.enCours = false; a.progres = `Je ne trouve pas « ${a.lieu} ». Essaie le nom complet de la ville.`; vueMagasins(t, ctx); return; }
       const parAdresse = new Map();
-      for (let i = 0; i < BANS.length; i++) {
+      for (let i = 0; i < bans().length; i++) {
         if (ui.auto !== a) return;                                  // une autre recherche a commencé
-        const [k] = BANS[i];
-        majProgres(`Recherche ${nomBan(k)} (${i + 1}/${BANS.length})…`);
+        const [k] = bans()[i];
+        majProgres(`Recherche ${nomBan(k)} (${i + 1}/${bans().length})…`);
         await pause(1100);                                          // règle d'OpenStreetMap : 1 recherche par seconde
         let res = [];
         try { res = await chercherAutour(nomBan(k), centre, a.rayon); } catch { /* bannière suivante */ }

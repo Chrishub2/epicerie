@@ -11,10 +11,10 @@ import { SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, SUPABASE_JS } from '../config.js';
 export const COLLECTIONS = {
   article: 'articles', liste: 'liste', prix: 'prix', magasin: 'magasins', rayon: 'rayons',
   recette: 'recettes', livre: 'livres', carte: 'cartes', point: 'points', rabais: 'rabaisPerso',
-  photo: 'photos', recu: 'recus', releve: 'releves', cp: 'codesPostaux',
+  photo: 'photos', recu: 'recus', releve: 'releves', cp: 'codesPostaux', banniere: 'bannieres',
 };
 // Cartes fidélité et points : jamais chargés dans la console (inutiles ici, et données sensibles).
-const TYPES_LUS = ['article', 'rayon', 'prix', 'photo', 'recu', 'magasin', 'liste', 'recette', 'cp', 'rabais', 'livre', 'releve'];
+const TYPES_LUS = ['article', 'rayon', 'prix', 'photo', 'recu', 'magasin', 'liste', 'recette', 'cp', 'rabais', 'livre', 'releve', 'banniere'];
 
 /**
  * Construit l'état (même structure que l'app) à partir des lignes de `objets`.
