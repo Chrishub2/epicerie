@@ -72,40 +72,9 @@ setTimeout(async () => {
   await actualiserTout().catch(() => {});     // vrais prix des produits liés (max 1 fois / 12 h)
 }, 300);
 
-// ---------------------------------------------------------------------
-// Tirer l'écran vers le bas (en haut de page) = tout mettre à jour
-// ---------------------------------------------------------------------
-(() => {
-  const ind = document.createElement('div');
-  ind.id = 'tirer'; document.body.appendChild(ind);
-  let y0 = null, dy = 0, occupe = false;
-  const SEUIL = 80;
-  window.addEventListener('touchstart', (ev) => {
-    if (occupe || window.scrollY > 0 || document.querySelector('#modale').open || document.querySelector('.camera-recu')) { y0 = null; return; }
-    y0 = ev.touches[0].clientY; dy = 0;
-  }, { passive: true });
-  window.addEventListener('touchmove', (ev) => {
-    if (y0 == null) return;
-    dy = ev.touches[0].clientY - y0;
-    if (dy <= 0) { ind.style.transform = 'translate(-50%, -60px)'; return; }
-    ind.textContent = dy > SEUIL ? '↻ Relâche pour mettre à jour' : '↓ Tire pour mettre à jour';
-    ind.style.transform = `translate(-50%, ${Math.min(dy, SEUIL + 30) - 40}px)`;
-  }, { passive: true });
-  window.addEventListener('touchend', async () => {
-    if (y0 == null) return;
-    y0 = null;
-    if (dy <= SEUIL) { ind.style.transform = 'translate(-50%, -60px)'; return; }
-    occupe = true; ind.textContent = '↻ Mise à jour…';
-    try {
-      await traiterFile();
-      const ids = S.get().articles.filter((a) => a.liens?.length).map((a) => a.id);
-      for (const id of ids) await actualiserArticle(id, { force: true });
-      toast(navigator.onLine ? 'À jour' : 'Pas de réseau : ce sera fait au retour du réseau');
-    } finally {
-      occupe = false; ind.style.transform = 'translate(-50%, -60px)'; rendre();
-    }
-  });
-})();
+// (Geste « tirer l'écran vers le bas = tout mettre à jour » retiré en v72 : il se déclenchait
+//  en glissant dans la liste et relançait, un par un, les prix de TOUS les produits liés.
+//  Les prix se mettent quand même à jour seuls au démarrage — actualiserTout, max 1 fois / 12 h.)
 
 export function rendre() {
   appliquerRegistre(S.get().bannieres);   // bannières ajoutées depuis Flipp : disponibles dans Magasins
