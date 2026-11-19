@@ -26,6 +26,7 @@ export const SOURCES_CIRC = [
   { id: 'familiprix_extra', nom: 'Familiprix Extra', banniere: 'familiprix_extra' },
   { id: 'pharmaprix', nom: 'Pharmaprix', banniere: 'pharmaprix' },
   { id: 'canadian_tire', nom: 'Canadian Tire', banniere: 'canadian_tire', note: 'Électroménagers seulement' },
+  { id: 'provigo', nom: 'Provigo', banniere: 'provigo' },
 ];
 const SOURCE = Object.fromEntries(SOURCES_CIRC.map((s) => [s.id, s]));
 const BUCKET = 'circulaires';
