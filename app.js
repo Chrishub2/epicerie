@@ -4,7 +4,7 @@
 import { estFsa, secteurDe, memeVille, enSecteur } from './secteurs.js';
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
-  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive } from './ui.js';
+  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive, magasinsActifs } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserOffre, analyserFormat, formatLisible, gtinVariantes } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
@@ -418,7 +418,7 @@ function htmlRangee(r, cols, seule) {
   let h = `<tr class="pl ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="p-art">
     <div class="p-photo" data-fiche="${a.id}">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : '<span aria-hidden="true">📦</span>'}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
     <div class="p-txt" data-fiche="${a.id}"><div class="p-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>${
-      seule ? (sous.length ? `<div class="p-sous">${esc(sous.join(' · '))}</div>` : '') : sous.map((s) => `<div class="p-sous">${esc(s)}</div>`).join('')}</div>
+      sous.length ? `<div class="p-sous">${esc(sous.join(' · '))}</div>` : ''}</div>
     <div class="p-pm"><button data-q="1" aria-label="Un de plus">+</button><button data-q="-1" aria-label="Un de moins">−</button></div></div></td>`;
   if (seule) return `${h}</tr>`;
   h += `<td class="p-dealc">${r.offre ? htmlPrixCase(r.offre, u, { avecMax: false }) : '<span class="pp" style="color:var(--doux)">—</span>'}</td>`;
@@ -429,13 +429,86 @@ function htmlRangee(r, cols, seule) {
   return `${h}<td></td></tr>`;
 }
 
+// ---------------------------------------------------------------------
+// Liste — MODE ÉPICERIE (une puce par bannière) : seulement les articles dont la bannière choisie en
+// Préparation est celle-ci. Les choix restent modifiables : on revient à « Prépa. » à tout moment.
+// ---------------------------------------------------------------------
+const PREF_MODE = 'liste.mode';   // « prep » ou une bannière (ce téléphone)
+function modeListe(cols) {
+  let m = 'prep';
+  try { m = localStorage.getItem(PREF_MODE) || 'prep'; } catch { /* navigation privée */ }
+  return m === 'prep' || cols.includes(m) ? m : 'prep';
+}
+
+function vueEpicerie(v, b, toutes) {
+  const e = S.get();
+  const ici = toutes.filter((r) => r.ban === b);
+  const aPrendre = ici.filter((r) => !r.l.coche && !r.l.indisponible);
+  const panier = ici.filter((r) => r.l.coche);
+  const indispos = ici.filter((r) => !r.l.coche && r.l.indisponible);
+  const sansPrix = toutes.filter((r) => !r.ban && !r.l.coche && !r.l.indisponible);
+  const nom = esc(nomBanniere(b));
+
+  // Ordre des rayons de la succursale de cette bannière (sinon l'ordre par défaut)
+  const mag = magasinsActifs(b).find((m) => m.id === e.magasinCourant) || magasinsActifs(b)[0];
+  const ordreId = mag && e.ordreRayons?.[mag.id] ? mag.id : 'defaut';
+  const divers = rayonParDefaut();
+  const rayonDe = (a) => (e.rayons.some((r) => r.id === a.rayonId) ? a.rayonId : divers);
+  const parRayons = (rs) => {
+    let h = '';
+    for (const g of groupesRayons(ordreId)) {
+      const dans = rs.filter((r) => g.ids.includes(rayonDe(r.a)));
+      if (dans.length) h += `<section class="rayon"><h3>${esc(g.nom)} <span class="doux">(${dans.length})</span></h3>${dans.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
+    }
+    return h;
+  };
+
+  let h = '';
+  if (!aPrendre.length && !panier.length) {
+    h += `<div class="vide">Rien à acheter chez ${nom}. Dans « Prépa. », touche un prix de la colonne ${nom} pour y placer un article.</div>`;
+  } else if (!aPrendre.length) {
+    h += `<div class="vide">✔ Tout est dans le panier chez ${nom}.</div>`;
+  }
+  h += parRayons(aPrendre);
+  if (sansPrix.length) h += `<section class="rayon"><h3>Sans prix connu <span class="doux">(${sansPrix.length})</span> <span class="doux" style="font-size:12px;font-weight:400">— à prendre où tu les trouves</span></h3>${sansPrix.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
+  if (indispos.length) h += `<section class="rayon"><h3>🚫 Pas disponible <span class="doux">(${indispos.length})</span></h3>${indispos.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
+  if (panier.length) {
+    h += `<section class="rayon"><h3>🛒 Dans le panier <span class="doux">(${panier.length})</span></h3>${panier.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
+    h += `<button class="btn sec" id="btnVider" style="width:100%;margin-top:8px">Retirer les ${panier.length} article(s) acheté(s)</button>`;
+  }
+  h += '<button class="btn sec" id="btnRecu" style="width:100%;margin-top:8px">🧾 Photographier mon reçu</button>';
+  v.innerHTML = h;
+
+  const ids = new Set(panier.map((r) => r.l.id));
+  $('#btnVider', v)?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !ids.has(l.id)); }));
+  $('#btnRecu', v).onclick = () => nouveauRecu();
+  $$('.item-liste', v).forEach((el) => brancherAppuiLong(el, () => optionsArticleListe(el.dataset.id)));
+  $$('.item-liste', v).forEach((el) => {
+    const id = el.dataset.id;
+    el.querySelector('input').onchange = (ev) => S.maj((x) => {
+      const l = x.liste.find((i) => i.id === id);
+      if (l) { l.coche = ev.target.checked; l.cocheLe = ev.target.checked ? new Date().toISOString() : null; }
+    });
+    el.querySelectorAll('[data-q]').forEach((bt) => bt.onclick = () => S.maj((x) => {
+      const l = x.liste.find((i) => i.id === id);
+      if (!l) return;
+      l.quantite = Math.max(0, l.quantite + Number(bt.dataset.q));
+      if (l.quantite === 0) x.liste = x.liste.filter((i) => i.id !== id);
+    }));
+    el.querySelectorAll('[data-fiche]').forEach((f) => f.onclick = () => ficheArticle(f.dataset.fiche, id));
+    el.querySelector('[data-photomag]')?.addEventListener('click', (ev) => { ev.stopPropagation(); identifierArticle(ev.currentTarget.dataset.photomag, id); });
+  });
+}
+
 function vueListe(v) {
   const e = S.get();
   const photo = lirePref(PREF_PHOTO);
   const seule = lirePref(PREF_SEULE);
   const cols = banColonnes();
-  const rangees = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a)
+  const toutes = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a)
     .map(({ l, a }) => rangeeListe(l, a));
+  // Préparation : ce qui reste à acheter (les articles déjà « dans le panier » sont dans le mode épicerie)
+  const rangees = toutes.filter((r) => !r.l.coche);
 
   // Totaux : par bannière (au-dessus du logo), économies (dessous) et total de l'épicerie (en-tête)
   const tot = {}, eco = {};
@@ -446,10 +519,17 @@ function vueListe(v) {
     if (c != null) { total += c; tot[r.ban] = (tot[r.ban] || 0) + c; }
     if (r.offre.economie) eco[r.ban] = (eco[r.ban] || 0) + r.offre.economie * r.l.quantite;
   }
-  $('#totalListe').textContent = rangees.length ? argent(total) : '';
-  $('#pucesMag').innerHTML = '<button class="actif" data-mode="prep">Prépa.</button>'
-    + cols.map((b) => `<button data-mode="${b}">${esc(nomBanniere(b))}</button>`).join('');
-  $$('#pucesMag [data-mode]').forEach((b) => b.onclick = () => { if (b.dataset.mode !== 'prep') toast('Mode épicerie : bientôt'); });
+  const mode = modeListe(cols);
+  $('#totalListe').textContent = mode !== 'prep' ? argent(tot[mode] || 0) : rangees.length ? argent(total) : '';
+  $('#pucesMag').innerHTML = `<button class="${mode === 'prep' ? 'actif' : ''}" data-mode="prep">Prépa.</button>`
+    + cols.map((b) => `<button class="${mode === b ? 'actif' : ''}" data-mode="${b}">${esc(nomBanniere(b))}</button>`).join('');
+  $$('#pucesMag [data-mode]').forEach((b) => b.onclick = () => {
+    if (b.dataset.mode === mode) return;
+    try { localStorage.setItem(PREF_MODE, b.dataset.mode); } catch { /* navigation privée */ }
+    rendre();
+    window.scrollTo(0, 0);
+  });
+  if (mode !== 'prep') { vueEpicerie(v, mode, toutes); return; }
 
   if (!rangees.length) {
     v.innerHTML = '<div class="vide">Ta liste est vide. Ajoute un produit en haut à droite ou scanne un code-barres.</div>';
@@ -458,7 +538,9 @@ function vueListe(v) {
 
   const nCol = seule ? 1 : cols.length + 3;
   const bascule = (id, lib, on) => `<label class="bascule"><span class="interrupteur"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></span><span class="lib">${lib}</span></label>`;
-  let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-defile"><table class="prep-t">`;
+  // Largeur fixe : sans largeur de tableau, le navigateur élargit la colonne produit au nom le plus long
+  const largeur = (photo ? 52 : 172) + 72 + cols.length * 72 + 40;
+  let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-defile"><table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>`;
   if (!seule) h += `<colgroup><col style="width:${photo ? 52 : 172}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`;
   // Liste activée : l'interrupteur Photo disparaît et Liste prend sa place
   h += `<thead><tr><th class="pc"><div class="bascules">${seule ? '' : bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div></th>`;
@@ -468,6 +550,9 @@ function vueListe(v) {
     h += '<th><button class="p-ajban" id="btnAjBan" aria-label="Ajouter une bannière">+</button></th>';
   }
   h += '</tr></thead><tbody>';
+  // Fiches à compléter (sans photo et jamais liées) : une à une, tu choisis le bon produit en ligne
+  const aCompleter = rangees.filter((r) => !r.a.imageUrl && !r.a.liens?.length).map((r) => r.a.id);
+  if (aCompleter.length && navigator.onLine) h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><button id="btnCompleter">📷 ${aCompleter.length} produit(s) sans photo · Compléter</button></span></td></tr>`;
 
   // Rayons dans l'ordre standard (« Ordre par défaut ») ; bande compacte sur toute la largeur
   const divers = rayonParDefaut();
@@ -490,6 +575,18 @@ function vueListe(v) {
     toast('Tout au meilleur prix');
   });
   $('#btnAjBan', v)?.addEventListener('click', () => allerOnglet('magasins'));
+  $('#btnCompleter', v)?.addEventListener('click', () => {
+    let i = 0;
+    const suivant = () => {
+      const id = aCompleter[i++];
+      if (!id) { fermerModale(); toast('Fiches parcourues'); return; }
+      const a = S.get().articles.find((x) => x.id === id);
+      if (!a) { suivant(); return; }
+      ouvrirLiaison(id, suivant, { auto: true, passer: suivant,
+        etape: `Fiche ${i}/${aCompleter.length} — ${a.nom} : coche le bon produit (photo, marque, format et prix suivent), ou « Plus tard »` });
+    };
+    suivant();
+  });
   $$('[data-reorg]', v).forEach((b) => b.onclick = () => ouvrirReorg('defaut'));
   $$('[data-classer]', v).forEach((b) => b.onclick = () => classerSansRayon());
 

@@ -269,6 +269,7 @@ export function ouvrirLiaison(articleId, apres, opts = {}) {
         e.prix = e.prix.filter((p) => !(p.articleId === articleId && p.source === 'epiceries_ca' && !ar.liens.some((l) => l.id === p.lienId)));
         if (!ar.imageUrl && choisis[0]?.image) ar.imageUrl = choisis[0].image;
         if (!ar.format && choisis[0]?.size) { ar.format = formatLisible(choisis[0].size); const f = analyserFormat(choisis[0].size); if (f) ar.uniteRef = f.base; }
+        if (!ar.marque && choisis[0]?.brand) ar.marque = choisis[0].brand;
       });
       $('#ecLier', c).disabled = true; $('#ecLier', c).textContent = 'Récupération des prix…';
       const n = await actualiserArticle(articleId, { force: true });

@@ -145,7 +145,8 @@ table.prep-t { border-collapse: separate; border-spacing: 0; table-layout: fixed
 .p-photo.appui::after { content: ''; position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: var(--rouge); border-radius: 2px;
   animation: appui-long 2.7s linear .3s forwards; }
 .p-txt { min-width: 0; flex: 1; overflow: hidden; cursor: pointer; }
-.p-nom { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-nom { font-weight: 600; font-size: 12.5px; line-height: 1.2; overflow: hidden; overflow-wrap: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .p-sous { font-size: 11px; color: var(--doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .p-pm { display: flex; flex-direction: column; gap: 3px; flex: none; }
 .p-pm button { width: 34px; height: 23px; border-radius: 7px; border: 1px solid var(--ligne); background: var(--gris-fond);

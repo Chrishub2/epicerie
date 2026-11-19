@@ -74,13 +74,14 @@ export function normaliserProduits(e) {
   // Rattache prix, achats et lignes de reçus à la variante (seulement s'il en manque une valide)
   const ids = new Map((e.articles || []).map((a) => [a.id, new Set(a.variantes.map((v) => v.id))]));
   const valide = (articleId, varianteId) => ids.get(articleId)?.has(varianteId);
-  const rattacher = (o) => {
+  // fige : un prix est un historique (la base refuse de le modifier) → sa variante n'est jamais réécrite
+  const rattacher = (o, fige = false) => {
     if (!o?.articleId || !prefDe.has(o.articleId)) return false;
-    if (o.varianteId && valide(o.articleId, o.varianteId)) return false;
+    if (o.varianteId && (fige || valide(o.articleId, o.varianteId))) return false;
     o.varianteId = prefDe.get(o.articleId);
     return true;
   };
-  for (const p of e.prix || []) if (rattacher(p)) n++;
+  for (const p of e.prix || []) if (rattacher(p, true)) n++;
   for (const x of e.achats || []) if (rattacher(x)) n++;
   for (const r of e.recus || []) {
     let change = false;

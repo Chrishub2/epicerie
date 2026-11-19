@@ -214,7 +214,19 @@ export async function pousser() {
     };
     const refuses = await envoyerParPaquets(lignes, envoyer, new Set((meta.refuses || []).map((r) => r.k)));
     if (refuses.length) console.warn('Synchronisation : élément(s) refusé(s) par la base', refuses);
-    meta.refuses = refuses;
+    // Prix modifié sur ce téléphone alors que la base les garde en ajout seulement (incident du 2026-11-19 :
+    // 102 prix dont la variante avait été réécrite) → on reprend la version de la base, rien n'est perdu.
+    const aRetablir = refuses.filter((r) => r.k.startsWith('prix:') && /ajout seulement/i.test(r.erreur) && meta.empreintes[r.k]);
+    if (aRetablir.length) {
+      S.maj((e) => {
+        for (const r of aRetablir) {
+          const id = r.k.slice(5);
+          const i = (e.prix || []).findIndex((p) => String(cleDe('prix', p)) === id);
+          if (i >= 0) e.prix[i] = JSON.parse(meta.empreintes[r.k]);
+        }
+      });
+    }
+    meta.refuses = refuses.filter((r) => !aRetablir.includes(r));
     await envoyerPhotos();
     meta.erreurEnvoi = null;
     meta.dernier = new Date().toISOString(); ecrireMeta(); signaler();
