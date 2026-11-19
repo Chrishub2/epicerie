@@ -1,0 +1,71 @@
+/* Skin « Plein jour » — choisi par Chris le 2026-11-18 (direction B, avec le skill frontend-design).
+   Lisible sous l'éclairage du magasin : blanc, encre bleu marine, police Lexend (zéro rond, sans barre oblique).
+   Le soir : suit le mode sombre du téléphone (bleu nuit, tuile choisie inversée en blanc cassé).
+   S'active avec <html data-skin="pleinjour">. Polices chargées par skins.js ; repli système hors ligne. */
+
+:root[data-skin="pleinjour"] {
+  --fond: #ffffff; --carte: #f5f7fb; --texte: #13233d; --doux: #5a6b86; --ligne: #e3e8f0;
+  --accent: #13233d; --accent-doux: #eef2f8;
+  --vert: #0b7a43; --vert-fond: #e3f4ea; --ambre: #b3261e; --ambre-fond: #fdeceb;
+  --rouge: #b3261e; --rouge-fond: #fdeceb; --gris-fond: #eef2f8;
+  --ombre: none;
+  --pj-entete: #13233d; --pj-entete-2: #24395e; --pj-entete-texte: #ffffff; --pj-entete-doux: #a9b8d3;
+  --pj-choix: #13233d; --pj-choix-texte: #ffffff; --pj-choix-rabais: #ffd54f; --pj-choix-doux: #a9b8d3;
+  --pj-qte: #13233d; --pj-qte-texte: #ffffff; --pj-sur-accent: #ffffff;
+  --police-texte: "Lexend", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="pleinjour"]:not([data-theme="light"]) {
+    --fond: #0f1b2e; --carte: #16243b; --texte: #e6edf7; --doux: #8c9bb4; --ligne: #1c2d47;
+    --accent: #4fc3f7; --accent-doux: #16243b;
+    --vert: #6fd39a; --vert-fond: #143326; --ambre: #ff8a80; --ambre-fond: #3a1d1b;
+    --rouge: #ff8a80; --rouge-fond: #3a1d1b; --gris-fond: #16243b;
+    --pj-entete: #0a1424; --pj-entete-2: #1c2d47; --pj-entete-texte: #e6edf7; --pj-entete-doux: #8c9bb4;
+    --pj-choix: #e6edf7; --pj-choix-texte: #0f1b2e; --pj-choix-rabais: #b3261e; --pj-choix-doux: #5a6b86;
+    --pj-qte: #4fc3f7; --pj-qte-texte: #0f1b2e; --pj-sur-accent: #0f1b2e;
+    color-scheme: dark;
+  }
+}
+/* Sombre choisi dans l'app (Plus → Apparence → Sombre), même si le téléphone est en clair */
+:root[data-skin="pleinjour"][data-theme="dark"] {
+  --fond: #0f1b2e; --carte: #16243b; --texte: #e6edf7; --doux: #8c9bb4; --ligne: #1c2d47;
+  --accent: #4fc3f7; --accent-doux: #16243b;
+  --vert: #6fd39a; --vert-fond: #143326; --ambre: #ff8a80; --ambre-fond: #3a1d1b;
+  --rouge: #ff8a80; --rouge-fond: #3a1d1b; --gris-fond: #16243b;
+  --pj-entete: #0a1424; --pj-entete-2: #1c2d47; --pj-entete-texte: #e6edf7; --pj-entete-doux: #8c9bb4;
+  --pj-choix: #e6edf7; --pj-choix-texte: #0f1b2e; --pj-choix-rabais: #b3261e; --pj-choix-doux: #5a6b86;
+  --pj-qte: #4fc3f7; --pj-qte-texte: #0f1b2e; --pj-sur-accent: #0f1b2e;
+  color-scheme: dark;
+}
+
+:root[data-skin="pleinjour"] body,
+:root[data-skin="pleinjour"] input,
+:root[data-skin="pleinjour"] button { font-family: var(--police-texte); }
+
+/* En-tête bleu marine (bleu nuit le soir) */
+:root[data-skin="pleinjour"] header { background: var(--pj-entete); color: var(--pj-entete-texte);
+  --entete-tuile: var(--pj-entete-2); --entete-ok-fond: #4fc3f7; --entete-ok-texte: #13233d;
+  --entete-puce-bord: transparent; --entete-puce-actif: var(--pj-entete-texte); --entete-puce-actif-texte: var(--pj-entete); }
+:root[data-skin="pleinjour"] .puces-mag button { background: var(--pj-entete-2); color: var(--pj-entete-doux); }
+:root[data-skin="pleinjour"] .puces-mag button.actif { background: var(--pj-entete-texte); color: var(--pj-entete); }
+
+/* Tableau Préparation : cases arrondies, choix = tuile pleine */
+:root[data-skin="pleinjour"] .p-deal { border: 2px solid var(--texte); color: var(--texte); border-radius: 999px; }
+:root[data-skin="pleinjour"] .pcel { border: 0; border-radius: 12px; background: var(--carte); }
+:root[data-skin="pleinjour"] .pcel.vide { background: transparent; }
+:root[data-skin="pleinjour"] .pcel.sel { background: var(--pj-choix); color: var(--pj-choix-texte); }
+:root[data-skin="pleinjour"] .pcel.sel .pp.promo { color: var(--pj-choix-rabais); }
+:root[data-skin="pleinjour"] .pcel.sel .prg { color: var(--pj-choix-doux); }
+:root[data-skin="pleinjour"] .p-qte { background: var(--pj-qte); color: var(--pj-qte-texte); }
+:root[data-skin="pleinjour"] .p-photo, :root[data-skin="pleinjour"] .p-pm button { border-radius: 10px; }
+:root[data-skin="pleinjour"] .p-pm button { border: 0; background: var(--gris-fond); }
+:root[data-skin="pleinjour"] .p-nom { font-weight: 700; }
+:root[data-skin="pleinjour"] .prep-t tr.pr td { background: var(--gris-fond); }
+:root[data-skin="pleinjour"] .pr-nom { font-weight: 700; }
+:root[data-skin="pleinjour"] .interrupteur input:checked + span { background: var(--accent); }
+
+/* Ailleurs dans l'app : mêmes formes douces */
+:root[data-skin="pleinjour"] .carte, :root[data-skin="pleinjour"] .item { border-radius: 12px; }
+:root[data-skin="pleinjour"] button.btn { border-radius: 999px; }
+:root[data-skin="pleinjour"] nav.onglets button.actif { color: var(--texte); }
+:root[data-skin="pleinjour"] button.btn:not(.sec):not(.danger) { color: var(--pj-sur-accent); }

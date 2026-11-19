@@ -91,11 +91,12 @@ export function ouvrirModale(titre, html, apres, opts = {}) {
   $('#modaleTitre').innerHTML = `${opts.image ? `<img src="${esc(opts.image)}" alt="" class="vignette" style="vertical-align:middle;margin-right:8px">` : ''}${esc(titre)}`;
   $('#modaleCorps').innerHTML = html;
   if (!dlg().open) dlg().showModal();
+  document.documentElement.classList.add('modale-ouverte'); // la page derrière ne défile plus avec la fiche
   apres?.($('#modaleCorps'));
 }
 let surFermeture = null;
 // Appelé une seule fois par fermeture (bouton ✕, fermerModale ou touche Échap via l'événement « close »)
-function apresFermeture() { const f = surFermeture; surFermeture = null; f?.(); }
+function apresFermeture() { document.documentElement.classList.remove('modale-ouverte'); const f = surFermeture; surFermeture = null; f?.(); }
 export function fermerModale() { if (dlg().open) dlg().close(); apresFermeture(); }
 export function quandFermee(fn) { surFermeture = fn; }
 document.addEventListener('DOMContentLoaded', () => {

@@ -29,7 +29,9 @@ export const SKINS = [
   { id: 'musique', nom: 'Musique', description: 'Ta liste en playlist', apercu: ['#0f1e24', '#142830', '#ff7a3d', '#f4ece0'],
     polices: GF + 'Syne:wght@600;800&family=Inter:wght@400;500;600&display=swap' },
   { id: 'sport', nom: 'Sport', description: 'Tableau de pointage', apercu: ['#eef2f6', '#0b1f3a', '#d7263d', '#ffd23f'],
-    polices: GF + 'Anton&family=Barlow+Condensed:wght@500;600;700&display=swap' }
+    polices: GF + 'Anton&family=Barlow+Condensed:wght@500;600;700&display=swap' },
+  { id: 'pleinjour', nom: 'Plein jour', description: 'Lisible en magasin, bleu nuit le soir', apercu: ['#ffffff', '#eef2f8', '#13233d', '#13233d'],
+    polices: GF + 'Lexend:wght@400;500;700&display=swap' }
 ];
 
 /** Fichiers à mettre dans le cache hors ligne (sw.js). */
@@ -95,3 +97,6 @@ export function brancherChoixSkin(racine = document) {
     });
   });
 }
+
+// Le téléphone passe en mode sombre (le soir) : la couleur de sa barre suit l'en-tête du skin.
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => appliquerSkin(skinActuel())); } catch { /* vieux navigateur */ }

@@ -4,14 +4,14 @@
 import { estFsa, secteurDe, memeVille, enSecteur } from './secteurs.js';
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
-  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon } from './ui.js';
-import { BANNIERES } from './demo-data.js';
-import { analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
+  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive } from './ui.js';
+import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
+import { analyserOffre, analyserFormat, formatLisible, gtinVariantes } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
-import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
+import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique, rechercherSouple } from './epiceries.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
 import * as Sync from './sync.js';
 import { surveillerMisesAJour } from './maj.js';
@@ -29,37 +29,30 @@ let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répa
 // Démarrage
 // ---------------------------------------------------------------------
 S.charger();
-const choix = $('#choixMembre');
-choix.onchange = () => S.maj((e) => { e.utilisateur = choix.value; });
 
-/** En-tête : membre actif (connecté : son prénom, sans choix) et bandeau d'état. */
+/**
+ * Bandeau d'état sous l'en-tête : seulement quand quelque chose cloche (envoi refusé, hors ligne).
+ * Plus de nom ni de note « données gardées sur ce téléphone » (demande de Chris, 2026-11-18).
+ */
 function majEntete() {
-  const e = S.get();
   const st = Sync.etatSync();
-  if (st.foyer) {
-    choix.innerHTML = `<option>${esc(e.utilisateur)}</option>`; choix.disabled = true;
-  } else {
-    choix.disabled = false;
-    choix.innerHTML = e.membres.map((m) => `<option ${m === e.utilisateur ? 'selected' : ''}>${esc(m)}</option>`).join('');
-  }
   const b = $('#bandeauDemo');
   b.onclick = null;
+  b.classList.remove('ok');
+  b.classList.remove('cache');
   if (st.foyer && st.enLigne && (st.refuses.length || st.erreurEnvoi)) {
     // Ne jamais afficher « synchronisé » quand un envoi échoue (incident du 2026-11-16)
-    b.classList.remove('ok');
     b.textContent = st.refuses.length
       ? `⚠ ${st.refuses.length} élément(s) refusé(s) par la base · le reste est synchronisé · touche pour le détail`
       : '⚠ Envoi en attente : la base n\'a pas répondu · nouvel essai au prochain changement · touche pour le détail';
     b.onclick = () => toast(st.refuses.length
       ? st.refuses.slice(0, 3).map((r) => `${r.k} : ${r.erreur}`).join(' · ')
       : `Dernière erreur : ${st.erreurEnvoi}`);
-  } else if (st.foyer) {
-    b.classList.add('ok');
-    b.textContent = `👪 Partagé avec « ${st.foyer.nom} » · ${st.enLigne ? 'synchronisé' : '📵 hors ligne : envoi au retour du réseau'}`;
+  } else if (st.foyer && !st.enLigne) {
+    b.textContent = '📵 Hors ligne : tes changements seront envoyés au retour du réseau';
   } else {
-    b.classList.remove('ok');
-    b.textContent = st.connecte ? 'Connecté : crée ou joins ton foyer dans Plus → Mon foyer.'
-      : 'Données gardées sur ce téléphone seulement. Plus → Mon foyer pour partager la liste et activer l\'IA.';
+    b.textContent = '';
+    b.classList.add('cache');
   }
 }
 
@@ -116,8 +109,10 @@ setTimeout(async () => {
 export function rendre() {
   majEntete();
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
+  document.body.classList.toggle('onglet-liste', onglet === 'liste');
+  if (onglet !== 'liste') { masquerSuggestions(); $('#champAjout').classList.remove('ouvert'); }
   const v = $('#vue');
-  if (onglet === 'liste') { vueListe(v); majBandeauCirc(); }
+  if (onglet === 'liste') vueListe(v);
   else if (onglet === 'comparer') vueComparaison(v, rendre);
   else if (onglet === 'recettes') vueRecettes(v);
   else if (onglet === 'magasins') vueMagasins(v);
@@ -366,109 +361,288 @@ function logoCle(k) {
   return logoVille(k);
 }
 
+// ---------------------------------------------------------------------
+// Liste — PRÉPARATION : tableau article × bannière (maquette v16 validée par Chris le 2026-11-18).
+// Le mode épicerie (liste par magasin, cases à cocher) viendra ensuite : htmlItem / htmlRayons restent pour lui.
+// ---------------------------------------------------------------------
+const PREF_PHOTO = 'liste.photo';   // colonne produit réduite à la photo (ce téléphone)
+const PREF_SEULE = 'liste.seule';   // liste des produits seulement, sans colonnes de prix (ce téléphone)
+const lirePref = (k) => { try { return localStorage.getItem(k) === '1'; } catch { return false; } };
+const ecrirePref = (k, oui) => { try { localStorage.setItem(k, oui ? '1' : '0'); } catch { /* navigation privée */ } };
+
+/** Bannières en colonnes : celles dont au moins une succursale est « à considérer ». */
+const banColonnes = () => BANNIERES_MAGASIN.filter((b) => banniereActive(b));
+
+/** Clé d'arrêt → bannière (« perso:IGA Extra Varennes » → iga). */
+function banDeCle(cle) {
+  if (!cle || cle === 'aucun') return null;
+  if (cle.startsWith('perso:')) return S.get().magasins.find((m) => m.nom === cle.slice(6))?.banniere || null;
+  return cle;
+}
+
+/** « Limite de 3 par client », « max. 4 »… dans les conditions d'une offre → 3, 4. */
+function maxParClient(o) {
+  const m = String(o?.conditions || '').match(/(?:max(?:imum)?\.?|limite(?:\s+de)?)\D{0,12}(\d{1,2})\b/i);
+  return m ? Number(m[1]) : null;
+}
+
+/** Prix unitaire court pour une case : « 1,52 $/kg », « 2,99 $/u ». */
+const puCourt = (pu, u) => esc(libelleUnitaire(pu, u).split(' · ')[0].replace('$/unité', '$/u'));
+
+/** Une rangée : offres par bannière (la moins chère de chacune), bannière choisie et son offre. */
+function rangeeListe(l, a) {
+  const offres = offresArticle(a).filter((o) => o.pu != null); // déjà triées du moins cher au plus cher
+  const parBan = {};
+  for (const o of offres) if (!parBan[o.banniere]) parBan[o.banniere] = o;
+  const choisie = banDeCle(l.magasinCible);
+  const ban = choisie && parBan[choisie] ? choisie : offres[0]?.banniere || null;
+  return { l, a, parBan, ban, offre: ban ? parBan[ban] : null };
+}
+
+/** Contenu d'une case de prix : prix unitaire (rabais en couleur), régulier barré ou rabais perso dessous. */
+function htmlPrixCase(o, u, { avecMax = true } = {}) {
+  const promo = o.perso || o.economie || (o.type && o.type !== 'regulier');
+  const max = avecMax ? maxParClient(o) : null;
+  const dessous = o.perso
+    ? `<span class="prg perso">${esc((o.rabaisTexte || '').match(/−\s*\d+\s*%/)?.[0] || 'perso')}</span>`
+    : `<span class="prg">${o.economie && o.prixNum ? argent(o.pu * o.prixRegulier / o.prixNum) : ''}</span>`;
+  return `${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}`;
+}
+
+const SVG_RAPPEL = '<svg class="p-rappel" viewBox="0 0 18 16" role="img" aria-label="Rappel ou avis sur ce produit"><path d="M9 1 17 15H1z" fill="#ffd54f" stroke="#8a5a00" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 6v4" stroke="#412402" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="12.4" r=".9" fill="#412402"/></svg>';
+
+function htmlRangee(r, cols, seule) {
+  const { l, a } = r;
+  const u = r.offre?.uniteRef || a.uniteRef;
+  const sous = [formatLisible(a.format), a.marque].filter(Boolean);
+  let h = `<tr class="pl ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="p-art">
+    <div class="p-photo" data-fiche="${a.id}">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : '<span aria-hidden="true">📦</span>'}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
+    <div class="p-txt" data-fiche="${a.id}"><div class="p-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>${
+      seule ? (sous.length ? `<div class="p-sous">${esc(sous.join(' · '))}</div>` : '') : sous.map((s) => `<div class="p-sous">${esc(s)}</div>`).join('')}</div>
+    <div class="p-pm"><button data-q="1" aria-label="Un de plus">+</button><button data-q="-1" aria-label="Un de moins">−</button></div></div></td>`;
+  if (seule) return `${h}</tr>`;
+  h += `<td class="p-dealc">${r.offre ? htmlPrixCase(r.offre, u, { avecMax: false }) : '<span class="pp" style="color:var(--doux)">—</span>'}</td>`;
+  h += cols.map((b) => {
+    const o = r.parBan[b];
+    return `<td>${o ? `<button class="pcel ${b === r.ban ? 'sel' : ''}" data-cle="${esc(cleOffre(o))}" aria-label="Acheter chez ${esc(nomBanniere(b))}">${htmlPrixCase(o, u)}</button>` : '<span class="pcel vide">—</span>'}</td>`;
+  }).join('');
+  return `${h}<td></td></tr>`;
+}
+
 function vueListe(v) {
   const e = S.get();
-  const tous = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a);
-  // Groupes de magasins (après « Utiliser cette répartition »), avec total par magasin
-  const cibles = {};
-  tous.forEach((x) => { const k = x.l.magasinCible || 'aucun'; (cibles[k] ||= { n: 0, total: 0, items: [] }); cibles[k].n++; cibles[k].items.push(x);
-    if (k !== 'aucun' && !x.l.coche) cibles[k].total += coutPour(x.l, x.a, k) || 0; });
-  const avecCibles = Object.keys(cibles).some((k) => k !== 'aucun');
-  if (!avecCibles || (filtreMagasin !== 'tous' && !cibles[filtreMagasin])) filtreMagasin = 'tous';
-  const magFiltre = magasinDeCle(filtreMagasin);
-  const nbCoches = e.liste.filter((l) => l.coche).length;
-  const optionsMag = [`<option value="defaut">Ordre par défaut</option>`]
-    .concat(e.magasins.filter((m) => m.actif !== false).map((m) => `<option value="${m.id}" ${e.magasinCourant === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`)).join('');
-  const totalGeneral = Object.entries(cibles).filter(([k]) => k !== 'aucun').reduce((t, [, c]) => t + c.total, 0);
+  const photo = lirePref(PREF_PHOTO);
+  const seule = lirePref(PREF_SEULE);
+  const cols = banColonnes();
+  const rangees = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a)
+    .map(({ l, a }) => rangeeListe(l, a));
 
-  let html = `
-    <div class="ajout">
-      <div class="rang">
-        <input id="saisie" class="grandir" placeholder="Ajouter… (ex. beurre, 2 lait)" autocomplete="off" enterkeyhint="done">
-        <button class="icone entree" id="btnEntree" title="Entrée" aria-label="Ajouter">✓</button>
-        <button class="icone" id="btnScan" title="Code-barres">▥</button>
-        <button class="icone" id="btnPhoto" title="Photo d'un produit">📷</button>
-      </div>
-      <div id="suggestions" class="suggestions cache"></div>
-    </div>
-    ${alertesListe()}
-    <div id="bandeauCirc"></div>
-    <div class="rang" style="margin:4px 0 6px">
-      ${magFiltre ? `<div class="grandir doux">Rayons dans l'ordre de <b>${esc(magFiltre.nom)}</b></div>`
-        : avecCibles ? '<div class="grandir doux">Chaque magasin garde son ordre de rayons</div>'
-        : `<select id="choixMagasin" class="grandir" aria-label="Ordre des rayons pour quel magasin">${optionsMag}</select>`}
-      <button class="btn sec" id="btnReorg">↕ Rayons</button>
-    </div>
-    ${avecCibles ? `<div class="rang envelopper" style="margin-bottom:8px">
-      <button class="btn ${filtreMagasin === 'tous' ? '' : 'sec'} puce-filtre" data-filtre="tous">Tout (${tous.length}) · ${argent(totalGeneral)}</button>
-      ${Object.entries(cibles).map(([k, c]) => `<button class="btn ${filtreMagasin === k ? '' : 'sec'} puce-filtre" data-filtre="${esc(k)}">${logoCle(k)} <span>(${c.n})${k !== 'aucun' ? ` · ${argent(c.total)}` : ''}</span></button>`).join('')}</div>` : ''}`;
-
-  if (!tous.length) html += `<div class="vide">Ta liste est vide. Ajoute un article, scanne un code-barres ou ajoute une recette.</div>`;
-  else if (avecCibles && filtreMagasin === 'tous') {
-    // Vue « Tout » : un bloc par magasin (logo, nombre, total), repliable d'un toucher
-    for (const [k, c] of Object.entries(cibles)) {
-      const mag = magasinDeCle(k);
-      const ferme = replies.has(k);
-      html += `<div class="groupe-mag ${ferme ? 'ferme' : ''}">
-        <button class="tete-mag" data-replier="${esc(k)}"><span class="fleche">${ferme ? '▸' : '▾'}</span><span class="grandir">${logoCle(k)}</span>
-          <span class="doux">${c.n} art.</span>${k !== 'aucun' ? `<b>${argent(c.total)}</b>` : ''}</button>
-        ${ferme ? '' : `<div class="corps-mag">${htmlRayons(c.items, mag?.id || e.magasinCourant)}</div>`}</div>`;
-    }
-  } else {
-    const items = filtreMagasin === 'tous' ? tous : cibles[filtreMagasin].items;
-    html += htmlRayons(items, magFiltre?.id || e.magasinCourant);
+  // Totaux : par bannière (au-dessus du logo), économies (dessous) et total de l'épicerie (en-tête)
+  const tot = {}, eco = {};
+  let total = 0;
+  for (const r of rangees) {
+    if (!r.offre || r.l.indisponible) continue;
+    const c = coutPour(r.l, r.a, cleOffre(r.offre));
+    if (c != null) { total += c; tot[r.ban] = (tot[r.ban] || 0) + c; }
+    if (r.offre.economie) eco[r.ban] = (eco[r.ban] || 0) + r.offre.economie * r.l.quantite;
   }
-  const indispos = tous.filter((x) => x.l.indisponible);
-  if (indispos.length) html += `<section class="rayon"><h3>🚫 Pas disponible <span class="doux">(${indispos.length})</span></h3>${indispos.map(({ l, a }) => htmlItem(l, a)).join('')}</section>`;
-  if (tous.length && !indispos.length && !localStorage.getItem('astuce-appui-long')) html += '<p class="doux" style="text-align:center;font-size:12px">Astuce : garde le doigt 3 secondes sur un produit pour le retirer ou le marquer « pas disponible ».</p>';
-  if (nbCoches) html += `<button class="btn sec" id="btnVider" style="width:100%;margin-top:8px">Retirer les ${nbCoches} article(s) acheté(s)</button>`;
-  html += `<button class="btn sec" id="btnRecu" style="width:100%;margin-top:8px">🧾 Photographier mon reçu</button>`;
-  v.innerHTML = html;
+  $('#totalListe').textContent = rangees.length ? argent(total) : '';
+  $('#pucesMag').innerHTML = '<button class="actif" data-mode="prep">Prépa.</button>'
+    + cols.map((b) => `<button data-mode="${b}">${esc(nomBanniere(b))}</button>`).join('');
+  $$('#pucesMag [data-mode]').forEach((b) => b.onclick = () => { if (b.dataset.mode !== 'prep') toast('Mode épicerie : bientôt'); });
 
-  const saisie = $('#saisie');
-  const valider = () => { if (saisie.value.trim()) { const t = saisie.value; saisie.value = ''; masquerSuggestions(); ajouterTexte(t); } };
-  saisie.onkeydown = (ev) => { if (ev.key === 'Enter') valider(); if (ev.key === 'Escape') masquerSuggestions(); };
-  saisie.oninput = () => suggerer(saisie.value);
-  $('#btnEntree').onclick = valider;
-  $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); });
-  $('#btnPhoto').onclick = () => ouvrirModale('Prendre une photo', `
-    <button class="btn" id="chListe" style="width:100%;margin-bottom:8px">📝 Une liste écrite à la main</button>
-    <button class="btn sec" id="chProduit" style="width:100%">📦 Un produit</button>
-    <p class="doux" style="margin-top:8px">Liste écrite : je la lis, j'ajoute ce que je reconnais dans ton historique, et je te propose les prix des bannières pour le reste.</p>`, (c) => {
-    $('#chListe', c).onclick = () => { fermerModale(); ouvrirListeManuscrite(); };
-    $('#chProduit', c).onclick = () => { fermerModale(); photoProduit(); };
+  if (!rangees.length) {
+    v.innerHTML = '<div class="vide">Ta liste est vide. Ajoute un produit en haut à droite ou scanne un code-barres.</div>';
+    return;
+  }
+
+  const nCol = seule ? 1 : cols.length + 3;
+  const bascule = (id, lib, on) => `<label class="bascule"><span class="interrupteur"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></span><span class="lib">${lib}</span></label>`;
+  let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-defile"><table class="prep-t">`;
+  if (!seule) h += `<colgroup><col style="width:${photo ? 52 : 172}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`;
+  // Liste activée : l'interrupteur Photo disparaît et Liste prend sa place
+  h += `<thead><tr><th class="pc"><div class="bascules">${seule ? '' : bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div></th>`;
+  if (!seule) {
+    h += '<th><button class="p-deal" id="btnDeal" title="Tout au meilleur prix">Deal</button></th>';
+    h += cols.map((b) => `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : '—'}</div>${logo(b)}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`).join('');
+    h += '<th><button class="p-ajban" id="btnAjBan" aria-label="Ajouter une bannière">+</button></th>';
+  }
+  h += '</tr></thead><tbody>';
+
+  // Rayons dans l'ordre standard (« Ordre par défaut ») ; bande compacte sur toute la largeur
+  const divers = rayonParDefaut();
+  const rayonDe = (a) => (e.rayons.some((r) => r.id === a.rayonId) ? a.rayonId : divers);
+  for (const g of groupesRayons('defaut')) {
+    const dans = rangees.filter((r) => g.ids.includes(rayonDe(r.a)));
+    if (!dans.length) continue;
+    const classer = g.ids.includes(divers) && dans.some((r) => rayonDe(r.a) === divers) ? '<button data-classer>🗂 Classer</button>' : '';
+    h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><span data-reorg title="Changer l'ordre des rayons">${esc(g.nom)} · ${dans.length}</span>${classer}</span></td></tr>`;
+    h += dans.map((r) => htmlRangee(r, cols, seule)).join('');
+  }
+  h += '</tbody></table></div></div>';
+  v.innerHTML = h;
+
+  $('#bPhoto', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_PHOTO, ev.target.checked); rendre(); });
+  $('#bListe', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_SEULE, ev.target.checked); rendre(); });
+  $('#btnDeal', v)?.addEventListener('click', () => {
+    const cles = Object.fromEntries(rangees.map((r) => { const m = meilleureOffre(r.a); return [r.l.id, m ? cleOffre(m) : null]; }));
+    S.maj((x) => x.liste.forEach((li) => { if (cles[li.id]) li.magasinCible = cles[li.id]; }));
+    toast('Tout au meilleur prix');
   });
-  $('#choixMagasin')?.addEventListener('change', (ev) => S.maj((x) => { x.magasinCourant = ev.target.value; }));
-  $('#btnReorg').onclick = () => ouvrirReorg(magFiltre?.id);
-  $$('[data-action]', v).forEach((al) => {
-    al.onclick = (ev) => { if (!ev.target.closest('[data-masquer]')) agir(al.dataset.action); };
-    al.onkeydown = (ev) => { if (ev.key === 'Enter') agir(al.dataset.action); };
-  });
-  $$('[data-masquer]', v).forEach((b) => b.onclick = () => S.maj((x) => {
-    x.alertesMasquees = [...new Set([...(x.alertesMasquees || []), b.dataset.masquer])].slice(-200);
-  }));
-  $('#btnVider')?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !l.coche); }));
-  $('#btnRecu').onclick = () => nouveauRecu();
+  $('#btnAjBan', v)?.addEventListener('click', () => allerOnglet('magasins'));
+  $$('[data-reorg]', v).forEach((b) => b.onclick = () => ouvrirReorg('defaut'));
   $$('[data-classer]', v).forEach((b) => b.onclick = () => classerSansRayon());
-  $$('[data-filtre]', v).forEach((b) => b.onclick = () => { filtreMagasin = b.dataset.filtre; rendre(); });
-  $$('[data-replier]', v).forEach((b) => b.onclick = () => {
-    const k = b.dataset.replier; replies.has(k) ? replies.delete(k) : replies.add(k); rendre();
-  });
 
-  $$('.item-liste', v).forEach((el) => brancherAppuiLong(el, () => optionsArticleListe(el.dataset.id)));
-  $$('.item', v).forEach((el) => {
-    const id = el.dataset.id;
-    el.querySelector('input').onchange = (ev) => S.maj((x) => {
-      const l = x.liste.find((i) => i.id === id); l.coche = ev.target.checked; l.cocheLe = ev.target.checked ? new Date().toISOString() : null;
+  $$('tr.pl', v).forEach((tr) => {
+    const id = tr.dataset.l;
+    // Toucher la photo ou le nom → fiche ; garder le doigt 3 s sur la photo → retirer / pas disponible / rayon
+    tr.querySelector('.pc').addEventListener('click', (ev) => {
+      const f = ev.target.closest('[data-fiche]');
+      if (f) ficheArticle(f.dataset.fiche, id);
     });
-    el.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => S.maj((x) => {
+    brancherAppuiLong(tr.querySelector('.p-photo'), () => optionsArticleListe(id));
+    tr.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => S.maj((x) => {
       const l = x.liste.find((i) => i.id === id);
+      if (!l) return;
       l.quantite = Math.max(0, l.quantite + Number(b.dataset.q));
       if (l.quantite === 0) x.liste = x.liste.filter((i) => i.id !== id);
     }));
-    el.querySelectorAll('[data-fiche]').forEach((f) => f.onclick = () => ficheArticle(f.dataset.fiche, id));
-    el.querySelector('[data-photomag]')?.addEventListener('click', (ev) => { ev.stopPropagation(); identifierArticle(ev.currentTarget.dataset.photomag, id); });
+    tr.querySelectorAll('.pcel[data-cle]').forEach((b) => b.onclick = () => S.maj((x) => {
+      const l = x.liste.find((i) => i.id === id);
+      if (l) l.magasinCible = b.dataset.cle;
+    }));
   });
+}
+
+// --- En-tête de la liste : branché une seule fois (il n'est pas redessiné) ---
+function terminerSaisie() {
+  const saisie = $('#saisie');
+  saisie.value = '';
+  masquerSuggestions();
+  $('#champAjout').classList.remove('ouvert');
+  saisie.blur();
+}
+
+(() => {
+  const saisie = $('#saisie'), champ = $('#champAjout'), zone = $('#suggestions');
+  // Le champ s'élargit par-dessus l'en-tête quand on écrit, puis reprend sa place
+  saisie.addEventListener('focus', () => champ.classList.add('ouvert'));
+  saisie.addEventListener('blur', () => setTimeout(() => {
+    if (document.activeElement === saisie) return;
+    champ.classList.remove('ouvert');
+    masquerSuggestions();
+  }, 150));
+  // Toucher une suggestion ou ✓ ne fait pas perdre le focus au champ (sinon la liste se fermerait avant le toucher)
+  zone.addEventListener('pointerdown', (ev) => ev.preventDefault());
+  $('#btnEntree').addEventListener('pointerdown', (ev) => ev.preventDefault());
+  $('#btnEntree').addEventListener('click', () => valider());
+  saisie.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') valider();
+    if (ev.key === 'Escape') terminerSaisie();
+  });
+  // Autocomplétion : le nom du produit le plus probable se complète dans le champ (partie sélectionnée)
+  saisie.addEventListener('input', (ev) => {
+    const trouves = suggerer(saisie.value);
+    if (!ev.inputType?.startsWith('insert') || !trouves.length) return;
+    const m = saisie.value.match(/^(\d+(?:[.,]\d+)?\s*(?:x\s*)?)?(.*)$/i);
+    const avant = m[1] || '', tape = m[2];
+    const nom = trouves[0].nom;
+    if (tape.length < 2 || nom.length <= tape.length || !sansAccents(nom).startsWith(sansAccents(tape))) return;
+    saisie.value = avant + tape + nom.slice(tape.length);
+    saisie.setSelectionRange(avant.length + tape.length, saisie.value.length);
+  });
+  // Toucher ailleurs que dans l'en-tête : le champ reprend sa place et les propositions se ferment
+  document.addEventListener('pointerdown', (ev) => {
+    if (ev.target.closest('header') || !champ.classList.contains('ouvert')) return;
+    champ.classList.remove('ouvert');
+    masquerSuggestions();
+  });
+  $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); });
+
+  // Barre d'onglets du bas : cachée en descendant, revient dès qu'on remonte
+  let yPrec = window.scrollY;
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY, nav = $('#onglets');
+    if (y > yPrec + 6 && y > 40) nav.classList.add('masquee');
+    else if (y < yPrec - 6 || y <= 40) nav.classList.remove('masquee');
+    yPrec = y;
+  }, { passive: true });
+
+  // Taille d'affichage : 100 % = curseur en bas ; on monte pour réduire (jusqu'à 60 %). L'en-tête ne change pas.
+  const boite = $('#zoomVue'), curseur = $('#zoomCurseur');
+  let delai = null;
+  const appliquer = (p) => { $('#vue').style.zoom = p === 100 ? '' : String(p / 100); $('#zoomValeur').textContent = `${p} %`; };
+  const recacher = () => { clearTimeout(delai); delai = setTimeout(() => boite.classList.remove('ouvert'), 2500); };
+  let p = 100;
+  try { p = Math.min(100, Math.max(60, Number(localStorage.getItem('zoom-vue')) || 100)); } catch { /* navigation privée */ }
+  curseur.value = String(100 - p);
+  appliquer(p);
+  $('#zoomPoignee').onclick = () => { boite.classList.add('ouvert'); recacher(); };
+  curseur.addEventListener('input', () => {
+    const val = 100 - Number(curseur.value);
+    appliquer(val);
+    try { localStorage.setItem('zoom-vue', String(val)); } catch { /* navigation privée */ }
+    recacher();
+  });
+})();
+
+/** « 2 lait, beurre et café » → [{ quantite: 2, nom: 'lait' }, …] */
+function decouperSaisie(txt) {
+  return txt.split(/,|\bet\b|;/i).map((s) => s.trim()).filter(Boolean).map((m) => {
+    const r = m.match(/^(\d+(?:[.,]\d+)?)\s*(?:x\s*)?(.+)$/i);
+    return { quantite: r ? Number(r[1].replace(',', '.')) : 1, nom: r ? r[2] : m };
+  });
+}
+
+/**
+ * ✓ : produit connu → ajouté. Un seul produit inconnu → recherche en ligne silencieuse (icône de chargement) :
+ * des produits trouvés → proposés ; rien → ajouté tel quel. Plusieurs produits ou hors ligne → ajoutés tels quels.
+ */
+async function valider() {
+  const saisie = $('#saisie'), champ = $('#champAjout');
+  const brut = saisie.value.trim();
+  if (!brut || champ.classList.contains('charge')) return;
+  const morceaux = decouperSaisie(brut);
+  const seul = morceaux.length === 1 && !trouverArticle(morceaux[0].nom) ? morceaux[0] : null;
+  if (!seul || !navigator.onLine) { terminerSaisie(); ajouterTexte(brut); return; }
+  masquerSuggestions();
+  champ.classList.add('charge');
+  let res = [];
+  try { res = await rechercherSouple(seul.nom); } catch { res = []; }
+  champ.classList.remove('charge');
+  if (saisie.value.trim() !== brut) return; // le texte a changé pendant la recherche
+  const vus = new Set();
+  const props = res.filter((r) => {
+    const k = sansAccents(`${r.brand || ''} ${r.name} ${r.size || ''}`);
+    if (vus.has(k)) return false;
+    vus.add(k); return true;
+  }).slice(0, 6);
+  if (!props.length) { terminerSaisie(); ajouterTexte(brut); return; }
+  const zone = $('#suggestions');
+  zone.innerHTML = props.map((r, i) => `<button class="sugg" data-enligne="${i}">${r.image ? `<img class="vignette petite" src="${esc(r.image)}" alt="">` : '<span class="vignette petite"></span>'}
+      <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(r.name)}</span>
+      <span class="doux une-ligne" style="display:block;font-size:12px">${esc([r.brand, r.size ? formatLisible(r.size) : ''].filter(Boolean).join(' · '))}</span></span></button>`).join('')
+    + `<button class="sugg" data-telquel="1"><span class="vignette petite" style="display:grid;place-items:center">＋</span><span class="grandir une-ligne">Garder « ${esc(brut)} » tel quel</span></button>`;
+  zone.classList.remove('cache');
+  champ.classList.add('ouvert'); // le clavier a pu se fermer pendant la recherche : le champ reste ouvert avec les propositions
+  $$('[data-enligne]', zone).forEach((b) => b.onclick = () => { terminerSaisie(); ajouterDepuisEnLigne(props[Number(b.dataset.enligne)], seul.quantite); });
+  $('[data-telquel]', zone).onclick = () => { terminerSaisie(); ajouterTexte(brut); };
+}
+
+/** Produit trouvé en ligne (épiceries.ca) → fiche remplie (nom, marque, format, photo, lien) + ses prix en arrière-plan. */
+function ajouterDepuisEnLigne(r, quantite = 1) {
+  let a = S.get().articles.find((x) => (x.liens || []).some((li) => li.id === r.id));
+  if (!a) {
+    const f = analyserFormat(r.size);
+    a = { id: S.uid('a'), nom: String(r.name || '').trim().replace(/^./, (c) => c.toUpperCase()), marque: r.brand || '',
+      rayonId: rayonParDefaut(), uniteRef: f?.base || 'unite', format: r.size ? formatLisible(r.size) : '', local: false, codes: [],
+      imageUrl: r.image || null, liens: [{ id: r.id, nom: [r.brand, r.name].filter(Boolean).join(' '), size: r.size, image: r.image }] };
+    const nouveau = a;
+    S.maj((e) => e.articles.push(nouveau));
+  }
+  ajouterALaListe(a.id, quantite);
+  toast(`${a.nom} ajouté`);
+  actualiserArticle(a.id, { force: true }).then(() => rendre()).catch(() => { /* hors ligne : les prix viendront plus tard */ });
 }
 
 // --- Saisie : d'abord ta base (articles déjà achetés / au catalogue) ---
@@ -511,22 +685,25 @@ function suggererOFF(q, txt) {
     }
     const boite = $('#suggOFF');
     if (!boite || !idees.length) return;
+    $('#suggestions').classList.remove('cache'); // rien dans ton catalogue, mais des idées : on les montre
     boite.innerHTML = `<div class="doux" style="font-size:12px;padding:6px 8px 2px">💡 Idées (Open Food Facts, Canada)</div>` + idees.map((g, i) =>
       `<button class="sugg" data-off="${i}">${g.image ? `<img class="vignette petite" src="${esc(g.image)}" alt="">` : '<span class="vignette petite"></span>'}
         <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(g.nom)}</span>
         ${g.exemples.length ? `<span class="doux une-ligne" style="display:block;font-size:12px">ex. ${esc(g.exemples.join(' · '))}</span>` : ''}</span></button>`).join('');
     $$('[data-off]', boite).forEach((b) => b.onclick = () => {
       const r = txt.match(/^(\d+(?:[.,]\d+)?)\s*(?:x\s*)?/i);
-      $('#saisie').value = ''; masquerSuggestions();
-      ajouterTexte(`${r ? r[0] : ''}${idees[Number(b.dataset.off)].nom}`, { forcerNouveau: true });
+      const g = idees[Number(b.dataset.off)];
+      terminerSaisie();
+      ajouterTexte(`${r ? r[0] : ''}${g.nom}`, { forcerNouveau: true, image: g.image || null });
     });
   }, 500);
 }
 
+/** Suggestions pendant la frappe (ton catalogue, puis idées Open Food Facts). Rien trouvé → rien d'affiché. Retourne les produits trouvés. */
 function suggerer(txt) {
   const zone = $('#suggestions');
   const q = sansAccents(txt.replace(/^\d+(?:[.,]\d+)?\s*(?:x\s*)?/i, ''));
-  if (!zone || q.length < 2) { masquerSuggestions(); return; }
+  if (!zone || q.length < 2) { masquerSuggestions(); return []; }
   const e = S.get();
   const achats = (id) => e.liste.filter((l) => l.articleId === id).length + (e.achats?.filter((x) => x.articleId === id).length || 0);
   // Produits d'abord : nom, marque ou n'importe laquelle de leurs marques/formats (taper « tilda » trouve « Riz basmati blanc »)
@@ -550,47 +727,38 @@ function suggerer(txt) {
       <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(a.nom)}</span>
         ${detail.replace(/^ · /, '') ? `<span class="doux une-ligne" style="display:block;font-size:12px">${detail.replace(/^ · /, '')}</span>` : ''}</span>
       <span class="doux">${m ? esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0]) : ''}</span></button>`;
-  }).join('') + `<div id="suggOFF"></div><button class="sugg" data-nouveau="1"><span class="vignette petite" style="display:grid;place-items:center">＋</span>
-      <span class="grandir une-ligne">Ajouter « ${esc(txt.trim())} » ${trouves.length ? '(autre produit)' : '— je cherche ses prix'}</span></button>`;
-  zone.classList.remove('cache');
+  }).join('') + '<div id="suggOFF"></div>';
+  zone.classList.toggle('cache', !trouves.length); // rien dans ton catalogue → rien d'affiché (sauf idées OFF plus bas)
   // Peu de résultats dans ton catalogue : idées tirées d'Open Food Facts (produits vendus au Canada)
   if (trouves.length < 3 && q.length >= 3) suggererOFF(q, txt);
   $$('[data-sugg]', zone).forEach((b) => b.onclick = () => {
     const r = txt.match(/^(\d+(?:[.,]\d+)?)/);
     ajouterALaListe(b.dataset.sugg, r ? Number(r[1].replace(',', '.')) : 1);
-    $('#saisie').value = ''; masquerSuggestions();
+    terminerSaisie();
     toast(`${S.get().articles.find((a) => a.id === b.dataset.sugg).nom} ajouté`);
   });
-  $('[data-nouveau]', zone).onclick = () => { const t = $('#saisie').value; $('#saisie').value = ''; masquerSuggestions(); ajouterTexte(t, { forcerNouveau: true }); };
+  return trouves;
 }
 
 /**
- * « 2 lait, beurre et café » → plusieurs ajouts.
- * Article déjà dans ta base → ajouté tel quel. Nouveau → créé, puis je cherche
- * aussitôt ses prix et sa photo dans les bannières (un toucher pour confirmer).
+ * « 2 lait, beurre et café » → plusieurs ajouts, sans fenêtre ni étape affichée.
+ * Article déjà dans ta base → ajouté. Nouveau → créé avec la description telle quelle
+ * (la recherche en ligne se fait avant, dans valider(), pour un produit seul).
  */
-function ajouterTexte(txt, { forcerNouveau = false } = {}) {
-  const morceaux = txt.split(/,|\bet\b|;/i).map((s) => s.trim()).filter(Boolean);
-  const noms = [], nouveaux = [];
-  for (const m of morceaux) {
-    const r = m.match(/^(\d+(?:[.,]\d+)?)\s*(?:x\s*)?(.+)$/i);
-    const q = r ? Number(r[1].replace(',', '.')) : 1;
-    const nom = r ? r[2] : m;
+function ajouterTexte(txt, { forcerNouveau = false, image = null } = {}) {
+  const noms = [];
+  for (const { quantite, nom } of decouperSaisie(txt)) {
     const existant = forcerNouveau ? S.get().articles.find((a) => sansAccents(a.nom) === sansAccents(nom)) : trouverArticle(nom);
-    const a = existant || creerArticle(nom);
-    ajouterALaListe(a.id, q);
+    const a = existant || creerArticle(nom, image);
+    ajouterALaListe(a.id, quantite);
     noms.push(a.nom);
-    if (!existant) nouveaux.push(a.id);
   }
-  toast(`Ajouté : ${noms.join(', ')}`);
-  // Recherche automatique des prix + photo, un nouvel article à la fois
-  const suivant = () => { const id = nouveaux.shift(); if (id) ouvrirLiaison(id, () => { fermerModale(); suivant(); }, { auto: true }); };
-  suivant();
+  if (noms.length) toast(`Ajouté : ${noms.join(', ')}`);
 }
 
-function creerArticle(nom) {
+function creerArticle(nom, image = null) {
   const a = { id: S.uid('a'), nom: nom.trim().replace(/^./, (c) => c.toUpperCase()), rayonId: rayonParDefaut(),
-    uniteRef: 'unite', format: '', local: false, codes: [] };
+    uniteRef: 'unite', format: '', local: false, codes: [], ...(image ? { imageUrl: image } : {}) };
   if (/kirkland/i.test(nom)) a.exclusif = 'costco';
   S.maj((e) => e.articles.push(a));
   return a;
