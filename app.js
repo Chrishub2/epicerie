@@ -230,23 +230,47 @@ function magasinDeCle(cle) {
 
 const replies = new Set(); // groupes de magasins repliés (vue « Tout »)
 
-/** Une ligne de la liste. Cocher ne la déplace pas : elle reste à sa place, barrée. */
+/**
+ * Une ligne de la liste en mode épicerie. Hauteur fixe (toutes les cartes égales) :
+ * nom (1 ligne) · prix sur l'étiquette + format + marque (1 ligne) · notes et avertissements (2 lignes au plus).
+ * Le détail complet est dans la fiche. Cocher ne déplace pas la ligne : elle reste à sa place, barrée.
+ */
 function htmlItem(l, a) {
-  // Article placé dans un magasin (répartition) : on montre le prix de CE magasin, sinon le meilleur prix.
+  // Article placé dans un magasin (Prépa.) : on montre le prix de CE magasin, sinon le meilleur prix.
   const k = l.magasinCible;
   const m = (k && offresArticle(a).find((o) => o.pu != null && cleOffre(o) === k)) || meilleureOffre(a);
-  const meilleur = m ? `${logo(m.banniere)} ${esc(m.magasinNom ? m.magasinNom.replace(/^\S+\s*/, '') : '')} ${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${m.economie ? ` <span style="color:var(--vert)">(−${argent(m.economie)})</span>` : ''}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}${m.produitOffre ? ` · <b>${esc(m.produitOffre)}</b>` : ''}` : 'Prix inconnu';
+  // Prix tel qu'affiché sur l'étagère (« 3,99 $ », « 2/5,00 $ ») pour comparer d'un coup d'œil
+  const etiquette = m ? (m.offre || (m.prixArticle != null ? argent(m.prixArticle) : '')) : '';
+  const promo = m && (m.economie || m.perso || (m.type && m.type !== 'regulier'));
+  const prix = m
+    ? `<b class="ep-pp ${promo ? 'promo' : ''}">${esc(etiquette) || '?'}</b>${m.economie && m.prixRegulier ? ` <s class="doux">${argent(m.prixRegulier)}</s>` : ''}`
+    : '<b class="ep-pp" style="color:var(--doux)">Prix inconnu</b>';
+  const details = [formatLisible(m?.format || a.format), a.marque].filter(Boolean).map(esc);
+  if (m?.pu != null) details.push(`<span class="doux">${puCourt(m.pu, m.uniteRef)}</span>`);
+
+  // Notes et avertissements, du plus important au moins important (2 lignes au plus)
+  const notes = [];
+  if (l.indisponible) notes.push(`<span class="doux">🚫 Pas disponible${l.indisponible.le ? ` (${esc(new Date(`${l.indisponible.le}T12:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }))})` : ''} — garde le doigt 3 s pour le remettre</span>`);
   const verdict = htmlVerdictListe(l.recu);
+  if (verdict) notes.push(verdict.replace('<div class="item-recu', '<span class="item-recu').replace(/<\/div>$/, '</span>'));
+  if (a.rappel) notes.push('<span class="ep-alerte">⚠️ Rappel ou avis sur ce produit</span>');
+  if (l.note) notes.push(`<span>📝 ${esc(l.note)}</span>`);
+  if (m?.produitOffre) notes.push(`<span>Prendre : <b>${esc(m.produitOffre)}</b></span>`);
+  if (m?.perso) notes.push(`<span class="ep-promo">${esc(m.rabaisTexte || 'rabais perso')}</span>`);
+  const max = m ? maxParClient(m) : null;
+  if (max) notes.push(`<span class="ep-alerte">${max} max par client</span>`);
+  else if (m?.conditions) notes.push(`<span class="ep-alerte">${esc(m.conditions)}</span>`);
+  if (m?.economie) notes.push(`<span class="ep-promo">Rabais −${argent(m.economie)}${m.fin ? ` · ${libelleFin(m.fin)}` : ''}</span>`);
+  if (a.exclusif) notes.push(`<span>${esc(nomBanniere(a.exclusif))} seulement</span>`);
+
   const teinte = l.recu?.absent ? '' : l.recu?.statut === 'plus' ? 'recu-ecart' : (l.recu?.statut === 'ok' || l.recu?.statut === 'moins') ? 'recu-ok' : '';
-  return `<div class="item item-liste ${teinte} ${l.coche ? 'coche' : ''} ${l.indisponible ? 'indisponible' : ''}" data-id="${l.id}">
-    ${l.indisponible ? `<div class="item-recu doux">🚫 Pas disponible${l.indisponible.le ? ` (${esc(new Date(`${l.indisponible.le}T12:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }))})` : ''} — garde le doigt 3 s pour le remettre</div>` : ''}
-    ${verdict ? verdict.replace('class="item-recu', `data-fiche="${a.id}" class="item-recu`) : ''}
+  return `<div class="item item-liste ep ${teinte} ${l.coche ? 'coche' : ''} ${l.indisponible ? 'indisponible' : ''}" data-id="${l.id}">
     <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Dans le panier">
-    ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" class="vignette" data-fiche="${a.id}">` : ''}
-    <div class="grandir" data-fiche="${a.id}" style="cursor:pointer">
-      <div class="nom">${esc(a.nom)} ${a.local ? '<span title="Produit local (Québec)">🍁</span>' : ''}${a.exclusif ? `<span class="pastille">${esc(nomBanniere(a.exclusif))} seulement</span>` : ''}</div>
-      <div class="info">${meilleur}</div>
-      ${formatLisible(a.format) ? `<div class="info">${m?.produitOffre ? 'ton habituel : ' : ''}${esc(formatLisible(a.format))}</div>` : ''}
+    <div class="ep-photo" data-fiche="${a.id}">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : '<span aria-hidden="true">📦</span>'}</div>
+    <div class="grandir ep-txt" data-fiche="${a.id}">
+      <div class="nom ep-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>
+      <div class="ep-prix">${prix}${details.length ? ` · ${details.join(' · ')}` : ''}</div>
+      <div class="ep-note">${notes.join(' · ')}</div>
     </div>
     ${!m && !a.liens?.length && !l.coche ? `<button class="icone photo-mag" data-photomag="${a.id}" title="Identifier ce produit (code-barres, photo)" aria-label="Identifier le produit">🔎</button>` : ''}
     <div class="qte"><button data-q="-1">−</button><b>${l.quantite}</b><button data-q="1">+</button></div>
@@ -593,12 +617,18 @@ function terminerSaisie() {
 
 (() => {
   const saisie = $('#saisie'), champ = $('#champAjout'), zone = $('#suggestions');
+  // Quitter le champ sans ✓ (ni Entrée) et sans toucher une proposition = abandon : le texte est effacé.
+  // Pendant la recherche en ligne lancée par ✓, le texte reste (la recherche s'en sert).
+  const abandonner = () => {
+    champ.classList.remove('ouvert');
+    masquerSuggestions();
+    if (!champ.classList.contains('charge')) saisie.value = '';
+  };
   // Le champ s'élargit par-dessus l'en-tête quand on écrit, puis reprend sa place
   saisie.addEventListener('focus', () => champ.classList.add('ouvert'));
   saisie.addEventListener('blur', () => setTimeout(() => {
     if (document.activeElement === saisie) return;
-    champ.classList.remove('ouvert');
-    masquerSuggestions();
+    abandonner();
   }, 150));
   // Toucher une suggestion ou ✓ ne fait pas perdre le focus au champ (sinon la liste se fermerait avant le toucher)
   zone.addEventListener('pointerdown', (ev) => ev.preventDefault());
@@ -622,8 +652,7 @@ function terminerSaisie() {
   // Toucher ailleurs que dans l'en-tête : le champ reprend sa place et les propositions se ferment
   document.addEventListener('pointerdown', (ev) => {
     if (ev.target.closest('header') || !champ.classList.contains('ouvert')) return;
-    champ.classList.remove('ouvert');
-    masquerSuggestions();
+    abandonner();
   });
   $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); });
 
@@ -1193,6 +1222,12 @@ export function ficheArticle(articleId, ligneId) {
     const rouvrir = () => ficheArticle(articleId, ligneId);
     brancherVariantes(c, a, rouvrir);
     $('#ecLiaison', c).onclick = () => ouvrirLiaison(a.id, rouvrir);
+    // Preuve des rabais de circulaire : le lien mène à la page exacte où le rabais a été lu (si elle est encore gardée)
+    const liensCirc = $$('[data-offrecirc]', c);
+    if (liensCirc.length) Sync.pagesDesOffres(liensCirc.map((x) => x.dataset.offrecirc)).then((urls) => urls && liensCirc.forEach((x) => {
+      if (urls[x.dataset.offrecirc]) x.href = urls[x.dataset.offrecirc];
+      else x.textContent = '📰 Circulaire (page plus gardée)';
+    }));
     $('#ecMaj', c)?.addEventListener('click', async () => { toast('Mise à jour…'); await actualiserArticle(a.id, { force: true }); rouvrir(); });
     $$('[data-delien]', c).forEach((x) => x.onclick = (ev) => {
       ev.preventDefault();

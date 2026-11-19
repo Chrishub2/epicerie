@@ -53,6 +53,7 @@ export function tableauOffres(a, { avecManquants = false } = {}) {
         <div class="doux">${esc(l.offre)}${l.economie ? ` <b style="color:var(--vert)">(−${argent(l.economie)})</b>` : ''}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
         <div>${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.aVerifier ? '<span class="pastille ambre">lu sur photo : à vérifier</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'flipp' ? '<span class="pastille" title="Trouvé automatiquement dans la circulaire (Flipp) : vérifie le produit">📰 circulaire</span>' : ''}${l.source === 'circulaire' ? `<span class="pastille" title="Lu dans une circulaire que tu as envoyée">📰 circulaire</span>${l.conditions ? `<span class="pastille ambre">${esc(l.conditions)}</span>` : ''}` : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
         ${l.erreur ? `<div class="doux" style="color:var(--rouge)">${esc(l.erreur)}</div>` : ''}
+        ${htmlPreuveRabais(l)}
       </td>
       <td class="pu">${puHtml(l)}${l.prixArticle != null ? `<div class="doux">${argent(l.prixArticle)} / article</div>` : ''}</td>
     </tr>`).join('')}
@@ -60,6 +61,27 @@ export function tableauOffres(a, { avecManquants = false } = {}) {
       <td class="pu"><button class="btn sec" data-ajprix="${b}" style="padding:4px 10px">+ prix</button></td></tr>`).join('')}
   </table>
   <p class="doux">Vert = le moins cher · rouge = le plus cher · ambre = moins de 5 % d'écart. (−x $) = économie sur le prix régulier.</p>`;
+}
+
+/**
+ * Rabais (circulaire, prix barré, rabais perso…) : liens vers la donnée qui le prouve.
+ * - circulaire lue : la page de la circulaire (image privée ; lien signé posé par brancherPreuves) + la circulaire officielle ;
+ * - épiceries.ca : le produit sur le site de la bannière + sa fiche et son historique sur épiceries.ca.
+ */
+function htmlPreuveRabais(l) {
+  const rabais = l.economie || l.perso || (l.type && l.type !== 'regulier');
+  if (!rabais) return '';
+  const lien = (url, texte, attrs = '') => `<a href="${esc(url)}" target="_blank" rel="noopener"${attrs}>${texte}</a>`;
+  const ban = esc(nomBanniere(l.banniere));
+  const liens = [];
+  if (l.offreCirculaire) liens.push(lien(BANNIERES[l.banniere]?.circulaire || '#', '📰 Page de la circulaire', ` data-offrecirc="${esc(l.offreCirculaire)}"`));
+  if (l.lienMarchand) liens.push(lien(l.lienMarchand, `🌐 Site de ${ban}`));
+  if (l.url) liens.push(lien(l.url, l.source === 'epiceries_ca' ? '📈 épiceries.ca' : '🔗 Source'));
+  if (!l.offreCirculaire && (l.type === 'circulaire' || l.source === 'flipp') && BANNIERES[l.banniere]?.circulaire) liens.push(lien(BANNIERES[l.banniere].circulaire, `📰 Circulaire ${ban}`));
+  if (l.perso) liens.push(`<span class="doux">Rabais perso : ta carte ${ban}</span>`);
+  if (l.source === 'photo') liens.push('<span class="doux">📷 Photo de l\'étiquette (📈 Historique)</span>');
+  if (!liens.length) liens.push('<span class="doux">Aucune source en ligne pour ce rabais</span>');
+  return `<div class="preuve-rabais"><span class="doux">Preuve :</span>${liens.join('')}</div>`;
 }
 
 function puHtml(l) {

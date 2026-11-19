@@ -350,4 +350,26 @@ export async function chercherCode(code) {
   } catch { return null; }
 }
 
+/**
+ * Preuve d'un rabais de circulaire : lien (valide 1 h) vers l'image de la page où il a été lu.
+ * { idOffre: url } pour celles dont la page est encore gardée (absente = page effacée) ; null hors ligne ou en erreur.
+ */
+export async function pagesDesOffres(idsOffres) {
+  const ids = [...new Set(idsOffres)].filter(Boolean);
+  if (!ids.length || !estPret() || !navigator.onLine) return null;
+  try {
+    const { data: offres } = await sb.from('offres_circulaires').select('id, page_id').in('id', ids);
+    const parPage = new Map((offres || []).filter((o) => o.page_id).map((o) => [o.id, o.page_id]));
+    if (!parPage.size) return {};
+    const { data: pages } = await sb.from('pages_circulaires').select('id, chemin').in('id', [...new Set(parPage.values())]);
+    const chemins = new Map((pages || []).filter((p) => p.chemin).map((p) => [p.id, p.chemin]));
+    if (!chemins.size) return {};
+    const { data: urls } = await sb.storage.from('circulaires').createSignedUrls([...new Set(chemins.values())], 3600);
+    const parChemin = new Map((urls || []).filter((u) => u.signedUrl).map((u) => [u.path, u.signedUrl]));
+    const res = {};
+    for (const [offre, page] of parPage) { const u = parChemin.get(chemins.get(page)); if (u) res[offre] = u; }
+    return res;
+  } catch (err) { console.warn('Pages de circulaire indisponibles', err); return null; }
+}
+
 export function synchroniserMaintenant() { return tirer().then(pousser); }
