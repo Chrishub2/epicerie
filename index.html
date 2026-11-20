@@ -361,6 +361,16 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .une-ligne { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .vignette.petite { width: 32px; height: 32px; }
 .rayon { margin-bottom: 10px; }
+/* Produit ajouté : cadre autour de sa rangée, le reste de l'écran foncé, puis tout s'éclaircit jusqu'à disparaître */
+.cadre-ajout { position: fixed; z-index: 30; pointer-events: none; border-radius: 12px;
+  border: 2px solid var(--accent); box-shadow: 0 0 0 100vmax rgba(0,0,0,.62), 0 0 18px 2px var(--accent);
+  animation: cadreAjout 1.9s ease-out .15s both; }
+@keyframes cadreAjout {
+  0% { box-shadow: 0 0 0 100vmax rgba(0,0,0,.62), 0 0 18px 2px var(--accent); border-color: var(--accent); }
+  35% { box-shadow: 0 0 0 100vmax rgba(0,0,0,.5), 0 0 14px 2px var(--accent); }
+  100% { box-shadow: 0 0 0 100vmax rgba(0,0,0,0), 0 0 0 0 transparent; border-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .cadre-ajout { animation-duration: .01s; } }
 /* Mode Magasin : anneau « trouvés / total » à droite du premier rayon (se remplit à mesure qu'on coche) */
 /* Centré dans l'espace libre entre le nom du rayon et le bord droit */
 .ratio-trouves { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-transform: none; letter-spacing: 0; }

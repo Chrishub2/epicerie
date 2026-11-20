@@ -143,6 +143,47 @@ export function ajouterALaListe(articleId, quantite = 1, extra = {}) {
   return fusion;
 }
 
+/**
+ * Après un ajout par le champ « Ajouter » (ou le lecteur) : un cadre entoure la rangée du produit, le reste
+ * de l'écran est foncé puis s'éclaircit jusqu'à disparaître. Rangée hors de l'écran → on y défile d'abord.
+ * À appeler juste après l'ajout : le cadre se pose une fois la liste redessinée.
+ */
+export function montrerAjout(articleId) {
+  setTimeout(() => {
+    if (onglet !== 'liste') return;
+    const l = S.get().liste.find((x) => x.articleId === articleId && !x.coche);
+    const el = l && ($(`#vue tr.pl[data-l="${l.id}"]`) || $(`#vue .item-liste[data-id="${l.id}"]`));
+    if (!el) return;   // pas affiché ici (ex. Mode Magasin d'une autre bannière)
+    // Zone vraiment visible : sous l'entête (et la tête des colonnes en Prépa.), au-dessus de la barre du bas
+    const haut = Math.max($('#entete').getBoundingClientRect().bottom, $('#vue .prep-tete')?.getBoundingClientRect().bottom || 0);
+    const nav = $('#onglets');
+    const bas = innerHeight - (nav && !nav.classList.contains('masquee') ? nav.offsetHeight : 0);
+    const r = el.getBoundingClientRect();
+    const visible = r.top >= haut && r.bottom <= bas;
+    // Défilement en douceur fait à la main (le « smooth » du navigateur n'est pas fiable partout)
+    if (!visible) {
+      const de = scrollY, vers = Math.max(0, scrollY + r.top - (haut + bas) / 2 + r.height / 2), t0 = performance.now();
+      const pas = (t) => {
+        const k = Math.min(1, Math.max(0, (t - t0) / 400));
+        window.scrollTo(0, de + (vers - de) * (1 - (1 - k) ** 3));
+        if (k < 1) requestAnimationFrame(pas);
+      };
+      requestAnimationFrame(pas);
+    }
+    setTimeout(() => {
+      const ici = ($(`#vue tr.pl[data-l="${l.id}"]`) || $(`#vue .item-liste[data-id="${l.id}"]`))?.getBoundingClientRect();
+      if (!ici) return;
+      const cadre = document.createElement('div');
+      cadre.className = 'cadre-ajout';
+      const g = Math.max(ici.left, 4), d = Math.min(ici.right, innerWidth - 4);
+      Object.assign(cadre.style, { top: `${ici.top - 3}px`, left: `${g - 3}px`, width: `${d - g + 6}px`, height: `${ici.height + 6}px` });
+      document.body.append(cadre);
+      cadre.addEventListener('animationend', () => cadre.remove());
+      setTimeout(() => cadre.remove(), 3000); // filet si l'animation est coupée
+    }, visible ? 0 : 450);
+  }, 60);
+}
+
 function ordreRayons(magasinId = S.get().magasinCourant) {
   const e = S.get();
   const sauve = e.ordreRayons[magasinId] || e.rayons.map((r) => r.id);
@@ -748,7 +789,7 @@ function terminerSaisie() {
     if (ev.target.closest('header') || !champ.classList.contains('ouvert')) return;
     abandonner();
   });
-  $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); });
+  $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); montrerAjout(a.id); });
 
   // Barre d'onglets du bas : cachée en descendant, revient dès qu'on remonte
   let yPrec = window.scrollY;
@@ -837,6 +878,7 @@ function ajouterDepuisEnLigne(r, quantite = 1) {
   }
   ajouterALaListe(a.id, quantite);
   toast(`${a.nom} ajouté`);
+  montrerAjout(a.id);
   actualiserArticle(a.id, { force: true }).then(() => rendre()).catch(() => { /* hors ligne : les prix viendront plus tard */ });
 }
 
@@ -931,6 +973,7 @@ function suggerer(txt) {
     ajouterALaListe(b.dataset.sugg, r ? Number(r[1].replace(',', '.')) : 1);
     terminerSaisie();
     toast(`${S.get().articles.find((a) => a.id === b.dataset.sugg).nom} ajouté`);
+    montrerAjout(b.dataset.sugg);
   });
   return trouves;
 }
@@ -942,13 +985,16 @@ function suggerer(txt) {
  */
 function ajouterTexte(txt, { forcerNouveau = false, image = null } = {}) {
   const noms = [];
+  let dernier = null;
   for (const { quantite, nom } of decouperSaisie(txt)) {
     const existant = forcerNouveau ? S.get().articles.find((a) => sansAccents(a.nom) === sansAccents(nom)) : trouverArticle(nom);
     const a = existant || creerArticle(nom, image);
     ajouterALaListe(a.id, quantite);
     noms.push(a.nom);
+    dernier = a.id;
   }
   if (noms.length) toast(`Ajouté : ${noms.join(', ')}`);
+  if (dernier) montrerAjout(dernier);   // plusieurs produits : le cadre va sur le dernier
 }
 
 function creerArticle(nom, image = null) {
