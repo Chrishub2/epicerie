@@ -437,6 +437,7 @@ function htmlPrixCase(o, u, { avecMax = true } = {}) {
   return `${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}`;
 }
 
+const SVG_ETIQ = '<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8.6V2.2a.7.7 0 0 1 .7-.7h6.4l6 6a1 1 0 0 1 0 1.4l-5.2 5.2a1 1 0 0 1-1.4 0z" fill="currentColor"/><circle cx="5" cy="5" r="1.4" fill="#d7f7e4"/></svg>';
 const SVG_RAPPEL = '<svg class="p-rappel" viewBox="0 0 18 16" role="img" aria-label="Rappel ou avis sur ce produit"><path d="M9 1 17 15H1z" fill="#ffd54f" stroke="#8a5a00" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 6v4" stroke="#412402" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="12.4" r=".9" fill="#412402"/></svg>';
 
 function htmlRangee(r, cols, seule) {
@@ -549,7 +550,10 @@ function vueListe(v) {
     if (r.offre.economie) eco[r.ban] = (eco[r.ban] || 0) + r.offre.economie * r.l.quantite;
   }
   const mode = modeListe(cols);
-  $('#totalListe').textContent = mode !== 'prep' ? argent(tot[mode] || 0) : rangees.length ? argent(total) : '';
+  // Total en haut + économie totale dessous (en magasin : celles de la bannière choisie seulement)
+  const montant = mode !== 'prep' ? argent(tot[mode] || 0) : rangees.length ? argent(total) : '';
+  const ecoTot = mode !== 'prep' ? eco[mode] || 0 : Object.values(eco).reduce((s, x) => s + x, 0);
+  $('#totalListe').innerHTML = montant ? `<span>${montant}</span>${ecoTot > 0.004 ? `<span class="tl-eco" title="Économie totale">${SVG_ETIQ}−${argent(ecoTot)}</span>` : ''}` : '';
   $('#pucesMag').innerHTML = `<button class="${mode === 'prep' ? 'actif' : ''}" data-mode="prep">Prépa.</button>`
     + cols.map((b) => `<button class="${mode === b ? 'actif' : ''}" data-mode="${b}">${esc(nomBanniere(b))}</button>`).join('');
   $$('#pucesMag [data-mode]').forEach((b) => b.onclick = () => {
