@@ -563,8 +563,8 @@ function vueListe(v) {
   const ouvrirTable = () => `<table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>${seule ? ''
     : `<colgroup><col style="width:${photo ? 52 : 172}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`}`;
   let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
-  // Liste activée : l'interrupteur Photo disparaît et Liste prend sa place
-  h += `<thead><tr><th class="pc"><div class="bascules">${seule ? '' : bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div></th>`;
+  // Les deux interrupteurs restent toujours à leur place (Photo s'applique quand Liste est désactivée)
+  h += `<thead><tr><th class="pc"><div class="bascules">${bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div></th>`;
   if (!seule) {
     h += '<th><button class="p-deal" id="btnDeal" title="Tout au meilleur prix">Deal</button></th>';
     h += cols.map((b) => `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : ''}</div>${logo(b)}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`).join('');
@@ -586,10 +586,14 @@ function vueListe(v) {
     h += dans.map((r) => htmlRangee(r, cols, seule)).join('');
   }
   h += '</tbody></table></div></div>';
+  // Le tableau est redessiné à chaque changement (ex. prix mis à jour un à un au démarrage) :
+  // on garde la position du défilement de côté, sinon il revient au début toutes les secondes.
+  const xAvant = $('.prep-defile', v)?.scrollLeft || 0;
   v.innerHTML = h;
 
   // Glisser la tête ou le corps de côté : l'autre suit
   const tete = $('.prep-tete', v), corps = $('.prep-defile', v);
+  if (xAvant) { corps.scrollLeft = xAvant; tete.scrollLeft = corps.scrollLeft; }
   corps.addEventListener('scroll', () => { if (tete.scrollLeft !== corps.scrollLeft) tete.scrollLeft = corps.scrollLeft; }, { passive: true });
   tete.addEventListener('scroll', () => { if (corps.scrollLeft !== tete.scrollLeft) corps.scrollLeft = tete.scrollLeft; }, { passive: true });
   majHautEntete();
