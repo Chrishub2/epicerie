@@ -382,7 +382,12 @@ function maxParClient(o) {
 }
 
 /** Prix unitaire court pour une case : « 1,52 $/kg », « 2,99 $/u ». */
-const puCourt = (pu, u) => esc(libelleUnitaire(pu, u).split(' · ')[0].replace('$/unité', '$/u'));
+const puCourt = (pu, u) => {
+  const t = libelleUnitaire(pu, u).split(' · ')[0].replace('$/unité', '$/u');
+  const i = t.indexOf('/');
+  // L'unité (« /kg », « /u ») en plus pâle : l'œil s'arrête sur le prix
+  return i > 0 ? `${esc(t.slice(0, i))}<span class="pu-u">${esc(t.slice(i))}</span>` : esc(t);
+};
 
 /** Une rangée : offres par bannière (la moins chère de chacune), bannière choisie et son offre. */
 function rangeeListe(l, a) {
@@ -416,10 +421,10 @@ function htmlRangee(r, cols, seule) {
       sous.length ? `<div class="p-sous">${esc(sous.join(' · '))}</div>` : ''}</div>
     <div class="p-pm"><button data-q="1" aria-label="Un de plus">+</button><button data-q="-1" aria-label="Un de moins">−</button></div></div></td>`;
   if (seule) return `${h}</tr>`;
-  h += `<td class="p-dealc">${r.offre ? htmlPrixCase(r.offre, u, { avecMax: false }) : '<span class="pp" style="color:var(--doux)">—</span>'}</td>`;
+  h += `<td class="p-dealc">${r.offre ? htmlPrixCase(r.offre, u, { avecMax: false }) : ''}</td>`;
   h += cols.map((b) => {
     const o = r.parBan[b];
-    return `<td>${o ? `<button class="pcel ${b === r.ban ? 'sel' : ''}" data-cle="${esc(cleOffre(o))}" aria-label="Acheter chez ${esc(nomBanniere(b))}">${htmlPrixCase(o, u)}</button>` : '<span class="pcel vide">—</span>'}</td>`;
+    return `<td>${o ? `<button class="pcel ${b === r.ban ? 'sel' : ''}" data-cle="${esc(cleOffre(o))}" aria-label="Acheter chez ${esc(nomBanniere(b))}">${htmlPrixCase(o, u)}</button>` : ''}</td>`;
   }).join('');
   return `${h}<td></td></tr>`;
 }
@@ -548,7 +553,7 @@ function vueListe(v) {
   h += `<thead><tr><th class="pc"><div class="bascules">${seule ? '' : bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div></th>`;
   if (!seule) {
     h += '<th><button class="p-deal" id="btnDeal" title="Tout au meilleur prix">Deal</button></th>';
-    h += cols.map((b) => `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : '—'}</div>${logo(b)}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`).join('');
+    h += cols.map((b) => `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : ''}</div>${logo(b)}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`).join('');
     h += '<th><button class="p-ajban" id="btnAjBan" aria-label="Ajouter une bannière">+</button></th>';
   }
   h += `</tr></thead></table></div><div class="prep-defile">${ouvrirTable()}<tbody>`;
@@ -1202,7 +1207,7 @@ export function ficheArticle(articleId, ligneId) {
     ${l?.recu?.absent ? `<div class="alerte" style="margin-bottom:10px">🧾 Ce produit n'est pas sur la facture du ${esc(l.recu.date || '')}${l.recu.banniere ? ` (${esc(nomBanniere(l.recu.banniere))})` : ''}.</div>` : ''}
     ${htmlAchats(a.id)}
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
-    ${tableauOffres(a, { avecManquants: true })}
+    ${tableauOffres(a)}
     <div class="carte" style="margin-top:8px;background:var(--gris-fond)">
       <div class="rang"><b class="grandir">Vrais prix (épiceries.ca)</b>${a.liens?.length ? '<button class="btn sec" id="ecMaj" style="padding:5px 10px">↻</button>' : ''}</div>
       ${a.liens?.length ? `<ul class="liste-arret">${a.liens.map((li) => `<li><span>${esc(li.nom)}${li.size ? ` <span class="doux">${esc(formatLisible(li.size))}</span>` : ''}</span><a href="#" data-delien="${esc(li.id)}" aria-label="Retirer">✕</a></li>`).join('')}</ul>
