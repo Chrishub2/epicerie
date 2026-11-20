@@ -22,6 +22,7 @@ import { ouvrirListeManuscrite, photoEnMagasin, identifierArticle, remplacerArti
 import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
+import { jourQuebec } from './couverture-circulaires.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -366,7 +367,19 @@ const lirePref = (k) => { try { return localStorage.getItem(k) === '1'; } catch 
 const ecrirePref = (k, oui) => { try { localStorage.setItem(k, oui ? '1' : '0'); } catch { /* navigation privée */ } };
 
 /** Bannières en colonnes : celles dont au moins une succursale est « à considérer ». */
-const banColonnes = () => BANNIERES_MAGASIN.filter((b) => banniereActive(b));
+/**
+ * Bannières affichées (puces et colonnes) : actives ET avec une circulaire en cours, c.-à-d. au moins un
+ * rabais de circulaire non annulé, commencé et pas encore fini. Aucune n'en a (données vides, démo) → toutes les actives.
+ */
+function banColonnes() {
+  const actives = BANNIERES_MAGASIN.filter((b) => banniereActive(b));
+  const auj = jourQuebec(); // date du Québec (pas UTC : une circulaire finie « ce soir » reste jusqu'à minuit)
+  const avecCirc = new Set((S.get().prix || [])
+    .filter((p) => p.type === 'circulaire' && !p.annule && p.fin && p.fin >= auj && (!p.debut || p.debut <= auj))
+    .map((p) => p.banniere));
+  const cols = actives.filter((b) => avecCirc.has(b));
+  return cols.length ? cols : actives;
+}
 
 /** Clé d'arrêt → bannière (« perso:IGA Extra Varennes » → iga). */
 function banDeCle(cle) {
@@ -390,8 +403,9 @@ const puCourt = (pu, u) => {
 };
 
 /** Une rangée : offres par bannière (la moins chère de chacune), bannière choisie et son offre. */
-function rangeeListe(l, a) {
-  const offres = offresArticle(a).filter((o) => o.pu != null); // déjà triées du moins cher au plus cher
+function rangeeListe(l, a, cols) {
+  // Seulement les bannières affichées (déjà triées du moins cher au plus cher)
+  const offres = offresArticle(a).filter((o) => o.pu != null && cols.includes(o.banniere));
   const parBan = {};
   for (const o of offres) if (!parBan[o.banniere]) parBan[o.banniere] = o;
   const choisie = banDeCle(l.magasinCible);
@@ -506,7 +520,7 @@ function vueListe(v) {
   const seule = lirePref(PREF_SEULE);
   const cols = banColonnes();
   const toutes = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a)
-    .map(({ l, a }) => rangeeListe(l, a));
+    .map(({ l, a }) => rangeeListe(l, a, cols));
   // Préparation : ce qui reste à acheter (les articles déjà « dans le panier » sont dans le mode épicerie)
   const rangees = toutes.filter((r) => !r.l.coche);
 
@@ -583,7 +597,8 @@ function vueListe(v) {
   $('#bPhoto', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_PHOTO, ev.target.checked); rendre(); });
   $('#bListe', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_SEULE, ev.target.checked); rendre(); });
   $('#btnDeal', v)?.addEventListener('click', () => {
-    const cles = Object.fromEntries(rangees.map((r) => { const m = meilleureOffre(r.a); return [r.l.id, m ? cleOffre(m) : null]; }));
+    // Meilleur prix parmi les bannières affichées (r.offre sans choix = la moins chère d'entre elles)
+    const cles = Object.fromEntries(rangees.map((r) => { const m = Object.values(r.parBan).sort((x, y) => x.pu - y.pu)[0]; return [r.l.id, m ? cleOffre(m) : null]; }));
     S.maj((x) => x.liste.forEach((li) => { if (cles[li.id]) li.magasinCible = cles[li.id]; }));
     toast('Tout au meilleur prix');
   });
