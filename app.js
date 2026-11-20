@@ -510,7 +510,7 @@ function vueEpicerie(v, b, toutes) {
   if (ici.length) {
     const pct = Math.round((panier.length / ici.length) * 100);
     const anneau = `<span class="ratio-trouves ${pct === 100 ? 'complet' : ''}" style="--p:${pct}" title="Trouvés : ${panier.length} sur ${ici.length}">`
-      + `<span class="rt-anneau"><b>${panier.length}</b><i>/${ici.length}</i></span><span class="rt-lib">trouvé${panier.length > 1 ? 's' : ''}</span></span>`;
+      + `<span class="rt-anneau"><span><b>${panier.length}</b><i>/${ici.length}</i></span><span class="rt-lib">trouvé${panier.length > 1 ? 's' : ''}</span></span></span>`;
     h = h.includes('</h3>') ? h.replace('</h3>', `${anneau}</h3>`) : anneau + h;
   }
   v.innerHTML = h;

@@ -362,14 +362,18 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .vignette.petite { width: 32px; height: 32px; }
 .rayon { margin-bottom: 10px; }
 /* Mode Magasin : anneau « trouvés / total » à droite du premier rayon (se remplit à mesure qu'on coche) */
-.ratio-trouves { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; }
-.rt-anneau { --t: 42px; width: var(--t); height: var(--t); border-radius: 50%; flex: none; display: inline-flex;
-  align-items: baseline; justify-content: center; padding-top: 12px; color: var(--texte, inherit); font-variant-numeric: tabular-nums;
-  background: radial-gradient(closest-side, var(--fond) 78%, transparent 80% 100%),
+/* Centré dans l'espace libre entre le nom du rayon et le bord droit */
+.ratio-trouves { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-transform: none; letter-spacing: 0; }
+.rt-anneau { --t: 66px; width: var(--t); height: var(--t); border-radius: 50%; flex: none; display: inline-flex;
+  flex-direction: column; align-items: center; justify-content: center; color: var(--texte, inherit); font-variant-numeric: tabular-nums;
+  background: radial-gradient(closest-side, var(--fond) 82%, transparent 84% 100%),
     conic-gradient(var(--accent) calc(var(--p) * 1%), var(--ligne) 0); }
-.rt-anneau b { font-size: 15px; font-weight: 800; color: var(--accent); line-height: 1; }
-.rt-anneau i { font-style: normal; font-size: 10px; font-weight: 600; opacity: .7; line-height: 1; }
-.rt-lib { font-family: "Dancing Script", "Segoe Script", cursive; font-size: 17px; font-weight: 700; color: var(--accent); }
+.rt-anneau > span { display: inline-flex; align-items: baseline; }
+.rt-anneau b { font-size: 21px; font-weight: 800; color: var(--accent); line-height: 1; letter-spacing: -.02em; }
+.rt-anneau i { font-style: normal; font-size: 13px; font-weight: 700; opacity: .75; line-height: 1; }
+.rt-lib { font-family: "Dancing Script", "Segoe Script", cursive; font-size: 13px; font-weight: 700; color: var(--accent); line-height: 1; margin-top: 1px; }
+/* Le premier rayon (celui qui porte l'anneau) remonte près de l'entête : 6 px d'écart au lieu de 24 */
+.rayon > h3:has(.ratio-trouves) { margin-top: -6px; }
 .ratio-trouves.complet .rt-anneau { box-shadow: 0 0 0 3px var(--accent-doux); }
 .rayon > h3 { display: flex; align-items: center; gap: 6px; color: var(--doux); font-size: 13px;
   text-transform: uppercase; letter-spacing: .03em; margin: 12px 2px 6px; }
