@@ -92,6 +92,18 @@ body:not(.onglet-liste) .barre-liste, body:not(.onglet-liste) .puces-mag { displ
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .puces-mag button.actif { background: var(--entete-puce-actif, #fff); color: var(--entete-puce-actif-texte, #0f3d27);
   border-color: var(--entete-puce-actif, #fff); font-weight: 700; }
+/* Prépa. : puces cachées en descendant (la marge garde la page en place) */
+header.puces-masquees .puces-mag { display: none; }
+/* Une bannière choisie : « Mode Magasin » écrit à la plume sous les puces */
+body:not(.onglet-liste) .mode-magasin { display: none; }
+.mode-magasin { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 6px auto 0; max-width: 720px; }
+.mode-magasin[hidden] { display: none; }
+.mode-magasin::before, .mode-magasin::after { content: ''; flex: 0 1 46px; height: 1px;
+  background: linear-gradient(90deg, transparent, currentColor); opacity: .55; }
+.mode-magasin::after { background: linear-gradient(90deg, currentColor, transparent); }
+.mm-titre { font-family: "Dancing Script", "Segoe Script", "Snell Roundhand", cursive; font-size: 27px; font-weight: 700;
+  line-height: 1.1; letter-spacing: .01em; }
+.mm-ban { font-size: 12px; opacity: .8; white-space: nowrap; align-self: flex-end; padding-bottom: 4px; }
 header .suggestions { position: absolute; left: 8px; right: 8px; top: 100%; margin-top: 2px; max-height: 60vh; overflow-y: auto;
   color: var(--texte); z-index: 8; }
 /* Barre du bas : cachée en descendant, revient en remontant */
@@ -111,6 +123,10 @@ html.modale-ouverte, html.modale-ouverte body { overflow: hidden; }
 /* ===== Liste — Préparation (tableau par bannière) ===== */
 .prep { margin: -12px -16px 0; }
 .prep-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* Tête des colonnes (Photo/Liste, Deal, bannières et totaux) : flotte sous l'en-tête pendant le défilement */
+.prep-tete { position: sticky; top: var(--haut-entete, 0px); z-index: 5; overflow-x: auto; scrollbar-width: none;
+  background: var(--fond); box-shadow: 0 2px 4px rgba(0,0,0,.12); }
+.prep-tete::-webkit-scrollbar { display: none; }
 table.prep-t { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13px; }
 .prep.seule table.prep-t { width: 100%; }
 .prep-t th, .prep-t td { padding: 0 2px; vertical-align: middle; border-bottom: 1px solid var(--ligne); }
@@ -457,6 +473,8 @@ a { color: var(--accent); }
 .cache-radio:focus-visible + .tuile-skin { outline: 3px solid var(--accent); outline-offset: 2px; }
 </style>
 <!-- Skins (apparence) : chaque fichier ne s'applique que si <html data-skin="..."> correspond. -->
+<!-- « Mode Magasin » : écriture à la plume (hors ligne : police cursive du téléphone) -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap">
 <link rel="stylesheet" href="skins/pro.css">
 <link rel="stylesheet" href="skins/etiquette.css">
 <link rel="stylesheet" href="skins/ludique.css">
@@ -487,6 +505,7 @@ try { var s = localStorage.getItem('epicerie.skin'); if (s && s !== 'classique')
     </div>
   </div>
   <div class="puces-mag" id="pucesMag"></div>
+  <div class="mode-magasin" id="modeMagasin" hidden></div>
   <div id="suggestions" class="suggestions cache"></div>
 </header>
 <div class="bandeau-demo cache" id="bandeauDemo"></div>

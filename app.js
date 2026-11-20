@@ -81,7 +81,7 @@ export function rendre() {
   majEntete();
   $$('#onglets button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === onglet));
   document.body.classList.toggle('onglet-liste', onglet === 'liste');
-  if (onglet !== 'liste') { masquerSuggestions(); $('#champAjout').classList.remove('ouvert'); }
+  if (onglet !== 'liste') { masquerSuggestions(); $('#champAjout').classList.remove('ouvert'); montrerPuces(); }
   const v = $('#vue');
   if (onglet === 'liste') vueListe(v);
   else if (onglet === 'comparer') vueComparaison(v, rendre);
@@ -524,7 +524,11 @@ function vueListe(v) {
     rendre();
     window.scrollTo(0, 0);
   });
-  if (mode !== 'prep') { vueEpicerie(v, mode, toutes); return; }
+  // Une bannière choisie = on magasine : titre « Mode Magasin » sous les puces
+  const titre = $('#modeMagasin');
+  titre.hidden = mode === 'prep';
+  if (mode !== 'prep') titre.innerHTML = `<span class="mm-titre">Mode Magasin</span><span class="mm-ban">chez ${esc(nomBanniere(mode))}</span>`;
+  if (mode !== 'prep') { montrerPuces(); vueEpicerie(v, mode, toutes); return; }
 
   if (!rangees.length) {
     v.innerHTML = '<div class="vide">Ta liste est vide. Ajoute un produit en haut à droite ou scanne un code-barres.</div>';
@@ -535,8 +539,11 @@ function vueListe(v) {
   const bascule = (id, lib, on) => `<label class="bascule"><span class="interrupteur"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></span><span class="lib">${lib}</span></label>`;
   // Largeur fixe : sans largeur de tableau, le navigateur élargit la colonne produit au nom le plus long
   const largeur = (photo ? 52 : 172) + 72 + cols.length * 72 + 40;
-  let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-defile"><table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>`;
-  if (!seule) h += `<colgroup><col style="width:${photo ? 52 : 172}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`;
+  // Deux tableaux de mêmes colonnes : la tête (bannières, totaux) flotte en haut pendant le défilement,
+  // le corps défile dessous ; leurs défilements horizontaux restent synchronisés.
+  const ouvrirTable = () => `<table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>${seule ? ''
+    : `<colgroup><col style="width:${photo ? 52 : 172}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`}`;
+  let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
   // Liste activée : l'interrupteur Photo disparaît et Liste prend sa place
   h += `<thead><tr><th class="pc"><div class="bascules">${seule ? '' : bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div></th>`;
   if (!seule) {
@@ -544,7 +551,7 @@ function vueListe(v) {
     h += cols.map((b) => `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : '—'}</div>${logo(b)}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`).join('');
     h += '<th><button class="p-ajban" id="btnAjBan" aria-label="Ajouter une bannière">+</button></th>';
   }
-  h += '</tr></thead><tbody>';
+  h += `</tr></thead></table></div><div class="prep-defile">${ouvrirTable()}<tbody>`;
   // Fiches à compléter (sans photo et jamais liées) : une à une, tu choisis le bon produit en ligne
   const aCompleter = rangees.filter((r) => !r.a.imageUrl && !r.a.liens?.length).map((r) => r.a.id);
   if (aCompleter.length && navigator.onLine) h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><button id="btnCompleter">📷 ${aCompleter.length} produit(s) sans photo · Compléter</button></span></td></tr>`;
@@ -561,6 +568,12 @@ function vueListe(v) {
   }
   h += '</tbody></table></div></div>';
   v.innerHTML = h;
+
+  // Glisser la tête ou le corps de côté : l'autre suit
+  const tete = $('.prep-tete', v), corps = $('.prep-defile', v);
+  corps.addEventListener('scroll', () => { if (tete.scrollLeft !== corps.scrollLeft) tete.scrollLeft = corps.scrollLeft; }, { passive: true });
+  tete.addEventListener('scroll', () => { if (corps.scrollLeft !== tete.scrollLeft) corps.scrollLeft = tete.scrollLeft; }, { passive: true });
+  majHautEntete();
 
   $('#bPhoto', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_PHOTO, ev.target.checked); rendre(); });
   $('#bListe', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_SEULE, ev.target.checked); rendre(); });
@@ -607,6 +620,33 @@ function vueListe(v) {
 }
 
 // --- En-tête de la liste : branché une seule fois (il n'est pas redessiné) ---
+
+/** Hauteur visible de l'en-tête → la tête de colonnes de Prépa. flotte juste dessous (corrigée du zoom d'affichage). */
+function majHautEntete() {
+  const z = Number($('#vue').style.zoom) || 1;
+  $('#vue').style.setProperty('--haut-entete', `${$('#entete').offsetHeight / z}px`);
+}
+
+/**
+ * Prépa. : les puces (Prépa., IGA, Super C…) disparaissent en descendant et reviennent en remontant.
+ * L'espace qu'elles occupaient est rendu en marge sous l'en-tête : la page ne saute pas pendant le défilement.
+ */
+function cacherPuces() {
+  const en = $('#entete');
+  if (en.classList.contains('puces-masquees')) return;
+  const avant = en.offsetHeight;
+  en.classList.add('puces-masquees');
+  en.style.marginBottom = `${avant - en.offsetHeight}px`;
+  majHautEntete();
+}
+function montrerPuces() {
+  const en = $('#entete');
+  if (!en.classList.contains('puces-masquees')) return;
+  en.classList.remove('puces-masquees');
+  en.style.marginBottom = '';
+  majHautEntete();
+}
+
 function terminerSaisie() {
   const saisie = $('#saisie');
   saisie.value = '';
@@ -662,13 +702,17 @@ function terminerSaisie() {
     const y = window.scrollY, nav = $('#onglets');
     if (y > yPrec + 6 && y > 40) nav.classList.add('masquee');
     else if (y < yPrec - 6 || y <= 40) nav.classList.remove('masquee');
+    // Prépa. seulement : les puces suivent la barre du bas (en magasin, elles restent visibles)
+    const prep = document.body.classList.contains('onglet-liste') && $('#vue .prep');
+    if (prep && y > yPrec + 6 && y > 40) cacherPuces();
+    else if (!prep || y < yPrec - 6 || y <= 40) montrerPuces();
     yPrec = y;
   }, { passive: true });
 
   // Taille d'affichage : 100 % = curseur en bas ; on monte pour réduire (jusqu'à 60 %). L'en-tête ne change pas.
   const boite = $('#zoomVue'), curseur = $('#zoomCurseur');
   let delai = null;
-  const appliquer = (p) => { $('#vue').style.zoom = p === 100 ? '' : String(p / 100); $('#zoomValeur').textContent = `${p} %`; };
+  const appliquer = (p) => { $('#vue').style.zoom = p === 100 ? '' : String(p / 100); $('#zoomValeur').textContent = `${p} %`; majHautEntete(); };
   const recacher = () => { clearTimeout(delai); delai = setTimeout(() => boite.classList.remove('ouvert'), 2500); };
   let p = 100;
   try { p = Math.min(100, Math.max(60, Number(localStorage.getItem('zoom-vue')) || 100)); } catch { /* navigation privée */ }
