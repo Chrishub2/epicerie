@@ -666,6 +666,9 @@ function modeListe(cols) {
   return m === 'prep' || cols.includes(m) ? m : 'prep';
 }
 
+const etatAnneau = new Map();    // bannière → dernier % « trouvés » affiché
+const eclatJusqua = new Map();   // bannière → fin de l'animation d'éclat (ms)
+
 function vueEpicerie(v, b, toutes) {
   const e = S.get();
   const ici = toutes.filter((r) => r.ban === b);
@@ -690,10 +693,9 @@ function vueEpicerie(v, b, toutes) {
   };
 
   let h = '';
+  // Tout trouvé : pas de message, c'est l'anneau « trouvés » qui passe au vert flash
   if (!aPrendre.length && !panier.length) {
     h += `<div class="vide">Rien à acheter chez ${nom}. Dans « Prépa. », touche un prix de la colonne ${nom} pour y placer un article.</div>`;
-  } else if (!aPrendre.length) {
-    h += `<div class="vide">✔ Tout est dans le panier chez ${nom}.</div>`;
   }
   h += parRayons(aPrendre);
   if (sansPrix.length) h += `<section class="rayon"><h3>Sans prix connu <span class="doux">(${sansPrix.length})</span> <span class="doux" style="font-size:12px;font-weight:400">— à prendre où tu les trouves</span></h3>${sansPrix.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
@@ -706,7 +708,13 @@ function vueEpicerie(v, b, toutes) {
   // Anneau « trouvés / total » (articles de cette bannière déjà dans le panier), à droite du premier rayon
   if (ici.length) {
     const pct = Math.round((panier.length / ici.length) * 100);
-    const anneau = `<span class="ratio-trouves ${pct === 100 ? 'complet' : ''}" style="--p:${pct}" title="Trouvés : ${panier.length} sur ${ici.length}">`
+    // Passage à 100 % : petite animation d'éclat (1,2 s), gardée si la liste est redessinée pendant ce temps
+    const avant = etatAnneau.get(b);
+    if (pct === 100 && avant != null && avant < 100) eclatJusqua.set(b, Date.now() + 1200);
+    etatAnneau.set(b, pct);
+    const resteEclat = (eclatJusqua.get(b) || 0) - Date.now();
+    const eclat = pct === 100 && resteEclat > 0 ? ` eclat" style="--p:${pct};--retard:${resteEclat - 1200}ms` : `" style="--p:${pct}`;
+    const anneau = `<span class="ratio-trouves ${pct === 100 ? 'complet' : ''}${eclat}" title="Trouvés : ${panier.length} sur ${ici.length}">`
       + `<span class="rt-anneau"><span><b>${panier.length}</b><i>/${ici.length}</i></span><span class="rt-lib">trouvé${panier.length > 1 ? 's' : ''}</span></span></span>`;
     h = h.includes('</h3>') ? h.replace('</h3>', `${anneau}</h3>`) : anneau + h;
   }
