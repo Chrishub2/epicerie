@@ -62,6 +62,7 @@ h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: v
 .synchro[data-etat="connexion"] .pastille { background: var(--alerte); box-shadow: 0 0 0 3px var(--alerte-doux); }
 img.vignette { object-fit: cover; background: var(--surface-3); padding: 0; border: 1px solid var(--trait); }
 img.vignette.casse { visibility: hidden; }
+img.vignette.heritee { border-style: dashed; opacity: .85; }
 /* Lecture seule (étape C3) : les actions d'écriture restent visibles mais atténuées */
 .lecture-seule [data-act="appliquer"], .lecture-seule #appliquerLot, .lecture-seule #fusionner, .lecture-seule #pasDoublons,
 .lecture-seule [data-lot], .lecture-seule [data-restaurer], .lecture-seule .valeur.editable { opacity: .5; cursor: not-allowed; }

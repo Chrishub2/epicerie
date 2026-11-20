@@ -7,6 +7,9 @@
 // relie chaque fiche au référentiel v3 (pont en attendant la migration du schéma).
 // =====================================================================
 
+// Adresse du dossier visuels/ à côté de ce module : marche depuis l'app ET la console (app/console/).
+const BASE = new URL('visuels/', import.meta.url).href;
+
 let presentes = null;   // Set des clés d'images disponibles
 let correspondance = {}; // articleId → { g: 'CAT-001-SC-01-P-001', s: 'gala' | null }
 
@@ -14,8 +17,8 @@ let correspondance = {}; // articleId → { g: 'CAT-001-SC-01-P-001', s: 'gala' 
 export async function chargerVisuels() {
   try {
     const [i, c] = await Promise.all([
-      fetch('visuels/index.json').then((r) => r.json()),
-      fetch('visuels/correspondance.json').then((r) => r.json()),
+      fetch(BASE + 'index.json').then((r) => r.json()),
+      fetch(BASE + 'correspondance.json').then((r) => r.json()),
     ]);
     presentes = new Set(i);
     correspondance = c || {};
@@ -39,5 +42,5 @@ export function cleVisuel(a, corr = correspondance, dispo = presentes) {
 export function photoDe(a) {
   if (a?.imageUrl) return a.imageUrl;
   const k = cleVisuel(a);
-  return k ? `visuels/${k}.jpg` : '';
+  return k ? `${BASE}${k}.jpg` : '';
 }

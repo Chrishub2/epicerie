@@ -13,6 +13,7 @@ import { chercherProduit, besoinsPour } from './recherche.js';
 import { monterCirculaires, compterAValider } from '../circulaires.js';
 import { surveillerMisesAJourConsole } from './maj-console.js';
 import { vueMagasins } from './magasins.js';
+import { chargerVisuels, photoDe } from '../visuels.js';
 
 // ---------------------------------------------------------------------
 // Outils
@@ -90,7 +91,12 @@ function reanalyser() {
 // ---------------------------------------------------------------------
 function vignette(a, grande = false) {
   const lettres = (a.nom || '?').trim().split(/\s+/).slice(0, 2).map((m) => m[0]).join('').toUpperCase();
-  if (!a.imageUrl) return `<span class="vignette vide${grande ? ' grande' : ''}" title="Aucune photo">${grande ? '📷' : ''}</span>`;
+  if (!a.imageUrl) {
+    // Pas de vraie photo : image héritée de son niveau (catégorie → sorte), marquée en pointillé. Sinon, case vide.
+    const h = photoDe(a);
+    if (h) return `<img class="vignette image heritee${grande ? ' grande' : ''}" src="${esc(h)}" alt="" loading="lazy" title="Image de sa catégorie (pas encore de vraie photo)">`;
+    return `<span class="vignette vide${grande ? ' grande' : ''}" title="Aucune photo">${grande ? '📷' : ''}</span>`;
+  }
   if (!String(a.imageUrl).startsWith('fictif:')) return `<img class="vignette image${grande ? ' grande' : ''}" src="${esc(a.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.classList.add('casse')">`;
   const h = (parseInt(String(a.rayonId).slice(1), 10) * 47) % 360;
   return `<span class="vignette${grande ? ' grande' : ''}" style="background:hsl(${h} 38% 38%)" title="Photo (fictive)">${esc(lettres)}</span>`;
@@ -1496,6 +1502,7 @@ async function chargerTout() {
   E = construireEtat(lignes, source.membres);
   try { histoBase = await source.chargerHistorique(); } catch (err) { console.warn('Historique', err); histoBase = []; }
   try { for (const cle of await source.chargerDecisions()) ignores.add(cle); } catch (err) { console.warn('Décisions', err); }
+  await chargerVisuels();
   reanalyser();
   etatSynchro('ok', `Vraies données · « ${foyer.nom} »`);
   rendre();
