@@ -140,6 +140,47 @@ table.prep-t { border-collapse: separate; border-spacing: 0; table-layout: fixed
 .prep-t tr.pl td { height: 56px; }
 .prep-t .pc { position: sticky; left: 0; z-index: 2; background: var(--fond); border-right: 1px solid var(--ligne); padding: 0 4px 0 8px; text-align: left; }
 .prep.seule .pc { border-right: 0; padding-right: 10px; }
+/* Mode Liste (maquette v3) : rangées enrichies, bilan des arrêts, bascule rayon / magasin, sous-totaux */
+.prep-t tr.pl.ls td { height: auto; padding: 7px 8px; }
+.ls-r { display: flex; align-items: center; gap: 9px; }
+.ls-tx { flex: 1; min-width: 0; cursor: pointer; }
+.ls-nom { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ls-sous { color: var(--doux); font-size: 11px; font-weight: 400; }
+.ls-prix { display: flex; align-items: baseline; gap: 5px; margin-top: 2px; white-space: nowrap; overflow: hidden; }
+.ls-prix .logo { font-size: 9px; padding: 2px 5px; border-radius: 4px; align-self: center; }
+.ls-pp { font-size: 13px; }
+.ls-pp.promo { color: var(--rouge); }
+.ls-prix s { color: var(--doux); font-size: 11px; }
+.ls-pu { color: var(--doux); font-size: 11px; opacity: .8; }
+.ls-ch { display: flex; flex-wrap: wrap; gap: 3px 4px; margin-top: 3px; max-height: 34px; overflow: hidden; }
+.lch { font-size: 10px; line-height: 15px; padding: 0 6px; border-radius: 8px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  background: var(--gris-fond); color: var(--texte); }
+.lch.ok { background: color-mix(in srgb, var(--vert) 18%, transparent); color: var(--vert); }
+.lch.wa { background: color-mix(in srgb, #e8a400 22%, transparent); color: #b07d00; }
+.lch.al { background: color-mix(in srgb, var(--rouge) 18%, transparent); color: var(--rouge); }
+.lch.ur { background: color-mix(in srgb, #ff8a1f 28%, transparent); color: #d9690a; font-weight: 600; }
+.lch.rec { background: color-mix(in srgb, #3b82f6 18%, transparent); color: #3b74d4; }
+.lch.rec.top { background: #3b82f6; color: #fff; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .lch.wa { color: #f0c35a; } .lch.ur { color: #ffb366; } .lch.rec { color: #86b2ef; } }
+.ls-d { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.ls-tot { font-size: 13px; font-variant-numeric: tabular-nums; }
+.ls-pm { display: flex; gap: 4px; }
+.ls-pm button { width: 30px; height: 26px; border-radius: 7px; border: 1px solid var(--ligne); background: var(--gris-fond); color: var(--texte); font-size: 16px; line-height: 1; padding: 0; cursor: pointer; }
+.prep.seule .pr-nom { position: static; display: flex; padding: 0 10px 0 8px; }
+.pr-st { margin-left: auto; font-variant-numeric: tabular-nums; }
+.pr-nom .logo { font-size: 9px; padding: 2px 5px; border-radius: 4px; }
+.prep-t tr.ls-bilan td, .prep-t tr.ls-seg td { padding: 6px 8px 0; border-bottom: 0; }
+.bil { background: var(--carte); border: 1px solid var(--ligne); border-radius: 12px; padding: 8px 10px; font-size: 12px; }
+.bil-l { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.bil-l + .bil-l { margin-top: 3px; }
+.bil-doux { color: var(--doux); font-size: 11px; }
+.bil-eco, .bil-ok { color: var(--vert); }
+.bil-wa { color: #c48a00; }
+.bil-rec { color: #3b74d4; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .bil-wa { color: #f0c35a; } .bil-rec { color: #86b2ef; } }
+.seg-gr { display: flex; background: var(--gris-fond); border-radius: 9px; padding: 2px; margin-bottom: 6px; }
+.seg-gr button { flex: 1; border: 0; background: transparent; color: var(--doux); font: inherit; font-size: 12px; padding: 5px; border-radius: 7px; cursor: pointer; }
+.seg-gr button.on { background: var(--carte); color: var(--texte); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 .prep-t .pc-tete { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 /* Nombre d'articles : chiffre fort dans une tuile douce, petit libellé dessous */
 .p-nb { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 46px; padding: 5px 6px 4px;

@@ -7,7 +7,7 @@ import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
   libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive, magasinsActifs } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
-import { analyserOffre, analyserFormat, formatLisible, gtinVariantes } from './normalise.js';
+import { analyserOffre, analyserFormat, formatLisible, gtinVariantes, normaliser } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
@@ -551,6 +551,111 @@ function htmlRangee(r, cols, seule) {
 }
 
 // ---------------------------------------------------------------------
+// Prépa. → interrupteur « Liste » : rangées enrichies (maquette v3 validée par Chris le 2026-11-20).
+// Bilan des arrêts en haut, groupement par rayon ou par magasin, écart avec ailleurs, record de prix.
+// ---------------------------------------------------------------------
+const PREF_GROUPE = 'liste.groupe';   // « rayon » ou « magasin » (ce téléphone)
+const SEUIL_ARRET = 8;                // $ d'écart à partir duquel un 2e arrêt vaut la peine (valeur par défaut de la SPEC)
+
+/** Meilleur prix unitaire jamais observé (toutes dates, prix annulés exclus ; le rabais perso n'est pas un prix observé). */
+function recordPrix(a) {
+  const variantes = new Map((a.variantes || []).map((v) => [v.id, v]));
+  let rec = null, max = null;
+  for (const p of S.get().prix) {
+    if (p.articleId !== a.id || p.annule || p.enAttente) continue;
+    const n = normaliser(p.offre, p.format || variantes.get(p.varianteId)?.format || a.format, a.uniteRef);
+    const pu = n.prixUnitaire ?? (p.uniteSource?.unite === a.uniteRef ? p.uniteSource.pu : null);
+    if (pu == null) continue;
+    if (max == null || pu > max) max = pu;
+    if (!rec || pu < rec.pu - 0.0005) rec = { pu, banniere: p.banniere, quand: p.observeLe || p.debut || p.fin || '', uniteRef: n.uniteRef || a.uniteRef };
+  }
+  return rec ? { ...rec, max } : null;
+}
+
+/** Étiquette du record pour une rangée : ★ si le prix actuel égale le plus bas jamais vu (et qu'on l'a déjà vu plus cher). */
+function etatRecord(r) {
+  const o = r.offre, rec = recordPrix(r.a);
+  if (!o || !rec) return null;
+  // Rabais perso : on compare le prix d'étagère (le −10 % s'ajoute à n'importe quel prix)
+  const pu = o.perso ? offresArticle(r.a).find((x) => !x.perso && x.banniere === o.banniere && x.pu != null)?.pu ?? o.pu : o.pu;
+  if (pu <= rec.pu + 0.005 && rec.max > rec.pu + 0.01) return { top: true };
+  if (pu <= rec.pu + 0.005) return null;   // un seul prix connu : pas de record à montrer
+  const d = rec.quand ? new Date(`${rec.quand.slice(0, 10)}T12:00`) : null;
+  const mois = d && !isNaN(d) ? d.toLocaleDateString('fr-CA', { month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }) : '';
+  return { top: false, texte: `Record : ${libelleUnitaire(rec.pu, rec.uniteRef).split(' · ')[0].replace('$/unité', '$/u')} · ${nomBanniere(rec.banniere)}${mois ? `, ${mois}` : ''}` };
+}
+
+function htmlRangeeListe(r, { groupe, rec }) {
+  const { l, a, offre: o } = r;
+  const sous = [formatLisible(o?.format || a.format), a.marque].filter(Boolean);
+  const etiquette = o ? (o.offre || (o.prixArticle != null ? argent(o.prixArticle) : '')) : '';
+  const cout = o ? coutPour(l, a, cleOffre(o)) : null;
+  const ch = [];
+  if (rec?.top) ch.push(['rec top', '★ Meilleur prix jamais vu']);
+  else if (rec) ch.push(['rec', rec.texte]);
+  if (l.indisponible) ch.push(['no', '🚫 Pas disponible']);
+  if (a.rappel) ch.push(['al', '⚠️ Rappel ou avis']);
+  if (o?.economie) {
+    const j = joursRestants(o.fin);
+    ch.push([j != null && j <= 1 ? 'ur' : 'ok', `−${argent(o.economie)}${o.fin ? ` · ${libelleFin(o.fin)}` : ''}`]);
+  }
+  if (o?.perso) ch.push(['ok', (o.rabaisTexte || 'rabais perso').split(' (')[0]]);
+  const max = o ? maxParClient(o) : null;
+  if (max) ch.push(['wa', `${max} max`]);
+  if (o?.produitOffre) ch.push(['no', `Prendre : ${o.produitOffre}`]);
+  if (l.note) ch.push(['no', `📝 ${l.note}`]);
+  if (l.recettes?.length) ch.push(['no', `Recette : ${l.recettes[0]}`]);
+  if (!o) ch.push(['no', 'Prix inconnu · touche la photo']);
+  // Écart avec la bannière affichée la moins chère après celle-ci
+  if (o && cout != null) {
+    const alt = Object.values(r.parBan).filter((x) => x.banniere !== o.banniere)
+      .map((x) => ({ b: x.banniere, c: coutPour(l, a, cleOffre(x)) })).filter((x) => x.c != null).sort((x, y) => x.c - y.c)[0];
+    if (alt) {
+      const d = alt.c - cout;
+      if (Math.abs(d) >= 0.005) ch.push([d < 0 ? 'wa' : 'no', `${nomBanniere(alt.b)} ${d < 0 ? '−' : '+'}${argent(Math.abs(d))}`]);
+    }
+  }
+  return `<tr class="pl ls ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="ls-r">
+    <div class="p-photo" data-fiche="${a.id}">${photoDe(a) ? `<img src="${esc(photoDe(a))}" alt="">` : '<span aria-hidden="true">📦</span>'}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
+    <div class="ls-tx" data-fiche="${a.id}">
+      <div class="ls-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}${sous.length ? ` <span class="ls-sous">· ${esc(sous.join(' · '))}</span>` : ''}</div>
+      <div class="ls-prix">${o ? `${groupe === 'rayon' ? logo(o.banniere) : ''}<b class="ls-pp ${estRabais(o) ? 'promo' : ''}">${esc(etiquette) || '?'}</b>${
+        o.economie && o.prixRegulier ? `<s>${argent(o.prixRegulier)}</s>` : ''}${o.pu != null ? `<span class="ls-pu">${puCourt(o.pu, o.uniteRef)}</span>` : ''}` : ''}</div>
+      <div class="ls-ch">${ch.map(([c, t]) => `<span class="lch ${c}">${esc(t)}</span>`).join('')}</div>
+    </div>
+    <div class="ls-d"><b class="ls-tot">${cout != null ? argent(cout) : '—'}</b><div class="ls-pm"><button data-q="-1" aria-label="Un de moins">−</button><button data-q="1" aria-label="Un de plus">+</button></div></div>
+  </div></td></tr>`;
+}
+
+/** Bilan en haut du mode Liste : arrêts, total, économie, coût d'un seul arrêt, records. */
+function htmlBilanListe(rangees, { total, ecoTot, recs }) {
+  const avecPrix = rangees.filter((r) => r.offre && !r.l.indisponible);
+  const arrets = new Set(avecPrix.map((r) => r.ban)).size;
+  const nRec = [...recs.values()].filter((x) => x?.top).length;
+  // Tout au même endroit : pour chaque bannière, ce qui y est offert à son prix, le reste là où il est choisi
+  let seul = null;
+  if (arrets > 1) {
+    const bans = new Set(avecPrix.flatMap((r) => Object.keys(r.parBan)));
+    for (const b of bans) {
+      let t = 0, manque = 0;
+      for (const r of avecPrix) {
+        const o = r.parBan[b];
+        const c = o ? coutPour(r.l, r.a, cleOffre(o)) : null;
+        if (c == null) { manque++; t += coutPour(r.l, r.a, cleOffre(r.offre)) || 0; } else t += c;
+      }
+      if (!seul || t < seul.t) seul = { b, t, manque };
+    }
+  }
+  const ecart = seul ? seul.t - total : 0;
+  return `<tr class="ls-bilan"><td><div class="bil">
+    <div class="bil-l"><span><b>${arrets} arrêt${arrets > 1 ? 's' : ''}</b> · ${rangees.length} article${rangees.length > 1 ? 's' : ''}</span><b>${argent(total)}</b></div>
+    ${seul ? `<div class="bil-l bil-doux"><span>Tout chez ${esc(nomBanniere(seul.b))} : ${argent(seul.t)} (+${argent(Math.max(0, ecart))})${seul.manque ? ` · ${seul.manque} absent${seul.manque > 1 ? 's' : ''}` : ''}</span>${ecoTot > 0.004 ? `<span class="bil-eco">−${argent(ecoTot)} économisés</span>` : ''}</div>`
+      : ecoTot > 0.004 ? `<div class="bil-l bil-doux"><span></span><span class="bil-eco">−${argent(ecoTot)} économisés</span></div>` : ''}
+    ${seul || nRec ? `<div class="bil-l bil-doux">${seul ? `<span class="${ecart >= SEUIL_ARRET ? 'bil-ok' : 'bil-wa'}">${ecart >= SEUIL_ARRET ? `Le 2e arrêt vaut la peine (seuil ${SEUIL_ARRET} $)` : `Moins de ${SEUIL_ARRET} $ d'écart : un seul arrêt suffit peut-être`}</span>` : '<span></span>'}${nRec ? `<span class="bil-rec">★ ${nRec} record${nRec > 1 ? 's' : ''}</span>` : ''}</div>` : ''}
+  </div></td></tr>`;
+}
+
+// ---------------------------------------------------------------------
 // Liste — MODE ÉPICERIE (une puce par bannière) : seulement les articles dont la bannière choisie en
 // Préparation est celle-ci. Les choix restent modifiables : on revient à « Prépa. » à tout moment.
 // ---------------------------------------------------------------------
@@ -690,15 +795,40 @@ function vueListe(v) {
   const aCompleter = rangees.filter((r) => !r.a.imageUrl && !r.a.liens?.length).map((r) => r.a.id);
   if (aCompleter.length && navigator.onLine) h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><button id="btnCompleter">📷 ${aCompleter.length} produit(s) sans photo · Compléter</button></span></td></tr>`;
 
-  // Rayons dans l'ordre standard (« Ordre par défaut ») ; bande compacte sur toute la largeur
-  const divers = rayonParDefaut();
-  const rayonDe = (a) => (e.rayons.some((r) => r.id === a.rayonId) ? a.rayonId : divers);
-  for (const g of groupesRayons('defaut')) {
-    const dans = rangees.filter((r) => g.ids.includes(rayonDe(r.a)));
-    if (!dans.length) continue;
-    const classer = g.ids.includes(divers) && dans.some((r) => rayonDe(r.a) === divers) ? '<button data-classer>🗂 Classer</button>' : '';
-    h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><span data-reorg title="Changer l'ordre des rayons">${esc(g.nom)} · ${dans.length}</span>${classer}</span></td></tr>`;
-    h += dans.map((r) => htmlRangee(r, cols, seule)).join('');
+  // Mode Liste : bilan des arrêts, puis bascule « Par rayon / Par magasin »
+  let groupe = 'rayon';
+  try { groupe = localStorage.getItem(PREF_GROUPE) === 'magasin' ? 'magasin' : 'rayon'; } catch { /* navigation privée */ }
+  const recs = seule ? new Map(rangees.map((r) => [r.l.id, etatRecord(r)])) : null;
+  const coutDe = (r) => (r.offre && !r.l.indisponible ? coutPour(r.l, r.a, cleOffre(r.offre)) || 0 : 0);
+  const sousTotal = (rs) => { const t = rs.reduce((s, r) => s + coutDe(r), 0); return seule && t ? `<span class="pr-st">${argent(t)}</span>` : ''; };
+  const rangeeHtml = (r) => (seule ? htmlRangeeListe(r, { groupe, rec: recs.get(r.l.id) }) : htmlRangee(r, cols, seule));
+  if (seule) {
+    const ecoTot = Object.values(eco).reduce((s, x) => s + x, 0);
+    h += htmlBilanListe(rangees, { total, ecoTot, recs });
+    h += `<tr class="ls-seg"><td><div class="seg-gr"><button data-groupe="rayon" class="${groupe === 'rayon' ? 'on' : ''}">Par rayon</button><button data-groupe="magasin" class="${groupe === 'magasin' ? 'on' : ''}">Par magasin</button></div></td></tr>`;
+  }
+
+  if (seule && groupe === 'magasin') {
+    // Un groupe par arrêt (bannière choisie), du plus gros montant au plus petit ; « Sans prix » à la fin
+    const parBan = new Map();
+    for (const r of rangees) { const k = r.offre ? r.ban : ''; if (!parBan.has(k)) parBan.set(k, []); parBan.get(k).push(r); }
+    const cles = [...parBan.keys()].sort((x, y) => (x === '') - (y === '') || parBan.get(y).reduce((s, r) => s + coutDe(r), 0) - parBan.get(x).reduce((s, r) => s + coutDe(r), 0));
+    for (const k of cles) {
+      const dans = parBan.get(k);
+      h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><span>${k ? logo(k) : 'Sans prix connu'} · ${dans.length}</span>${sousTotal(dans)}</span></td></tr>`;
+      h += dans.map(rangeeHtml).join('');
+    }
+  } else {
+    // Rayons dans l'ordre standard (« Ordre par défaut ») ; bande compacte sur toute la largeur
+    const divers = rayonParDefaut();
+    const rayonDe = (a) => (e.rayons.some((r) => r.id === a.rayonId) ? a.rayonId : divers);
+    for (const g of groupesRayons('defaut')) {
+      const dans = rangees.filter((r) => g.ids.includes(rayonDe(r.a)));
+      if (!dans.length) continue;
+      const classer = g.ids.includes(divers) && dans.some((r) => rayonDe(r.a) === divers) ? '<button data-classer>🗂 Classer</button>' : '';
+      h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><span data-reorg title="Changer l'ordre des rayons">${esc(g.nom)} · ${dans.length}</span>${classer}${sousTotal(dans)}</span></td></tr>`;
+      h += dans.map(rangeeHtml).join('');
+    }
   }
   h += '</tbody></table></div></div>';
   // Le tableau est redessiné à chaque changement (ex. prix mis à jour un à un au démarrage) :
@@ -715,6 +845,10 @@ function vueListe(v) {
 
   $('#bPhoto', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_PHOTO, ev.target.checked); rendre(); });
   $('#bListe', v)?.addEventListener('change', (ev) => { ecrirePref(PREF_SEULE, ev.target.checked); rendre(); });
+  $$('[data-groupe]', v).forEach((b) => b.onclick = () => {
+    try { localStorage.setItem(PREF_GROUPE, b.dataset.groupe); } catch { /* navigation privée */ }
+    rendre();
+  });
   $('#btnDeal', v)?.addEventListener('click', () => {
     // Meilleur prix parmi les bannières affichées (r.offre sans choix = la moins chère d'entre elles)
     const cles = Object.fromEntries(rangees.map((r) => { const m = Object.values(r.parBan).sort((x, y) => x.pu - y.pu)[0]; return [r.l.id, m ? cleOffre(m) : null]; }));
