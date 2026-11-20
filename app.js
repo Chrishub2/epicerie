@@ -184,6 +184,55 @@ export function montrerAjout(articleId) {
   }, 60);
 }
 
+// --- + / − sur un article de la liste (Prépa. et Mode Magasin) ---
+// Retrait : anneau qui se vide (compte à rebours) autour d'un « − », même esprit que l'anneau « trouvés »
+const SVG_SABLIER = '<svg class="sablier" viewBox="0 0 24 24" aria-label="Retrait en cours"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="3"/><circle class="rebours" cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" pathLength="100" stroke-dasharray="100" transform="rotate(-90 12 12)"/><path d="M8 12h8" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>';
+const ligneDe = (id) => $(`#vue tr.pl[data-l="${id}"]`) || $(`#vue .item-liste[data-id="${id}"]`);
+const chiffreDe = (id) => ligneDe(id)?.querySelector('.p-qte, .qte b');
+
+/** Un de plus / un de moins. À 1, « − » retire le produit (compte à rebours), puis la liste se referme. */
+function changerQuantite(id, delta) {
+  const l = S.get().liste.find((i) => i.id === id);
+  if (!l) return;
+  if (delta < 0 && l.quantite <= 1) { retirerAnime(id); return; }
+  S.maj((x) => { const li = x.liste.find((i) => i.id === id); if (li) li.quantite = Math.max(1, li.quantite + delta); });
+  // Le chiffre sur la photo s'allume comme le cadre d'un ajout, puis s'éteint
+  setTimeout(() => {
+    const c = chiffreDe(id);
+    if (!c) return;
+    c.classList.remove('qte-flash'); void c.offsetWidth; c.classList.add('qte-flash');
+  }, 0);
+}
+
+/** Compte à rebours sur le chiffre → la rangée se vide → elle disparaît et les rangées du dessous remontent. */
+function retirerAnime(id) {
+  const rangee = ligneDe(id);
+  if (!rangee || rangee.dataset.retrait) return;
+  rangee.dataset.retrait = '1';
+  const c = chiffreDe(id);
+  if (c) { c.innerHTML = SVG_SABLIER; c.classList.add('en-retrait'); }
+  setTimeout(() => {
+    ligneDe(id)?.classList.add('se-vide');   // l'espace reste, le contenu s'efface
+    setTimeout(() => {
+      // Positions avant le retrait (rangées, en-têtes de rayon), pour faire glisser ce qui est dessous
+      const cle = (e) => e.dataset.l || e.dataset.id || `t:${e.textContent.trim().slice(0, 60)}`;
+      const quoi = '#vue .prep-defile tr, #vue .item-liste, #vue .rayon > h3, #vue .rayon > button, #vue > .btn';
+      const avant = new Map($$(quoi).map((e) => [cle(e), e.getBoundingClientRect().top]));
+      S.maj((x) => { x.liste = x.liste.filter((i) => i.id !== id); });
+      for (const e of $$(quoi)) {
+        const dy = (avant.get(cle(e)) ?? NaN) - e.getBoundingClientRect().top;
+        if (!(dy > 0.5)) continue;
+        e.style.transition = 'none';
+        e.style.transform = `translateY(${dy}px)`;
+        void e.offsetWidth;
+        e.style.transition = 'transform .38s cubic-bezier(.2,.8,.2,1)';
+        e.style.transform = '';
+        e.addEventListener('transitionend', () => { e.style.transition = ''; }, { once: true });
+      }
+    }, 260);
+  }, 850);
+}
+
 function ordreRayons(magasinId = S.get().magasinCourant) {
   const e = S.get();
   const sauve = e.ordreRayons[magasinId] || e.rayons.map((r) => r.id);
@@ -568,12 +617,7 @@ function vueEpicerie(v, b, toutes) {
       const l = x.liste.find((i) => i.id === id);
       if (l) { l.coche = ev.target.checked; l.cocheLe = ev.target.checked ? new Date().toISOString() : null; }
     });
-    el.querySelectorAll('[data-q]').forEach((bt) => bt.onclick = () => S.maj((x) => {
-      const l = x.liste.find((i) => i.id === id);
-      if (!l) return;
-      l.quantite = Math.max(0, l.quantite + Number(bt.dataset.q));
-      if (l.quantite === 0) x.liste = x.liste.filter((i) => i.id !== id);
-    }));
+    el.querySelectorAll('[data-q]').forEach((bt) => bt.onclick = () => changerQuantite(id, Number(bt.dataset.q)));
     el.querySelectorAll('[data-fiche]').forEach((f) => f.onclick = () => ficheArticle(f.dataset.fiche, id));
     el.querySelector('[data-photomag]')?.addEventListener('click', (ev) => { ev.stopPropagation(); identifierArticle(ev.currentTarget.dataset.photomag, id); });
   });
@@ -701,12 +745,7 @@ function vueListe(v) {
       if (f) ficheArticle(f.dataset.fiche, id);
     });
     brancherAppuiLong(tr.querySelector('.p-photo'), () => optionsArticleListe(id));
-    tr.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => S.maj((x) => {
-      const l = x.liste.find((i) => i.id === id);
-      if (!l) return;
-      l.quantite = Math.max(0, l.quantite + Number(b.dataset.q));
-      if (l.quantite === 0) x.liste = x.liste.filter((i) => i.id !== id);
-    }));
+    tr.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => changerQuantite(id, Number(b.dataset.q)));
     tr.querySelectorAll('.pcel[data-cle]').forEach((b) => b.onclick = () => S.maj((x) => {
       const l = x.liste.find((i) => i.id === id);
       if (l) l.magasinCible = b.dataset.cle;
