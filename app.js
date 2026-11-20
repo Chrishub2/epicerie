@@ -381,6 +381,20 @@ function banColonnes() {
   return cols.length ? cols : actives;
 }
 
+/** Une offre affichée comme rabais (en couleur dans la case) : circulaire, économie sur le régulier ou rabais perso. */
+const estRabais = (o) => !!(o.perso || o.economie || (o.type && o.type !== 'regulier'));
+
+/**
+ * Parmi les bannières retenues, seulement celles qui ont au moins un rabais sur un article de la liste.
+ * Aucune n'en a → on garde toutes les bannières retenues (sinon le tableau serait vide).
+ */
+function banAvecRabaisListe(base, articles) {
+  const avec = new Set();
+  for (const a of articles) for (const o of offresArticle(a)) if (o.pu != null && estRabais(o)) avec.add(o.banniere);
+  const cols = base.filter((b) => avec.has(b));
+  return cols.length ? cols : base;
+}
+
 /** Clé d'arrêt → bannière (« perso:IGA Extra Varennes » → iga). */
 function banDeCle(cle) {
   if (!cle || cle === 'aucun') return null;
@@ -415,7 +429,7 @@ function rangeeListe(l, a, cols) {
 
 /** Contenu d'une case de prix : prix unitaire (rabais en couleur), régulier barré ou rabais perso dessous. */
 function htmlPrixCase(o, u, { avecMax = true } = {}) {
-  const promo = o.perso || o.economie || (o.type && o.type !== 'regulier');
+  const promo = estRabais(o);
   const max = avecMax ? maxParClient(o) : null;
   const dessous = o.perso
     ? `<span class="prg perso">${esc((o.rabaisTexte || '').match(/−\s*\d+\s*%/)?.[0] || 'perso')}</span>`
@@ -518,9 +532,10 @@ function vueListe(v) {
   const e = S.get();
   const photo = lirePref(PREF_PHOTO);
   const seule = lirePref(PREF_SEULE);
-  const cols = banColonnes();
-  const toutes = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a)
-    .map(({ l, a }) => rangeeListe(l, a, cols));
+  const lignes = e.liste.map((l) => ({ l, a: e.articles.find((x) => x.id === l.articleId) })).filter((x) => x.a);
+  // Colonnes : bannières avec une circulaire en cours ET au moins un rabais sur un article de la liste
+  const cols = banAvecRabaisListe(banColonnes(), lignes.map((x) => x.a));
+  const toutes = lignes.map(({ l, a }) => rangeeListe(l, a, cols));
   // Préparation : ce qui reste à acheter (les articles déjà « dans le panier » sont dans le mode épicerie)
   const rangees = toutes.filter((r) => !r.l.coche);
 
