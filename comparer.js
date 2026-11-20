@@ -8,6 +8,7 @@ import { $, $$, esc, argent, offresArticle, libelleUnitaire, libelleFin, joursRe
   banniereActive, nomOffre, puce, toast, logo, logoVille, logoMagasin } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserFormat, formatLisible } from './normalise.js';
+import { photoDe } from './visuels.js';
 
 let vue = 'tableau';      // 'tableau' | 'details' | 'online' | 'econo'
 let portee = 'liste';     // 'liste' | 'tout'
@@ -182,7 +183,7 @@ function appliquer(res) {
 }
 
 /** Petite photo du produit (ou un emplacement vide pour garder l'alignement). */
-const vignette = (a) => (a.imageUrl ? `<img class="vignette mini" src="${esc(a.imageUrl)}" alt="">` : '<span class="vignette mini"></span>');
+const vignette = (a) => (photoDe(a) ? `<img class="vignette mini" src="${esc(photoDe(a))}" alt="">` : '<span class="vignette mini"></span>');
 
 function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
   const eco = un && r !== un ? un.total - r.total : 0;
@@ -281,8 +282,8 @@ export function logoCleHtml(k) {
 
 /** Image du produit, ou sa première lettre dans une case grise (même place pour tous). */
 export function vignetteProduit(a, taille = 40) {
-  return a.imageUrl
-    ? `<img class="vignette-fixe" src="${esc(a.imageUrl)}" alt="" style="width:${taille}px;height:${taille}px" onerror="this.removeAttribute('src');this.classList.add('vignette-vide')">`
+  return photoDe(a)
+    ? `<img class="vignette-fixe" src="${esc(photoDe(a))}" alt="" style="width:${taille}px;height:${taille}px" onerror="this.removeAttribute('src');this.classList.add('vignette-vide')">`
     : `<span class="vignette-fixe vignette-vide" style="width:${taille}px;height:${taille}px">${esc((a.nom || '?')[0].toUpperCase())}</span>`;
 }
 

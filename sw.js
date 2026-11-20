@@ -7,10 +7,11 @@
 // - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
 // À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
 // =====================================================================
-const CACHE = 'epicerie-v82';
+const CACHE = 'epicerie-v83';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'couverture.js', 'couverture-circulaires.js', 'demo-data.js',
   'ui.js', 'comparer.js', 'circulaires.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'lignes-recu.js', 'plu.js', 'plu.json', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
   'retouche.js', 'maj.js', 'secteurs.js', 'bannieres-registre.js', 'scan.js', 'recettes.js', 'plus.js', 'envoi.js', 'manifest.webmanifest', 'icone.svg',
+  'visuels.js', 'visuels/index.json', 'visuels/correspondance.json',
   'icone-192.png', 'icone-512.png', 'apple-touch-icon.png',
   // Skins (même liste que FICHIERS_SKINS dans skins/skins.js)
   'skins/skins.js', 'skins/pro.css', 'skins/etiquette.css', 'skins/ludique.css', 'skins/potager.css', 'skins/doux.css',
@@ -19,7 +20,10 @@ const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'pro
 self.addEventListener('install', (e) => {
   // On télécharge toute la nouvelle version en contournant le cache du navigateur.
   e.waitUntil(caches.open(CACHE).then((c) => Promise.all(FICHIERS.map((f) =>
-    fetch(new Request(f, { cache: 'reload' })).then((r) => { if (!r.ok) throw new Error(f); return c.put(f, r); })))));
+    fetch(new Request(f, { cache: 'reload' })).then((r) => { if (!r.ok) throw new Error(f); return c.put(f, r); })))
+    // Photos par niveau (visuels/index.json) : mises en cache aussi, mais une image manquante ne bloque pas la mise à jour.
+    .then(() => c.match('visuels/index.json')).then((r) => (r ? r.json() : []))
+    .then((cles) => Promise.all(cles.map((k) => fetch(`visuels/${k}.jpg`).then((r) => (r.ok ? c.put(`visuels/${k}.jpg`, r) : null)).catch(() => null))))));
   // Pas de skipWaiting ici : on attend ton « Oui ».
 });
 

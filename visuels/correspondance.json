@@ -1,0 +1,426 @@
+{
+"a1": {
+"g": "CAT-004-SC-05-P-001",
+"s": "sale"
+},
+"a10": {
+"g": "CAT-005-SC-01-P-008",
+"s": "ble-entier"
+},
+"a11": {
+"g": "CAT-016-SC-01-P-002",
+"s": "nature"
+},
+"a12": {
+"g": "CAT-001-SC-02-P-016",
+"s": "jaune"
+},
+"a2": {
+"g": "CAT-004-SC-01-P-001",
+"s": "2"
+},
+"a3": {
+"g": "CAT-004-SC-06-P-001",
+"s": "gros"
+},
+"a4": {
+"g": "CAT-002-SC-04-P-002",
+"s": "desossee"
+},
+"a5": {
+"g": "CAT-001-SC-01-P-003",
+"s": null
+},
+"a7": {
+"g": "CAT-017-SC-01-P-001",
+"s": "a-preciser"
+},
+"a8": {
+"g": "CAT-018-SC-01-P-001",
+"s": "a-preciser"
+},
+"a9": {
+"g": "CAT-004-SC-04-P-001",
+"s": "nature"
+},
+"amwickxb8mxfb": {
+"g": "CAT-006-SC-01-P-003",
+"s": null
+},
+"amwickxbb844m": {
+"g": "CAT-001-SC-04-P-010",
+"s": "brocoli"
+},
+"amwickxberm34": {
+"g": "CAT-009-SC-02-P-009",
+"s": "basilic"
+},
+"amwickxbgt3o7": {
+"g": "CAT-004-SC-03-P-012",
+"s": "nature"
+},
+"amwicnl0d0onq": {
+"g": "CAT-016-SC-02-P-005",
+"s": "tomate"
+},
+"amwicnr9zfxmc": {
+"g": "CAT-018-SC-05-P-001",
+"s": null
+},
+"amwicnxop6gwj": {
+"g": "CAT-006-SC-03-P-003",
+"s": null
+},
+"amwico6h2v9w2": {
+"g": "CAT-006-SC-01-P-011",
+"s": null
+},
+"amwicoaw0hwhe": {
+"g": "CAT-006-SC-01-P-002",
+"s": null
+},
+"amwicocvbtecv": {
+"g": "CAT-004-SC-03-P-012",
+"s": "nature"
+},
+"amwicoeextfq1": {
+"g": "CAT-006-SC-04-P-007",
+"s": "flocons-de-mais-givres"
+},
+"amwicog1benlj": {
+"g": "CAT-006-SC-04-P-007",
+"s": "multigrains"
+},
+"amwicole49lkp": {
+"g": "CAT-005-SC-01-P-008",
+"s": "blanc"
+},
+"amwicor157sah": {
+"g": "CAT-005-SC-04-P-001",
+"s": "nature"
+},
+"amwicosen9j8j": {
+"g": "CAT-016-SC-03-P-001",
+"s": "cola"
+},
+"amwicottnxs2h": {
+"g": "CAT-001-SC-04-P-011",
+"s": "pomme"
+},
+"amwicoy0pouqf": {
+"g": "CAT-018-SC-01-P-002",
+"s": "a-preciser"
+},
+"amwicp0oov7q2": {
+"g": "CAT-004-SC-04-P-002",
+"s": "a-preciser"
+},
+"amwie2pr7vve6": {
+"g": "CAT-004-SC-03-P-003",
+"s": null
+},
+"amwie5m6tddka": {
+"g": "CAT-004-SC-04-P-003",
+"s": "vanille"
+},
+"amwie5m71mf1b": {
+"g": "CAT-016-SC-02-P-002",
+"s": "100-pur"
+},
+"amwie5m7622wh": {
+"g": "CAT-001-SC-02-P-002",
+"s": "anglais"
+},
+"amwie5m7a6iu2": {
+"g": "CAT-008-SC-02-P-001",
+"s": "ferme"
+},
+"amwie5m7g31yw": {
+"g": "CAT-004-SC-03-P-004",
+"s": null
+},
+"amwie5m7jlf8b": {
+"g": "CAT-005-SC-03-P-001",
+"s": "a-preciser"
+},
+"amwie5m7lobs8": {
+"g": "CAT-006-SC-04-P-008",
+"s": "maison"
+},
+"amwie5m7pkmtg": {
+"g": "CAT-001-SC-01-P-002",
+"s": "a-preciser"
+},
+"amwie88vy4d0w": {
+"g": "CAT-002-SC-02-P-001",
+"s": "maigre"
+},
+"amwie88w3ug4q": {
+"g": "CAT-006-SC-04-P-002",
+"s": "nature"
+},
+"amwie88w5g9a5": {
+"g": "CAT-009-SC-02-P-010",
+"s": "a-preciser"
+},
+"amwie88w7sigv": {
+"g": "CAT-001-SC-04-P-010",
+"s": "melange-pour-sauce"
+},
+"amwie88w954nb": {
+"g": "CAT-001-SC-04-P-002",
+"s": "mais"
+},
+"amwie88wdrrtb": {
+"g": "CAT-004-SC-03-P-001",
+"s": "a-preciser"
+},
+"amwied1xiulvw": {
+"g": "CAT-006-SC-01-P-012",
+"s": null
+},
+"amwied1xovzhp": {
+"g": "CAT-002-SC-07-P-004",
+"s": "sauce-bbq"
+},
+"amwied1xr9voh": {
+"g": "CAT-004-SC-03-P-006",
+"s": "rape"
+},
+"amwiee7hj4fie": {
+"g": "CAT-002-SC-06-P-001",
+"s": "bacon-et-cheddar"
+},
+"amwiefrxywv4t": {
+"g": "CAT-002-SC-01-P-001",
+"s": "mi-maigre"
+},
+"amwiefry3epp6": {
+"g": "CAT-009-SC-03-P-008",
+"s": null
+},
+"amwiefry79l15": {
+"g": "CAT-001-SC-04-P-005",
+"s": "en-des"
+},
+"amwiefryaryd1": {
+"g": "CAT-001-SC-04-P-010",
+"s": "avocat"
+},
+"amwipzforww6l": {
+"g": "CAT-005-SC-05-P-008",
+"s": "carottes"
+},
+"amwiq08qou0os": {
+"g": "CAT-005-SC-04-P-001",
+"s": "nature"
+},
+"amwiq32i33ikw": {
+"g": "CAT-010-SC-01-P-002",
+"s": "nacho-epice"
+},
+"amwiq3afyryd4": {
+"g": "CAT-010-SC-01-P-002",
+"s": "nacho-epice"
+},
+"amwiq3gjmm5j2": {
+"g": "CAT-010-SC-01-P-001",
+"s": "bbq"
+},
+"amwiq3r02zj44": {
+"g": "CAT-006-SC-03-P-001",
+"s": "etuve"
+},
+"amwiq40t05hbs": {
+"g": "CAT-006-SC-01-P-002",
+"s": null
+},
+"amwiq4umymm71": {
+"g": "CAT-006-SC-01-P-005",
+"s": null
+},
+"amwiq52knkfxb": {
+"g": "CAT-006-SC-01-P-006",
+"s": null
+},
+"amwiq5kop882m": {
+"g": "CAT-006-SC-04-P-002",
+"s": "assaisonne"
+},
+"amwiq6fonr0m7": {
+"g": "CAT-010-SC-01-P-001",
+"s": "nature"
+},
+"amwiq75sqgm5x": {
+"g": "CAT-006-SC-04-P-001",
+"s": null
+},
+"amwiq7etl419p": {
+"g": "CAT-010-SC-01-P-002",
+"s": "multigrains"
+},
+"amwiq7nrcb7x3": {
+"g": "CAT-010-SC-02-P-001",
+"s": "legumes"
+},
+"amwiq7xhpin5z": {
+"g": "CAT-010-SC-02-P-001",
+"s": "ritz"
+},
+"amwiq8348vris": {
+"g": "CAT-010-SC-02-P-001",
+"s": "soda-sales"
+},
+"amwiq8gxhky6g": {
+"g": "CAT-010-SC-02-P-002",
+"s": "a-preciser"
+},
+"amwiq8xvavlma": {
+"g": "CAT-007-SC-06-P-014",
+"s": null
+},
+"amwiq94kt6te6": {
+"g": "CAT-016-SC-02-P-002",
+"s": "100-pur"
+},
+"amwiq9e7hohaz": {
+"g": "CAT-016-SC-02-P-007",
+"s": "melon-d-eau-pomme"
+},
+"amwiq9lcs8ft8": {
+"g": "CAT-016-SC-02-P-007",
+"s": "mangue"
+},
+"amwiqa2xfgscq": {
+"g": "CAT-005-SC-02-P-002",
+"s": "nature"
+},
+"amwiqacud951y": {
+"g": "CAT-014-SC-01-P-003",
+"s": "regulier"
+},
+"amwiqahi58kqx": {
+"g": "CAT-014-SC-01-P-005",
+"s": "sans-sel-ajoute"
+},
+"amwiqaqjd0f3q": {
+"g": "CAT-017-SC-01-P-004",
+"s": "espresso"
+},
+"amwiqbimlbly8": {
+"g": "CAT-017-SC-01-P-001",
+"s": "a-preciser"
+},
+"amwiqbw2docik": {
+"g": "CAT-006-SC-04-P-007",
+"s": "flocons-de-mais-givres"
+},
+"amwiqdyokt59w": {
+"g": "CAT-006-SC-04-P-007",
+"s": "multigrains"
+},
+"amwiqho5eblub": {
+"g": "CAT-006-SC-04-P-007",
+"s": "carres-de-mais"
+},
+"amwiqiyh1oevt": {
+"g": "CAT-006-SC-04-P-007",
+"s": "cannelle"
+},
+"amwiqjdudukyn": {
+"g": "CAT-006-SC-04-P-008",
+"s": "chocolat-noir-et-baies"
+},
+"amwiqju5lj782": {
+"g": "CAT-006-SC-04-P-008",
+"s": "chocolat-noir-et-baies"
+},
+"amwiqkfwvrp6h": {
+"g": "CAT-006-SC-04-P-010",
+"s": "proteine"
+},
+"amwiqkmv2kif9": {
+"g": "CAT-010-SC-01-P-004",
+"s": "extra-beurre"
+},
+"amwiqkufz0ftq": {
+"g": "CAT-012-SC-01-P-007",
+"s": "gaufre"
+},
+"amwiqllx1o630": {
+"g": "CAT-009-SC-02-P-010",
+"s": "douce"
+},
+"amwiqm233bf2y": {
+"g": "CAT-009-SC-01-P-006",
+"s": null
+},
+"amwiqmec0dx7n": {
+"g": "CAT-009-SC-01-P-001",
+"s": "regulier"
+},
+"amwiqmjd8lgov": {
+"g": "CAT-009-SC-01-P-003",
+"s": "a-l-ancienne"
+},
+"amwiqmscvdx6x": {
+"g": "CAT-009-SC-01-P-003",
+"s": "jaune"
+},
+"amwiqn0xv8xli": {
+"g": "CAT-009-SC-01-P-003",
+"s": "au-miel"
+},
+"amwiqnczhts1b": {
+"g": "CAT-009-SC-04-P-001",
+"s": "fraise"
+},
+"amwiqnhw6709f": {
+"g": "CAT-009-SC-01-P-003",
+"s": "dijon"
+},
+"amwiqnobfazxl": {
+"g": "CAT-004-SC-04-P-001",
+"s": "a-preciser"
+},
+"amwiqnuglnezt": {
+"g": "CAT-004-SC-04-P-003",
+"s": "vanille"
+},
+"amwiqorq8y48j": {
+"g": "CAT-004-SC-05-P-002",
+"s": "originale"
+},
+"amwiqp44xz37y": {
+"g": "CAT-004-SC-03-P-015",
+"s": "mexicain"
+},
+"amwiqpnx9ht60": {
+"g": "CAT-002-SC-02-P-007",
+"s": "fume"
+},
+"amwiqq3zhaqmx": {
+"g": "CAT-008-SC-02-P-010",
+"s": "tofu"
+},
+"amwiqqayjh82x": {
+"g": "CAT-009-SC-03-P-008",
+"s": "moyenne"
+},
+"amwiqrdjgeqca": {
+"g": "CAT-009-SC-01-P-002",
+"s": "reguliere"
+},
+"amwiqtgo7pg76": {
+"g": "CAT-002-SC-02-P-001",
+"s": "maigre"
+},
+"amwiqu2pbisp4": {
+"g": "CAT-004-SC-01-P-001",
+"s": "2"
+},
+"amwiqumuvmstp": {
+"g": "CAT-007-SC-05-P-007",
+"s": "noir"
+}
+}

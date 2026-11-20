@@ -23,6 +23,7 @@ import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
+import { chargerVisuels, photoDe } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -66,6 +67,7 @@ Sync.surChangement((st) => {
   rendre();
 });
 queueMicrotask(rendre); // après l'évaluation complète du module
+chargerVisuels().then(() => rendre()); // photos par niveau (catégorie → sorte) pour les fiches sans vraie photo
 setTimeout(async () => {
   await Sync.initialiser().catch(() => {});   // connexion + partage (si déjà connecté)
   brancherIA(Sync.lireAvecIA);                // l'IA lit les photos quand le foyer est connecté
@@ -267,7 +269,7 @@ function htmlItem(l, a) {
   const teinte = l.recu?.absent ? '' : l.recu?.statut === 'plus' ? 'recu-ecart' : (l.recu?.statut === 'ok' || l.recu?.statut === 'moins') ? 'recu-ok' : '';
   return `<div class="item item-liste ep ${teinte} ${l.coche ? 'coche' : ''} ${l.indisponible ? 'indisponible' : ''}" data-id="${l.id}">
     <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Dans le panier">
-    <div class="ep-photo" data-fiche="${a.id}">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : '<span aria-hidden="true">📦</span>'}</div>
+    <div class="ep-photo" data-fiche="${a.id}">${photoDe(a) ? `<img src="${esc(photoDe(a))}" alt="">` : '<span aria-hidden="true">📦</span>'}</div>
     <div class="grandir ep-txt" data-fiche="${a.id}">
       <div class="nom ep-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>
       <div class="ep-prix">${prix}${details.length ? ` · ${details.join(' · ')}` : ''}</div>
@@ -445,7 +447,7 @@ function htmlRangee(r, cols, seule) {
   const u = r.offre?.uniteRef || a.uniteRef;
   const sous = [formatLisible(a.format), a.marque].filter(Boolean);
   let h = `<tr class="pl ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="p-art">
-    <div class="p-photo" data-fiche="${a.id}">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : '<span aria-hidden="true">📦</span>'}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
+    <div class="p-photo" data-fiche="${a.id}">${photoDe(a) ? `<img src="${esc(photoDe(a))}" alt="">` : '<span aria-hidden="true">📦</span>'}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
     <div class="p-txt" data-fiche="${a.id}"><div class="p-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>${
       sous.length ? `<div class="p-sous">${esc(sous.join(' · '))}</div>` : ''}</div>
     <div class="p-pm"><button data-q="1" aria-label="Un de plus">+</button><button data-q="-1" aria-label="Un de moins">−</button></div></div></td>`;
@@ -916,7 +918,7 @@ function suggerer(txt) {
     const detail = m
       ? `${m.produitOffre ? `Moins cher : ${esc(m.produitOffre)}` : esc(formatLisible(a.format) || '')} · ${esc(nomOffre(m))}`
       : `${esc(formatLisible(a.format) || '')}${nbV > 1 ? ` · ${nbV} marques/formats` : ''}`;
-    return `<button class="sugg" data-sugg="${a.id}">${a.imageUrl ? `<img class="vignette petite" src="${esc(a.imageUrl)}" alt="">` : '<span class="vignette petite"></span>'}
+    return `<button class="sugg" data-sugg="${a.id}">${photoDe(a) ? `<img class="vignette petite" src="${esc(photoDe(a))}" alt="">` : '<span class="vignette petite"></span>'}
       <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(a.nom)}</span>
         ${detail.replace(/^ · /, '') ? `<span class="doux une-ligne" style="display:block;font-size:12px">${detail.replace(/^ · /, '')}</span>` : ''}</span>
       <span class="doux">${m ? esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0]) : ''}</span></button>`;
