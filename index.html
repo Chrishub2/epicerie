@@ -140,6 +140,14 @@ table.prep-t { border-collapse: separate; border-spacing: 0; table-layout: fixed
 .prep-t tr.pl td { height: 56px; }
 .prep-t .pc { position: sticky; left: 0; z-index: 2; background: var(--fond); border-right: 1px solid var(--ligne); padding: 0 4px 0 8px; text-align: left; }
 .prep.seule .pc { border-right: 0; padding-right: 10px; }
+.prep-t .pc-tete { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+/* Nombre d'articles : chiffre fort dans une tuile douce, petit libellé dessous */
+.p-nb { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 46px; padding: 5px 6px 4px;
+  border-radius: 12px; background: var(--accent-doux); color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
+.p-nb b { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.p-nb span { font-size: 9px; font-weight: 600; margin-top: 2px; opacity: .85; }
+.prep.photo:not(.seule) .p-nb { display: none; }
 .prep-t .bascules { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .prep-t .bascule { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--doux); cursor: pointer; white-space: nowrap; }
 .prep-t .bascule .interrupteur { width: 34px; height: 20px; }
@@ -353,6 +361,16 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .une-ligne { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .vignette.petite { width: 32px; height: 32px; }
 .rayon { margin-bottom: 10px; }
+/* Mode Magasin : anneau « trouvés / total » à droite du premier rayon (se remplit à mesure qu'on coche) */
+.ratio-trouves { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; }
+.rt-anneau { --t: 42px; width: var(--t); height: var(--t); border-radius: 50%; flex: none; display: inline-flex;
+  align-items: baseline; justify-content: center; padding-top: 12px; color: var(--texte, inherit); font-variant-numeric: tabular-nums;
+  background: radial-gradient(closest-side, var(--fond) 78%, transparent 80% 100%),
+    conic-gradient(var(--accent) calc(var(--p) * 1%), var(--ligne) 0); }
+.rt-anneau b { font-size: 15px; font-weight: 800; color: var(--accent); line-height: 1; }
+.rt-anneau i { font-style: normal; font-size: 10px; font-weight: 600; opacity: .7; line-height: 1; }
+.rt-lib { font-family: "Dancing Script", "Segoe Script", cursive; font-size: 17px; font-weight: 700; color: var(--accent); }
+.ratio-trouves.complet .rt-anneau { box-shadow: 0 0 0 3px var(--accent-doux); }
 .rayon > h3 { display: flex; align-items: center; gap: 6px; color: var(--doux); font-size: 13px;
   text-transform: uppercase; letter-spacing: .03em; margin: 12px 2px 6px; }
 .item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--carte);

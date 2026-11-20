@@ -506,6 +506,13 @@ function vueEpicerie(v, b, toutes) {
     h += `<button class="btn sec" id="btnVider" style="width:100%;margin-top:8px">Retirer les ${panier.length} article(s) acheté(s)</button>`;
   }
   h += '<button class="btn sec" id="btnRecu" style="width:100%;margin-top:8px">🧾 Photographier mon reçu</button>';
+  // Anneau « trouvés / total » (articles de cette bannière déjà dans le panier), à droite du premier rayon
+  if (ici.length) {
+    const pct = Math.round((panier.length / ici.length) * 100);
+    const anneau = `<span class="ratio-trouves ${pct === 100 ? 'complet' : ''}" style="--p:${pct}" title="Trouvés : ${panier.length} sur ${ici.length}">`
+      + `<span class="rt-anneau"><b>${panier.length}</b><i>/${ici.length}</i></span><span class="rt-lib">trouvé${panier.length > 1 ? 's' : ''}</span></span>`;
+    h = h.includes('</h3>') ? h.replace('</h3>', `${anneau}</h3>`) : anneau + h;
+  }
   v.innerHTML = h;
 
   const ids = new Set(panier.map((r) => r.l.id));
@@ -583,7 +590,9 @@ function vueListe(v) {
     : `<colgroup><col style="width:${photo ? 52 : 172}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`}`;
   let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
   // Les deux interrupteurs restent toujours à leur place (Photo s'applique quand Liste est désactivée)
-  h += `<thead><tr><th class="pc"><div class="bascules">${bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div></th>`;
+  // À droite des interrupteurs : nombre d'articles sur la liste (Prépa. = ceux qui restent à acheter)
+  const nb = `<div class="p-nb" title="${rangees.length} article(s) sur la liste"><b>${rangees.length}</b><span>article${rangees.length > 1 ? 's' : ''}</span></div>`;
+  h += `<thead><tr><th class="pc"><div class="pc-tete"><div class="bascules">${bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div>${nb}</div></th>`;
   if (!seule) {
     h += '<th><button class="p-deal" id="btnDeal" title="Tout au meilleur prix">Deal</button></th>';
     h += cols.map((b) => `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : ''}</div>${logo(b)}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`).join('');
