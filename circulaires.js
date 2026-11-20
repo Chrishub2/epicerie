@@ -257,7 +257,7 @@ export function monterCirculaires(conteneur, opts) {
   const { sb, foyer, hote = 'app', source = 'telephone' } = opts;
   const message = opts.message || toastSimple;
   const articles = () => (opts.articles?.() || []).filter((a) => !a.supprime);
-  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true, liens: null, liensOuverts: true, liensTraites: new Set() };
+  const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true, liens: null, liensOuverts: true, liensTraites: new Set(), offresTraitees: new Set() };
   conteneur.innerHTML = `<div class="circ" data-hote="${hote}"><p class="c-doux">Chargement des circulaires…</p></div>`;
   const racine = conteneur.firstElementChild;
   if (!sb || !foyer) {
@@ -280,10 +280,10 @@ export function monterCirculaires(conteneur, opts) {
       etat.liens = liens && liens.filter((l) => !etat.liensTraites.has(cleLien(l)));   // clic pendant ce chargement
       etat.pages = pages.data || [];
       etat.lots = lots.data || [];
-      etat.aValider = aval.data || [];
+      etat.aValider = (aval.data || []).filter((o) => !etat.offresTraitees.has(o.id));   // clic pendant ce chargement
       const derniers = etat.lots.filter((l) => l.statut === 'termine').slice(0, 2).map((l) => l.id);
       etat.autres = derniers.length
-        ? ((await sb.from('offres_circulaires').select('*').in('lot_id', derniers).eq('statut', 'autre').order('nom').limit(800)).data || []) : [];
+        ? ((await sb.from('offres_circulaires').select('*').in('lot_id', derniers).eq('statut', 'autre').order('nom').limit(800)).data || []).filter((o) => !etat.offresTraitees.has(o.id)) : [];
       // Avancement des lots en cours
       for (const l of etat.lots.filter((x) => x.statut === 'envoye')) {
         const { data } = await sb.from('pages_circulaires').select('statut').eq('lot_id', l.id);
@@ -569,8 +569,9 @@ export function monterCirculaires(conteneur, opts) {
     const format = carte.querySelector('[data-format]')?.value.trim() || null;
     if (decision === 'valider' && !article) { message('Choisis le produit d\'abord.'); return false; }
     carte.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    etat.offresTraitees.add(id);   // dès le clic : un rechargement en vol ne la fait pas revenir
     const { error } = await sb.rpc('decider_offre', { p_offre: id, p_decision: decision, p_article: article, p_format: format, p_source: source });
-    if (error) { message(`Refusé : ${error.message}`); carte.querySelectorAll('button').forEach((b) => { b.disabled = false; }); return false; }
+    if (error && !/déjà traité/.test(error.message)) { etat.offresTraitees.delete(id); message(`Refusé : ${error.message}`); carte.querySelectorAll('button').forEach((b) => { b.disabled = false; }); return false; }
     etat.aValider = etat.aValider.filter((o) => o.id !== id);
     if (!silencieux) { message({ valider: 'Rabais enregistré', refuser: 'Noté : ce n\'est pas ce produit', ignorer: 'Ignoré' }[decision]); rendre(); opts.apresChangement?.(); }
     return true;
@@ -602,8 +603,9 @@ export function monterCirculaires(conteneur, opts) {
   }
 
   async function relier(id, articleId) {
+    etat.offresTraitees.add(id);
     const { error } = await sb.rpc('decider_offre', { p_offre: id, p_decision: 'valider', p_article: articleId, p_format: null, p_source: source });
-    if (error) { message(`Refusé : ${error.message}`); return; }
+    if (error && !/déjà traité/.test(error.message)) { etat.offresTraitees.delete(id); message(`Refusé : ${error.message}`); return; }
     etat.autres = etat.autres.filter((o) => o.id !== id);
     message('Relié : rabais enregistré, et je m\'en souviendrai.');
     rendre(); opts.apresChangement?.();
