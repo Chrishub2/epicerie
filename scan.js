@@ -294,6 +294,9 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   let rayonId = cible?.rayonManuel ? cible.rayonId : p ? devinerRayon(p.categories_tags || []) : (cible?.rayonId || rayonParDefaut());
   let rayonChoisi = false;
   let image = p?.image_front_url || p?.image_url || ecp?.image || '';
+  // Lecteur principal : « Sauvegarder » (fiche seulement) et « Sauvegarder + ajouter à la liste »
+  const deuxBoutons = !cibleId && libelleOk === 'Ajouter à la liste';
+  let maPhotoId = null; // photo prise dans le formulaire, sans le fermer
   zone.innerHTML = `
     ${ecp ? `<div class="alerte vert">💲 Prix réels trouvés sur épiceries.ca (${esc(argent(ecp.price))} chez ${esc(MAGASINS_EC[ecp.store] ? nomBanniere(MAGASINS_EC[ecp.store]) : ecp.store)}) — ils seront ajoutés.</div>` : ''}
     ${p || ecp ? `<div class="alerte vert">Trouvé sur ${esc(trouve?.source || 'épiceries.ca')}${p?.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>
@@ -310,8 +313,13 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
     <div id="sVar"></div>
     <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
     ${image ? '' : '<div id="sPhotos" class="champ"><label>Photo du produit</label><p class="doux">Recherche de photos en ligne…</p></div>'}
-    <div class="rang envelopper"><button class="btn" id="sOk">${cibleId ? '✓ Remplir la fiche' : esc(libelleOk)}</button>
-      <button class="btn sec" id="sPhoto">📷 Photo du produit</button></div>`;
+    <div id="sMaPhoto" class="champ" hidden><label>Ta photo (jointe à la fiche à la sauvegarde)</label>
+      <img id="sMaPhotoImg" alt="" style="display:block;max-height:160px;max-width:100%;margin:0 auto;border-radius:8px;background:#000"></div>
+    <button type="button" class="btn sec" id="sPhoto" style="width:100%">📷 Ajouter une photo</button>
+    ${deuxBoutons
+      ? `<div style="display:grid;gap:8px;margin-top:10px"><button class="btn" id="sOk">💾 Sauvegarder + ajouter à la liste</button>
+         <button class="btn sec" id="sSauver">💾 Sauvegarder seulement</button></div>`
+      : `<div class="rang envelopper" style="margin-top:10px"><button class="btn" id="sOk">${cibleId ? '✓ Remplir la fiche' : esc(libelleOk)}</button></div>`}`;
   // Relier à une fiche existante : le nom choisi rattache le code à cette fiche (pas de doublon)
   // Produit déjà au catalogue : ce code est-il une variante existante ou une nouvelle marque/format ?
   const val = (id) => zone.querySelector(id).value.trim();
@@ -372,12 +380,18 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   ['#sNom', '#sMarque', '#sQte', '#sUnite'].forEach((id) => zone.querySelector(id).addEventListener('change', majVar));
   majVar();
   brancherRayon(zone.querySelector('#sRayon'), zone.querySelector('#sRayonPanneau'), () => rayonId, (id) => { rayonId = id; rayonChoisi = true; });
-  zone.querySelector('#sOk').onclick = () => {
+  // La photo prise dans le formulaire est rattachée à la fiche (comme « 📷 Photo du produit » le faisait)
+  const joindrePhoto = (articleId) => {
+    if (!maPhotoId) return;
+    S.maj((x) => { x.photos.push({ id: maPhotoId, type: 'produit', articleId, date: new Date().toISOString(), prise_par: x.utilisateur, note: '' }); });
+  };
+  const sauver = (ajouter) => {
     const nom = zone.querySelector('#sNom').value.trim();
     if (!nom) { toast('Entre un nom'); return; }
     const format = lireFormat();
     const f = analyserFormat(format);
     if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, rayonChoisi, p, ec, ecp, variantes, details });
+      joindrePhoto(cibleId);
       surArticle(S.get().articles.find((x) => x.id === cibleId)); fermerModale(); return; }
     const choixVar = zone.querySelector('[name="sVar"]:checked')?.value || null;
     const a = assurerArticle(nom, { rayonId, ...(rayonChoisi ? { rayonManuel: true } : {}), format, uniteRef: f?.base || 'unite', marque: zone.querySelector('#sMarque').value.trim(),
@@ -410,8 +424,9 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
         lierLiens(ar);
       });
       if (ecp) actualiserArticle(a.id, { force: true });
-      surArticle(a);
-      zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} — ${choixVar === 'nouveau' ? 'nouvelle marque/format ajoutée' : 'code rangé dans sa marque/format'}${enRafale() ? ' — scanne le suivant' : ''}</div>`;
+      joindrePhoto(a.id);
+      if (ajouter) surArticle(a);
+      zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} — ${choixVar === 'nouveau' ? 'nouvelle marque/format ajoutée' : 'code rangé dans sa marque/format'}${ajouter ? '' : ' (sauvegardé, pas ajouté à la liste)'}${enRafale() ? ' — scanne le suivant' : ''}</div>`;
       if (!enRafale()) setTimeout(fermerModale, 900);
       return;
     }
@@ -428,11 +443,32 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
       lierLiens(ar);
     });
     if (ecp) actualiserArticle(a.id, { force: true });
-    surArticle(a);
-    zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} ${libelleOk === 'Ajouter à la liste' ? 'ajouté' : 'enregistré'}${enRafale() ? ' — scanne le suivant' : ''}</div>`;
+    joindrePhoto(a.id);
+    if (ajouter) surArticle(a);
+    zone.innerHTML = `<div class="alerte vert">✓ ${esc(a.nom)} ${!ajouter ? 'sauvegardé (pas ajouté à la liste)' : libelleOk === 'Ajouter à la liste' ? 'ajouté' : 'enregistré'}${enRafale() ? ' — scanne le suivant' : ''}</div>`;
     if (!enRafale()) setTimeout(fermerModale, 700);
   };
-  zone.querySelector('#sPhoto').onclick = () => { fermerModale(); photoProduit(null, code); };
+  zone.querySelector('#sOk').onclick = () => sauver(true);
+  zone.querySelector('#sSauver')?.addEventListener('click', () => sauver(false));
+  // Photo prise sans quitter le formulaire : rien de ce qui est rempli n'est perdu
+  zone.querySelector('#sPhoto').onclick = () => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
+    input.onchange = async () => {
+      const fichier = input.files?.[0]; if (!fichier) return;
+      // Sauvegarde bloquée le temps d'enregistrer la photo (sinon elle ne serait pas jointe)
+      const boutons = [zone.querySelector('#sOk'), zone.querySelector('#sSauver')].filter(Boolean);
+      boutons.forEach((b) => { b.disabled = true; });
+      zone.querySelector('#sPhoto').textContent = '📷 Enregistrement de la photo…';
+      const blob = await S.compresser(fichier);
+      maPhotoId = await S.enregistrerPhoto(blob);
+      boutons.forEach((b) => { b.disabled = false; });
+      zone.querySelector('#sMaPhotoImg').src = URL.createObjectURL(blob);
+      zone.querySelector('#sMaPhoto').hidden = false;
+      zone.querySelector('#sPhoto').textContent = '📷 Reprendre la photo';
+    };
+    input.click();
+  };
 
   // Pas de photo dans les bases : on en cherche en ligne et tu choisis la bonne
   if (!image) {
