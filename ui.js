@@ -2,6 +2,8 @@
 import { normaliser, libelleUnitaire, classer } from './normalise.js';
 import { get } from './store.js';
 import { BANNIERES } from './demo-data.js';
+import { prixEnVigueur } from './rabais.js';
+import { jourQuebec } from './couverture-circulaires.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -212,8 +214,11 @@ export function offresArticle(article) {
   const lignes = [];
   // Toutes les marques/formats du produit sont comparées au kg / L ; une variante retirée ne compte plus
   const variantes = new Map((article.variantes || []).map((v) => [v.id, v]));
-  for (const p of e.prix.filter((x) => x.articleId === article.id)) {
-    if (p.fin && joursRestants(p.fin) < 0) continue;
+  const auj = jourQuebec();
+  for (const p0 of e.prix.filter((x) => x.articleId === article.id)) {
+    // Rabais fini (date de fin passée, ou 7 jours après avoir été vu) : prix régulier s'il est connu, sinon l'offre ne compte plus
+    const p = prixEnVigueur(p0, auj);
+    if (!p) continue;
     if (p.enAttente) continue; // photo pas encore lue (hors ligne)
     if (p.annule) continue;    // prix d'une association de reçu corrigée
     if (!banniereActive(p.banniere)) continue;

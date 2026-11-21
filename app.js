@@ -10,6 +10,8 @@ import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserOffre, analyserFormat, formatLisible, gtinVariantes, normaliser } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
+import { memeNom, pertinenceNoms } from './noms.js';
+import { calendrierHtml } from './calendrier.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique, rechercherSouple } from './epiceries.js';
@@ -23,7 +25,7 @@ import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
-import { chargerVisuels, photoDe } from './visuels.js';
+import { chargerVisuels, photoDe, definirPhotosPro } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -67,9 +69,15 @@ Sync.surChangement((st) => {
   rendre();
 });
 queueMicrotask(rendre); // après l'évaluation complète du module
+// Calendrier de l'en-tête : 2 semaines, aujourd'hui en jaune ; se met à jour au fil des heures (le jour, puis la semaine, avancent seuls)
+const rendCalendrier = () => { const c = $('#calEntete'); if (c) c.innerHTML = calendrierHtml(new Date(), { court: innerWidth < 560 }); };
+rendCalendrier();
+setInterval(rendCalendrier, 15 * 60 * 1000);
+addEventListener('resize', rendCalendrier);
 chargerVisuels().then(() => rendre()); // photos par niveau (catégorie → sorte) pour les fiches sans vraie photo
 setTimeout(async () => {
   await Sync.initialiser().catch(() => {});   // connexion + partage (si déjà connecté)
+  Sync.photosPro().then((l) => { if (l) { definirPhotosPro(l); rendre(); } }); // photos studio approuvées
   brancherIA(Sync.lireAvecIA);                // l'IA lit les photos quand le foyer est connecté
   await traiterFile().catch(() => {});        // photos prises hors ligne
   await actualiserTout().catch(() => {});     // vrais prix des produits liés (max 1 fois / 12 h)
@@ -109,6 +117,7 @@ export function trouverArticle(nom) {
   const n = sansAccents(nom);
   const e = S.get();
   return e.articles.find((a) => sansAccents(a.nom) === n)
+    || e.articles.find((a) => memeNom(a, nom)) // pluriel, nom anglais ou nom alternatif (« patates » → Pomme de terre)
     || e.articles.find((a) => n.length >= 4 && (sansAccents(a.nom).startsWith(n) || n.startsWith(sansAccents(a.nom))));
 }
 
@@ -1110,11 +1119,11 @@ function suggerer(txt) {
   const e = S.get();
   const achats = (id) => e.liste.filter((l) => l.articleId === id).length + (e.achats?.filter((x) => x.articleId === id).length || 0);
   // Produits d'abord : nom, marque ou n'importe laquelle de leurs marques/formats (taper « tilda » trouve « Riz basmati blanc »)
+  // Nom générique, nom anglais et noms alternatifs ; « pommes » trouve « Pomme » (singulier automatique)
+  const tapeNom = txt.replace(/^\d+(?:[.,]\d+)?\s*(?:x\s*)?/i, '');
   const pertinence = (a) => {
-    const n = sansAccents(a.nom);
-    if (n.startsWith(q)) return 3;
-    if (n.split(/[^a-z0-9]+/).some((m) => m.startsWith(q))) return 2;
-    if (n.includes(q)) return 1;
+    const pn = pertinenceNoms(a, tapeNom);
+    if (pn) return pn;
     const parVariante = P.variantesActives(a).find((v) => sansAccents(`${v.marque || ''} ${v.nom || ''}`).includes(q));
     return parVariante || sansAccents(a.marque || '').includes(q) ? 0.5 : 0;
   };

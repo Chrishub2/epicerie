@@ -1,5 +1,6 @@
 // =====================================================================
 // Photos par niveau (journal/SPEC-photos-niveaux.md)
+// Ordre : photo pro approuvée (photos_pro) → photo de la fiche → image héritée de son niveau.
 // Une fiche sans vraie photo hérite de l'image de son niveau le plus précis :
 //   vraie photo (imageUrl) → sorte → générique → sous-catégorie → catégorie.
 // Les images générées sont dans visuels/<clé>.jpg (fond blanc, 200 px) ;
@@ -9,6 +10,19 @@
 
 // Adresse du dossier visuels/ à côté de ce module : marche depuis l'app ET la console (app/console/).
 const BASE = new URL('visuels/', import.meta.url).href;
+
+// Photos professionnelles approuvées (photos_pro) : articleId → adresse de la photo studio.
+// Gardées dans le navigateur pour l'affichage hors ligne et au démarrage.
+const CLE_PRO = 'epicerie.photosPro';
+let pro = new Map(lirePro());
+function lirePro() { try { return JSON.parse(localStorage.getItem(CLE_PRO)) || []; } catch { return []; } }
+
+/** Remplace la liste des photos pro (lignes { article_id, source_url } venues de Supabase). */
+export function definirPhotosPro(lignes) {
+  if (!Array.isArray(lignes)) return;
+  pro = new Map(lignes.filter((l) => l?.article_id && l?.source_url).map((l) => [l.article_id, l.source_url]));
+  try { localStorage.setItem(CLE_PRO, JSON.stringify([...pro])); } catch { /* stockage indisponible */ }
+}
 
 let presentes = null;   // Set des clés d'images disponibles
 let correspondance = {}; // articleId → { g: 'CAT-001-SC-01-P-001', s: 'gala' | null }
@@ -38,8 +52,9 @@ export function cleVisuel(a, corr = correspondance, dispo = presentes) {
   return niveaux(corr[a.id]).find((k) => dispo.has(k)) || null;
 }
 
-/** Adresse de la photo à afficher : la vraie photo d'abord, sinon l'image héritée, sinon ''. */
+/** Adresse de la photo à afficher : photo pro approuvée, sinon la photo de la fiche, sinon l'image héritée, sinon ''. */
 export function photoDe(a) {
+  if (a?.id && pro.has(a.id)) return pro.get(a.id);
   if (a?.imageUrl) return a.imageUrl;
   const k = cleVisuel(a);
   return k ? `${BASE}${k}.jpg` : '';

@@ -351,6 +351,18 @@ export async function chercherCode(code) {
 }
 
 /**
+ * Photos professionnelles APPROUVÉES par Chris (table photos_pro, journal/SPEC-photos-niveaux.md).
+ * [{ article_id, source_url }] ; null hors ligne ou en erreur (on garde alors la dernière liste connue).
+ */
+export async function photosPro() {
+  if (!estPret() || !navigator.onLine) return null;
+  try {
+    const { data, error } = await sb.from('photos_pro').select('article_id, source_url').eq('foyer_id', foyer.id).eq('statut', 'approuvee');
+    return error ? null : data;
+  } catch { return null; }
+}
+
+/**
  * Preuve d'un rabais de circulaire : lien (valide 1 h) vers l'image de la page où il a été lu.
  * { idOffre: url } pour celles dont la page est encore gardée (absente = page effacée) ; null hors ligne ou en erreur.
  */

@@ -68,13 +68,34 @@ export function liensAConfirmer(appris, offres, articles, dejaTraites = null) {
   return (appris || [])
     .filter((l) => l.origine === 'auto' && l.confirme === null && l.decision === 'lien' && !dejaTraites?.has(cleLien(l)))
     .sort((a, b) => String(b.maj || '').localeCompare(String(a.maj || '')))
-    .map((l) => {
-      const nom = dernier.get(`${l.banniere}|${l.nom_cle}`)?.nom || l.nom_cle;
-      const banniereNom = nomBanniere(l.banniere);
-      const produit = parId.get(l.article_id)?.nom || `produit introuvable (${l.article_id})`;
-      const libelle = `${nom} (${banniereNom}) → ${produit}${l.format ? ` · ${l.format}` : ''}`;
-      return { banniere: l.banniere, nom_cle: l.nom_cle, article_id: l.article_id, format: l.format || null, nom, banniereNom, produit, libelle };
-    });
+    .map((l) => libellerLien(l, dernier, parId));
+}
+
+function libellerLien(l, dernier, parId) {
+  const nom = dernier.get(`${l.banniere}|${l.nom_cle}`)?.nom || l.nom_cle;
+  const banniereNom = nomBanniere(l.banniere);
+  const produit = parId.get(l.article_id)?.nom || `produit introuvable (${l.article_id})`;
+  const libelle = `${nom} (${banniereNom}) → ${produit}${l.format ? ` · ${l.format}` : ''}`;
+  return { banniere: l.banniere, nom_cle: l.nom_cle, article_id: l.article_id, format: l.format || null, nom, banniereNom, produit, libelle };
+}
+
+/**
+ * Historique des liens appris que Chris a déjà tranchés (origine 'auto', confirme true), les plus récents d'abord.
+ * Chaque choix peut être annulé : le lien redevient « à confirmer ». Mêmes entrées que liensAConfirmer.
+ * Rend [{ ...lien libellé, decision: 'lien' (confirmé) | 'refus' (refusé), maj }].
+ */
+export function historiqueLiens(appris, offres, articles, limite = 15) {
+  const dernier = new Map();
+  for (const o of offres || []) {
+    const k = `${o.banniere}|${o.nom_cle}`, d = dernier.get(k);
+    if (o.nom && (!d || String(o.cree_le || '') > String(d.cree_le || ''))) dernier.set(k, o);
+  }
+  const parId = new Map((articles || []).map((a) => [a.id, a]));
+  return (appris || [])
+    .filter((l) => l.origine === 'auto' && l.confirme === true)
+    .sort((a, b) => String(b.maj || '').localeCompare(String(a.maj || '')))
+    .slice(0, limite)
+    .map((l) => ({ ...libellerLien(l, dernier, parId), decision: l.decision, maj: l.maj || null }));
 }
 
 // ---------------------------------------------------------------------
@@ -219,6 +240,13 @@ const CSS = `
 .circ table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .circ td { padding: 6px 4px; border-top: 1px solid var(--c-trait); vertical-align: top; }
 .circ .c-tableau { overflow-x: auto; }
+.circ .c-lien { min-height: 46px; }
+.circ .c-tout-beau { color: var(--c-doux); }
+.circ .c-ok-rond { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--c-accent); color: var(--c-accent); font-weight: 700; font-size: 13px; }
+.circ .c-hist { margin-top: 8px; }
+.circ .c-hist summary { cursor: pointer; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--c-doux); }
+.circ .c-pastille.c-confirme { border-color: var(--c-accent); color: var(--c-accent); }
+.circ .c-pastille.c-refuse { border-color: var(--c-erreur); color: var(--c-erreur); }
 .circ .c-confirmer { border: 1px solid var(--c-erreur); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
 .circ input[type=checkbox] { width: 18px; height: 18px; flex: none; }
 .circ .c-couv summary { cursor: pointer; font-weight: 600; font-size: 14px; }
@@ -308,6 +336,10 @@ export function monterCirculaires(conteneur, opts) {
           .order('cree_le', { ascending: false }).limit(1000);
         offres = r.data || [];   // facultatif : sinon, on montre le nom_cle
       }
+      // Historique des choix déjà faits (annulables) : facultatif
+      const h = await sb.from('appris_circulaires').select('banniere,nom_cle,article_id,decision,format,n,maj,origine,confirme')
+        .eq('foyer_id', foyer).eq('origine', 'auto').eq('confirme', true).order('maj', { ascending: false }).limit(15);
+      etat.historique = h.error ? [] : historiqueLiens(h.data || [], offres, opts.articles?.() || []);
       return liensAConfirmer(data, offres, opts.articles?.() || [], etat.liensTraites);
     } catch { return null; }
   }
@@ -415,14 +447,22 @@ export function monterCirculaires(conteneur, opts) {
 
   /** Liens appris tout seuls par la lecture : déjà utilisés, Chris les confirme (✓) ou les défait pour l'avenir (✗). */
   function blocLiens() {
-    if (!etat.liens?.length) return '';
+    const hist = etat.historique || [];
+    if (etat.liens == null || (!etat.liens.length && !hist.length)) return '';
+    const data = (l) => `data-banniere="${esc(l.banniere)}" data-nom-cle="${esc(l.nom_cle)}" data-article="${esc(l.article_id)}"`;
     return `<details class="c-bloc c-liens" ${etat.liensOuverts ? 'open' : ''}><summary><h2>🧠 Liens appris à confirmer (${etat.liens.length})</h2></summary>
       <p class="c-doux">La lecture a appris ces liens toute seule et s'en sert déjà. ✓ : c'est bien ce produit. ✗ : je défais le lien pour l'avenir (les prix déjà écrits restent).</p>
-      ${etat.liens.map((l) => `<div class="c-rang c-lien" data-banniere="${esc(l.banniere)}" data-nom-cle="${esc(l.nom_cle)}" data-article="${esc(l.article_id)}">
+      ${etat.liens.length ? etat.liens.map((l) => `<div class="c-rang c-lien" ${data(l)}>
         <span class="c-grandir">${esc(l.libelle)}</span>
         <button type="button" class="c-btn p" data-confirmer-lien="1" aria-label="Confirmer le lien" title="Confirmer le lien">✓</button>
         <button type="button" class="c-btn d" data-confirmer-lien="0" aria-label="Refuser le lien (les prix déjà écrits restent)" title="Refuser le lien (les prix déjà écrits restent)">✗</button>
-      </div>`).join('')}
+      </div>`).join('') : '<div class="c-rang c-lien c-tout-beau"><span class="c-ok-rond" aria-hidden="true">✓</span><span class="c-grandir">Tout est à jour : aucun lien à confirmer.</span></div>'}
+      ${hist.length ? `<details class="c-hist" ${etat.histOuvert ? 'open' : ''}><summary>Historique (${hist.length})</summary>
+        ${hist.map((l) => `<div class="c-rang c-lien" ${data(l)}>
+          <span class="c-pastille ${l.decision === 'lien' ? 'c-confirme' : 'c-refuse'}">${l.decision === 'lien' ? 'confirmé' : 'refusé'}</span>
+          <span class="c-grandir">${esc(l.libelle)}</span><span class="c-doux">${esc(l.maj ? dateCourte(l.maj) : '')}</span>
+          <button type="button" class="c-btn" data-annuler-lien title="Annuler ce choix : le lien redevient à confirmer">Annuler</button>
+        </div>`).join('')}</details>` : ''}
     </details>`;
   }
 
@@ -464,6 +504,8 @@ export function monterCirculaires(conteneur, opts) {
     racine.querySelector('.c-couv')?.addEventListener('toggle', (ev) => { etat.couvOuverte = ev.currentTarget.open; });
     racine.querySelector('.c-liens')?.addEventListener('toggle', (ev) => { etat.liensOuverts = ev.currentTarget.open; });
     racine.querySelectorAll('[data-confirmer-lien]').forEach((b) => b.onclick = () => confirmerLien(b.closest('.c-lien'), b.dataset.confirmerLien === '1'));
+    racine.querySelector('.c-hist')?.addEventListener('toggle', (ev) => { etat.histOuvert = ev.currentTarget.open; });
+    racine.querySelectorAll('[data-annuler-lien]').forEach((b) => b.onclick = () => annulerLien(b.closest('.c-lien')));
     racine.querySelectorAll('[data-charger]').forEach((inp) => inp.onchange = () => charger_(inp.dataset.charger, Number(inp.dataset.circ), [...inp.files]));
     racine.querySelectorAll('[data-retirer]').forEach((b) => b.onclick = () => retirer(b.dataset.retirer));
     racine.querySelectorAll('[data-autre]').forEach((b) => b.onclick = () => {
@@ -588,8 +630,27 @@ export function monterCirculaires(conteneur, opts) {
       etat.liensTraites.delete(cle);
       message(`Refusé : ${error.message}`); ligne.querySelectorAll('button').forEach((b) => { b.disabled = false; }); return;
     }
+    const fait = (etat.liens || []).find((l) => cleLien(l) === cle);
     etat.liens = (etat.liens || []).filter((l) => cleLien(l) !== cle);
+    if (fait) etat.historique = [{ ...fait, decision: ok ? 'lien' : 'refus', maj: new Date().toISOString() }, ...(etat.historique || [])].slice(0, 15);
+    etat.histOuvert = false;   // toute action dans ce bloc referme l'historique
     message(ok ? 'Lien confirmé' : 'Lien défait pour l\'avenir (les prix déjà écrits restent)');
+    rendre(); opts.apresChangement?.();
+  }
+
+  /** Annule un choix de l'historique : le lien redevient « à confirmer » (rien d'autre n'est touché). */
+  async function annulerLien(ligne) {
+    const { banniere, nomCle, article } = ligne.dataset;
+    const cle = cleLien({ banniere, nom_cle: nomCle, article_id: article });
+    ligne.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    const { error } = await sb.rpc('annuler_choix_lien', { p_banniere: banniere, p_nom_cle: nomCle, p_article: article });
+    if (error) { message(`Refusé : ${error.message}`); ligne.querySelectorAll('button').forEach((b) => { b.disabled = false; }); return; }
+    const h = (etat.historique || []).find((l) => cleLien(l) === cle);
+    etat.historique = (etat.historique || []).filter((l) => cleLien(l) !== cle);
+    etat.liensTraites.delete(cle);
+    if (h) etat.liens = [{ ...h, decision: undefined, maj: undefined }, ...(etat.liens || [])];
+    etat.histOuvert = false;
+    message('Choix annulé : le lien est de nouveau à confirmer');
     rendre(); opts.apresChangement?.();
   }
 

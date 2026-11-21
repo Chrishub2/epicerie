@@ -66,6 +66,17 @@ header { background: #1f7a4d; color: #fff;
   padding: calc(6px + env(safe-area-inset-top)) 10px 6px; display: block; }
 body.onglet-liste header { position: sticky; top: 0; z-index: 7; padding-bottom: 8px; }
 body:not(.onglet-liste) .barre-liste, body:not(.onglet-liste) .puces-mag { display: none; }
+/* Calendrier de l'en-tête : couleurs en transparence pour suivre chaque habillage */
+.cal-entete { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 720px; margin: 0 auto 6px; }
+.cal-entete .cal-m { font-weight: 700; font-size: 13px; opacity: .9; min-width: 34px; text-transform: capitalize; }
+.cal-entete .cal-m:first-child { text-align: right; }
+.cal-g { position: relative; display: grid; grid-template-columns: repeat(7, 30px); grid-template-rows: 11px 18px 18px; column-gap: 3px; row-gap: 2px; }
+.cal-l { font-size: 9.5px; font-weight: 700; text-align: center; line-height: 11px; opacity: .75; }
+.cal-j { display: grid; place-items: center; border-radius: 4px; font-size: 12px; font-weight: 600; line-height: 1; background: rgba(255,255,255,.14); font-variant-numeric: tabular-nums; }
+.cal-j.fds { background: rgba(0,0,0,.28); }
+.cal-j.auj { background: rgba(255,213,79,.30); box-shadow: inset 0 0 0 1.5px #ffd54f; }
+.cal-coupure { justify-self: start; width: 0; margin-left: -3px; border-left: 2.5px solid currentColor; border-radius: 2px; opacity: .85; }
+@media (min-width: 560px) { .cal-g { grid-template-columns: repeat(7, 36px); } .cal-entete .cal-m { font-size: 14px; min-width: 64px; } }
 .barre-liste { position: relative; display: flex; align-items: center; height: 40px; max-width: 720px; margin: 0 auto; }
 .tuile-scan { width: 96px; height: 38px; border-radius: 10px; border: 0; background: var(--entete-tuile, rgba(0,0,0,.22));
   color: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; flex: none; }
@@ -605,6 +616,8 @@ try { var s = localStorage.getItem('epicerie.skin'); if (s && s !== 'classique')
 </head>
 <body>
 <header id="entete">
+  <!-- Calendrier : 2 semaines (dimanche → samedi), aujourd'hui en jaune, coupure des rabais jeudi / mercredi (app/calendrier.js) -->
+  <div class="cal-entete" id="calEntete" role="group" aria-label="Calendrier des rabais"></div>
   <!-- Barre de l'onglet Liste : lecteur de code-barres · total · ajout (visible seulement sur l'onglet Liste) -->
   <div class="barre-liste">
     <button class="tuile-scan" id="btnScan" aria-label="Lire un code-barres">
