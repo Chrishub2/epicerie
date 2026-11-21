@@ -12,6 +12,7 @@ import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
 import { memeNom, pertinenceNoms } from './noms.js';
 import { calendrierHtml } from './calendrier.js';
+import { REMPLACEMENTS, REMPLACEMENT_DEFAUT, remplacementDe, definirRemplacement, meilleursChoix, DICO_ATTRIBUTS, attributDe, caracteristiques, definirCaracteristique, retirerCaracteristique } from './choix.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique, rechercherSouple } from './epiceries.js';
@@ -1460,6 +1461,58 @@ function brancherVariantes(c, a, rouvrir) {
   });
 }
 
+// --- Spec v1.1 : Meilleurs choix (S10), Remplacement accepté (S11), Caractéristiques (S8) ---
+function htmlMeilleursChoix(a) {
+  const regle = remplacementDe(a, S.get().utilisateur);
+  const rangs = meilleursChoix(offresArticle(a), { prefId: P.variantePref(a)?.id || null, variantes: P.variantesActives(a), regle });
+  if (rangs.every((r) => !r.offre)) return '';
+  return `<h3>Meilleurs choix <span class="doux">· ${esc(REMPLACEMENTS.find((x) => x.k === regle).nom.toLowerCase())}</span></h3>
+    <div class="mc">${rangs.map((r) => `<div class="mc-rang${r.offre ? '' : ' mc-vide'}">
+      <div class="mc-lib">${r.libs.map((x) => `<b>${esc(x)}</b>`).join('')}</div>
+      ${r.offre ? `<div class="mc-quoi">${r.offre.produitOffre ? `${logo(r.offre.banniere)} <span class="doux">${esc(r.offre.produitOffre)}</span>` : logoVille(r.offre.banniere)}</div>
+      <div class="mc-prix${r.offre.economie ? ' rabais' : ''}">${esc(libelleUnitaire(r.offre.pu, r.offre.uniteRef).split(' · ')[0])}${r.ecart ? `<small>+${esc(argent(r.ecart))} de plus</small>` : ''}</div>`
+        : `<div class="mc-quoi doux">${esc(r.vide)}</div>`}
+    </div>`).join('')}</div>`;
+}
+function htmlCaracteristiques(a, nouvel = '') {
+  const liste = caracteristiques(a);
+  const libres = DICO_ATTRIBUTS.filter((d) => !a.caracteristiques?.[d.k]);
+  const nouv = attributDe(nouvel);
+  return `${liste.length ? liste.map((c) => `<div class="carac-rang"><span class="doux">${esc(c.nom)}</span>
+      <select data-carac="${c.k}" aria-label="${esc(c.nom)}">${attributDe(c.k).vals.map((v) => `<option ${v === c.valeur ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+      <button class="icone" data-carac-retirer="${c.k}" title="Retirer ${esc(c.nom)}" aria-label="Retirer ${esc(c.nom)}">✕</button></div>`).join('')
+    : '<p class="doux" style="margin:4px 0">Aucune : ajoute seulement ce qui distingue ce produit.</p>'}
+    ${libres.length ? `<div class="rang envelopper"><select id="caracAjout" aria-label="Ajouter une caractéristique"><option value="">+ Ajouter une caractéristique…</option>${libres.map((d) => `<option value="${d.k}" ${d.k === nouvel ? 'selected' : ''}>${esc(d.nom)}</option>`).join('')}</select>
+      ${nouv ? `<select id="caracValeur" aria-label="Valeur de ${esc(nouv.nom)}"><option value="">Choisir la valeur…</option>${nouv.vals.map((v) => `<option>${esc(v)}</option>`).join('')}</select>` : ''}</div>` : ''}`;
+}
+function brancherCaracteristiques(c, articleId) {
+  const boite = $('#fCarac', c);
+  if (!boite) return;
+  const article = () => S.get().articles.find((x) => x.id === articleId);
+  const redessiner = (nouvel = '') => {
+    const a = article(); if (!a) return;
+    $('#fCaracCorps', c).innerHTML = htmlCaracteristiques(a, nouvel);
+    $('#fCaracNb', c).textContent = caracteristiques(a).length;
+  };
+  const changer = (fn) => S.maj((x) => { const ar = x.articles.find((i) => i.id === articleId); if (ar) fn(ar); });
+  boite.addEventListener('change', (ev) => {
+    const t = ev.target;
+    if (t.dataset.carac) changer((ar) => definirCaracteristique(ar, t.dataset.carac, t.value));
+    else if (t.id === 'caracAjout') redessiner(t.value);
+    else if (t.id === 'caracValeur' && t.value) { const k = $('#caracAjout', c).value; changer((ar) => definirCaracteristique(ar, k, t.value)); redessiner(); }
+  });
+  boite.addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-carac-retirer]');
+    if (b) { changer((ar) => retirerCaracteristique(ar, b.dataset.caracRetirer)); redessiner(); }
+  });
+  $('#fRempl', c)?.addEventListener('change', (ev) => {
+    changer((ar) => definirRemplacement(ar, S.get().utilisateur, ev.target.value));
+    const a = article();
+    $('#fRemplDefaut', c).hidden = ev.target.value !== REMPLACEMENT_DEFAUT;
+    if (a) $('#fChoix', c).innerHTML = htmlMeilleursChoix(a);
+  });
+}
+
 // --- Fiche article ----------------------------------------------------
 export function ficheArticle(articleId, ligneId) {
   const e = S.get();
@@ -1476,6 +1529,7 @@ export function ficheArticle(articleId, ligneId) {
     ${htmlDernierAchat(l?.recu?.absent ? null : (l?.recu || a.dernierAchat), a.id)}
     ${l?.recu?.absent ? `<div class="alerte" style="margin-bottom:10px">🧾 Ce produit n'est pas sur la facture du ${esc(l.recu.date || '')}${l.recu.banniere ? ` (${esc(nomBanniere(l.recu.banniere))})` : ''}.</div>` : ''}
     ${htmlAchats(a.id)}
+    <div id="fChoix">${htmlMeilleursChoix(a)}</div>
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a)}
     <div class="carte" style="margin-top:8px;background:var(--gris-fond)">
@@ -1515,6 +1569,10 @@ export function ficheArticle(articleId, ligneId) {
     </div>
     <div class="champ"><label>Vendu seulement chez</label><select id="fExclusif"><option value="">— Toutes les bannières —</option>
       ${Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement).map(([k, b]) => `<option value="${k}" ${a.exclusif === k ? 'selected' : ''}>${esc(b.nom)}</option>`).join('')}</select></div>
+    ${(() => { const r = remplacementDe(a, e.utilisateur); return `<div class="champ"><label for="fRempl">Remplacement accepté <span class="doux" id="fRemplDefaut" ${r === REMPLACEMENT_DEFAUT ? '' : 'hidden'}>(défaut)</span> <span class="pastille">pour toi seulement</span></label>
+      <select id="fRempl">${REMPLACEMENTS.map((x) => `<option value="${x.k}" ${x.k === r ? 'selected' : ''}>${esc(x.nom)}</option>`).join('')}</select></div>`; })()}
+    <details id="fCarac" class="carac"><summary class="btn sec" style="display:inline-block">Caractéristiques (<span id="fCaracNb">${caracteristiques(a).length}</span>)</summary>
+      <div id="fCaracCorps" style="margin-top:8px">${htmlCaracteristiques(a)}</div></details>
     ${l ? `
     <div class="champ"><label>Note</label><input id="fNote" value="${esc(l.note || '')}" placeholder="ex. sans lactose, gros format"></div>` : ''}
     ${l ? `<div class="doux">Ajouté à la liste par <b>${esc(l.ajoutePar || '?')}</b>${l.cree ? ` le ${esc(new Date(l.cree).toLocaleDateString('fr-CA'))}` : ''}</div>` : ''}
@@ -1607,6 +1665,7 @@ export function ficheArticle(articleId, ligneId) {
       fermerModale(); toast('Enregistré');
     };
     $('#fPhoto', c).onclick = () => photoProduit(a.id);
+    brancherCaracteristiques(c, a.id);
     // Mes achats : toucher un achat ouvre son reçu
     $$('[data-achat-recu]', c).forEach((li) => { li.onclick = () => ouvrirDetailRecu(li.dataset.achatRecu); });
     // Scan pour CET article : remplit nom, marque, format, catégorie, photo, code et vrais prix

@@ -8,6 +8,7 @@
 // (envoyer_lot, decider_offre, annuler_offre, annuler_lot) — mêmes règles pour le téléphone et la console.
 // =====================================================================
 import { couverture, tableauHtml, jourQuebec } from './couverture-circulaires.js';
+import { raisonLien } from './choix.js';
 
 /** Sources de circulaires (même liste que le serveur : supabase/functions/lire-circulaires/rapprochement.js). */
 export const SOURCES_CIRC = [
@@ -76,7 +77,9 @@ function libellerLien(l, dernier, parId) {
   const banniereNom = nomBanniere(l.banniere);
   const produit = parId.get(l.article_id)?.nom || `produit introuvable (${l.article_id})`;
   const libelle = `${nom} (${banniereNom}) → ${produit}${l.format ? ` · ${l.format}` : ''}`;
-  return { banniere: l.banniere, nom_cle: l.nom_cle, article_id: l.article_id, format: l.format || null, nom, banniereNom, produit, libelle };
+  // Spec v1.1 (S12) : pourquoi ce lien, en une ligne, sans pourcentage
+  const raison = raisonLien(l, parId.get(l.article_id));
+  return { banniere: l.banniere, nom_cle: l.nom_cle, article_id: l.article_id, format: l.format || null, nom, banniereNom, produit, libelle, raison };
 }
 
 /**
@@ -210,6 +213,7 @@ const CSS = `
 .circ h2 { font-size: 17px; margin: 0; }
 .circ h3 { font-size: 15px; margin: 0; }
 .circ .c-doux { color: var(--c-doux); font-size: 13px; }
+.circ .c-raison { display: block; font-size: 12px; margin-top: 2px; }
 .circ .c-bloc { background: var(--c-fond); border: 1px solid var(--c-trait); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
 .circ .c-rang { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .circ .c-grandir { flex: 1; min-width: 0; }
@@ -453,7 +457,7 @@ export function monterCirculaires(conteneur, opts) {
     return `<details class="c-bloc c-liens" ${etat.liensOuverts ? 'open' : ''}><summary><h2>🧠 Liens appris à confirmer (${etat.liens.length})</h2></summary>
       <p class="c-doux">La lecture a appris ces liens toute seule et s'en sert déjà. ✓ : c'est bien ce produit. ✗ : je défais le lien pour l'avenir (les prix déjà écrits restent).</p>
       ${etat.liens.length ? etat.liens.map((l) => `<div class="c-rang c-lien" ${data(l)}>
-        <span class="c-grandir">${esc(l.libelle)}</span>
+        <span class="c-grandir">${esc(l.libelle)}<span class="c-doux c-raison">${esc(l.raison)}</span></span>
         <button type="button" class="c-btn p" data-confirmer-lien="1" aria-label="Confirmer le lien" title="Confirmer le lien">✓</button>
         <button type="button" class="c-btn d" data-confirmer-lien="0" aria-label="Refuser le lien (les prix déjà écrits restent)" title="Refuser le lien (les prix déjà écrits restent)">✗</button>
       </div>`).join('') : '<div class="c-rang c-lien c-tout-beau"><span class="c-ok-rond" aria-hidden="true">✓</span><span class="c-grandir">Tout est à jour : aucun lien à confirmer.</span></div>'}
