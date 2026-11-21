@@ -799,9 +799,6 @@ function vueListe(v) {
     h += '<th><button class="p-ajban" id="btnAjBan" aria-label="Ajouter une bannière">+</button></th>';
   }
   h += `</tr></thead></table></div><div class="prep-defile">${ouvrirTable()}<tbody>`;
-  // Fiches à compléter (sans photo et jamais liées) : une à une, tu choisis le bon produit en ligne
-  const aCompleter = rangees.filter((r) => !r.a.imageUrl && !r.a.liens?.length).map((r) => r.a.id);
-  if (aCompleter.length && navigator.onLine) h += `<tr class="pr"><td colspan="${nCol}"><span class="pr-nom"><button id="btnCompleter">📷 ${aCompleter.length} produit(s) sans photo · Compléter</button></span></td></tr>`;
 
   // Mode Liste : bilan des arrêts, puis bascule « Par rayon / Par magasin »
   let groupe = 'rayon';
@@ -864,18 +861,6 @@ function vueListe(v) {
     toast('Tout au meilleur prix');
   });
   $('#btnAjBan', v)?.addEventListener('click', () => allerOnglet('magasins'));
-  $('#btnCompleter', v)?.addEventListener('click', () => {
-    let i = 0;
-    const suivant = () => {
-      const id = aCompleter[i++];
-      if (!id) { fermerModale(); toast('Fiches parcourues'); return; }
-      const a = S.get().articles.find((x) => x.id === id);
-      if (!a) { suivant(); return; }
-      ouvrirLiaison(id, suivant, { auto: true, passer: suivant,
-        etape: `Fiche ${i}/${aCompleter.length} — ${a.nom} : coche le bon produit (photo, marque, format et prix suivent), ou « Plus tard »` });
-    };
-    suivant();
-  });
   $$('[data-reorg]', v).forEach((b) => b.onclick = () => ouvrirReorg('defaut'));
   $$('[data-classer]', v).forEach((b) => b.onclick = () => classerSansRayon());
 
