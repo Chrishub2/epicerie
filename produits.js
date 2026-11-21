@@ -153,8 +153,18 @@ export function choisirPreferee(a, vid) {
 }
 
 /** Libellé court d'une variante : « Tilda · Riz basmati pur · 2 kg ». */
-export function libelleVariante(v) {
-  return [v.marque, v.nom, v.format].filter(Boolean).join(' · ') || 'Sans marque ni format';
+/**
+ * « Marque · précision · format ». La marque n'est jamais répétée dans la précision (« Philadelphia · Fromage à la crème »,
+ * pas « Philadelphia · Philadelphia Fromage… »). Sans marque ni format : le nom du produit (a), jamais « Sans marque ».
+ */
+export function libelleVariante(v, a = null) {
+  const marque = String(v?.marque || '').trim();
+  let nom = String(v?.nom || '').trim();
+  if (marque && nom) {
+    const m = marque.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    nom = nom.replace(new RegExp(`(^|\\s)${m}(?=\\s|$|[,.·-])`, 'gi'), ' ').replace(/\s{2,}/g, ' ').replace(/^[\s,·-]+|[\s,·-]+$/g, '');
+  }
+  return [marque, nom, v?.format].filter(Boolean).join(' · ') || a?.nom || '';
 }
 
 // ---------------------------------------------------------------------
@@ -376,9 +386,47 @@ export function completude(a, e, opts = {}) {
   ];
   const manquants = criteres.filter((c) => !c.ok).map(({ cle, icone, texte }) => ({ cle, icone, texte }));
   const alertes = [];
+  // Spec v1.2 (S13) : un prix régulier ne périme pas ; mais un seul prix connu ne permet aucune comparaison
+  if (!opts.prixReels) {
+    const bans = [...new Set((e.prix || []).filter((p) => p.articleId === a.id && estPrixReel(p)).map((p) => p.banniere).filter(Boolean))];
+    if (bans.length === 1 && a.seulChez !== bans[0]) alertes.push(`un seul prix connu (${opts.nomBanniere ? opts.nomBanniere(bans[0]) : bans[0]}) : touche « Trouver les vrais prix » ou attends d’autres reçus`);
+  }
   // Format en kg mais comparé à l'unité (ou l'inverse) : les prix au kg seraient faux
   if (f && f.base !== a.uniteRef) alertes.push(`format en ${f.base === 'unite' ? 'unités' : f.base === 'kg' ? 'poids' : 'volume'}, comparé ${a.uniteRef === 'unite' ? 'à l\'unité' : a.uniteRef === 'kg' ? 'au kg' : 'au litre'}`);
   return { ok: criteres.length - manquants.length, total: criteres.length, manquants, alertes };
+}
+
+/**
+ * Maquette fiche v104 : ce que l'utilisateur peut confirmer lui-même dans « À compléter ».
+ * bannieres = bannières actives (magasins choisis). Rend :
+ *  - seul : la bannière du seul prix connu (à confirmer « je l'achète seulement là »), sinon null ;
+ *  - sansPrix : bannières actives sans aucun prix, moins celles cochées « ne vend pas ce produit » (pasVenduChez).
+ */
+export function aConfirmer(a, e, bannieres = []) {
+  const bans = [...new Set((e.prix || []).filter((p) => p.articleId === a.id && estPrixReel(p)).map((p) => p.banniere).filter(Boolean))];
+  const exclues = new Set(a.pasVenduChez || []);
+  return {
+    seul: bans.length === 1 && a.seulChez !== bans[0] ? bans[0] : null,
+    sansPrix: bans.length ? bannieres.filter((b) => !bans.includes(b) && !exclues.has(b)) : [],
+    exclues: [...exclues],
+  };
+}
+
+/**
+ * Code tapé dans la fiche : PLU (4 chiffres, ou 9 + PLU = bio) ou code-barres (8 à 14 chiffres).
+ * Spec S14 : un PLU bio ne va que dans une fiche bio, et l'inverse. Rend { plu } | { code } | { erreur }.
+ */
+export function codeSaisi(texte, a) {
+  const c = String(texte || '').replace(/\D/g, '');
+  const bio = c.length === 5 && c[0] === '9';
+  if (c.length === 4 || bio) {
+    const n = +(bio ? c.slice(1) : c);
+    if (n < 3000 || n > 4999) return { erreur: 'PLU de fruits et légumes : 3000 à 4999 (ou 9 devant pour le bio)' };
+    if (bio !== !!a?.bio) return { erreur: bio ? 'Code bio : il va dans la fiche « … biologique », pas ici (le bio est un produit à part)' : 'Fiche bio : entre le code bio (9 devant, ex. 94011)' };
+    return { plu: c };
+  }
+  if (c.length >= 8 && c.length <= 14) return { code: c };
+  return { erreur: '4 chiffres (PLU), 9 + PLU pour le bio, ou 8 à 14 chiffres (code-barres)' };
 }
 
 /**

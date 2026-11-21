@@ -26,7 +26,7 @@ import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
-import { chargerVisuels, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro } from './visuels.js';
+import { chargerVisuels, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, etatPhotoPro, marquerPhotoEnvoyee } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -1412,7 +1412,7 @@ function htmlVariantes(a) {
       const estPref = v === pref;
       return `<div class="item" data-v="${v.id}" style="align-items:flex-start">
         <button class="icone" data-vpref title="${estPref ? 'Variante habituelle' : 'En faire la variante habituelle'}" aria-label="Variante habituelle">${estPref ? '★' : '☆'}</button>
-        <div class="grandir"><div class="nom">${esc(P.libelleVariante(v))}</div>
+        <div class="grandir"><div class="nom">${esc(P.libelleVariante(v, a))}</div>
           <div class="info">${v.codes?.length ? `▥ ${nbCodes(v.codes)} code(s)-barres` : 'sans code-barres'}${o ? ` · ${esc(libelleUnitaire(o.pu, o.uniteRef).split(' · ')[0])} ${esc(nomOffre(o))}` : ''}</div></div>
         <button class="icone" data-vmod title="Modifier" aria-label="Modifier">✏️</button>
         ${!estPref && P.variantesActives(a).length > 1 ? `<button class="icone" data-vsep title="Séparer en produit à part" aria-label="Séparer">↗</button>
@@ -1513,6 +1513,80 @@ function brancherCaracteristiques(c, articleId) {
   });
 }
 
+// --- Photo du produit (maquette fiche v102) ---------------------------------
+// Le lien ouvre la page du fabricant ou de l'épicier ; Chris colle l'image ; « Enregistrer » l'envoie « à traiter ».
+// L'agent du PC retire le fond, met au carré 512 sur blanc pur, retouche doucement, puis la range.
+const ETATS_PHOTO = { a_traiter: 'En préparation : l’ordinateur retire le fond et la met à nos standards.',
+  a_detourer: 'En préparation : le fond n’est pas uni, le détourage se fait à part.', approuvee: 'Photo pro en place.' };
+function htmlPhotoProduit(a) {
+  const et = etatPhotoPro(a.id);
+  const lien = a.lienPhoto || et?.page || '';
+  return `<h3 style="margin-top:14px">Photo du produit</h3>
+    <div class="champ"><label for="fLienPhoto">Lien de la photo</label>
+      <div class="rang"><input id="fLienPhoto" class="grandir" type="url" inputmode="url" value="${esc(lien)}" placeholder="Page du produit (fabricant ou épicier)">
+      <a class="btn sec" id="fOuvrirLien" href="${esc(lien || '#')}" target="_blank" rel="noopener" style="padding:6px 10px">Ouvrir ↗</a></div></div>
+    <div class="coller" id="fColler" tabindex="0" role="button" aria-label="Coller une image ou choisir une photo">Colle l’image ici (Ctrl+V)<br>ou touche pour choisir une photo</div>
+    <input type="file" id="fCollerFichier" accept="image/*" hidden>
+    <div class="doux" id="fEtatPhoto" style="margin-top:4px">${et ? esc(ETATS_PHOTO[et.statut] || '') : ''}</div>`;
+}
+/** Branche la zone de collage ; rend une fonction qui donne l'image en attente (Blob) ou null. */
+function brancherPhotoProduit(c) {
+  let image = null;
+  const zone = $('#fColler', c), etat = $('#fEtatPhoto', c);
+  if (!zone) return () => null;
+  const prendre = (f) => {
+    if (!f || !f.type?.startsWith('image/')) return;
+    image = f;
+    const url = URL.createObjectURL(f);
+    zone.innerHTML = `<img src="${url}" alt="Image collée">`;
+    etat.textContent = 'Image prête : touche Enregistrer pour l’envoyer.';
+  };
+  zone.onclick = () => $('#fCollerFichier', c).click();
+  zone.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); $('#fCollerFichier', c).click(); } };
+  $('#fCollerFichier', c).onchange = (ev) => prendre(ev.target.files[0]);
+  zone.ondragover = (ev) => { ev.preventDefault(); zone.classList.add('actif'); };
+  zone.ondragleave = () => zone.classList.remove('actif');
+  zone.ondrop = (ev) => { ev.preventDefault(); zone.classList.remove('actif'); prendre(ev.dataTransfer.files[0]); };
+  c.addEventListener('paste', (ev) => {
+    const f = [...(ev.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'))?.getAsFile();
+    if (f) { ev.preventDefault(); prendre(f); }
+  });
+  $('#fLienPhoto', c).oninput = (ev) => { $('#fOuvrirLien', c).href = ev.target.value.trim() || '#'; };
+  $('#fOuvrirLien', c).onclick = (ev) => { if (!$('#fLienPhoto', c).value.trim()) ev.preventDefault(); };
+  return () => image;
+}
+
+// --- Maquette fiche v104 : confirmer soi-même ce qui ne l'est pas -------------------
+const BANNIERES_FICHE = () => Object.keys(BANNIERES).filter((b) => banniereActive(b));
+function htmlAConfirmer(a, e) {
+  const k = P.aConfirmer(a, e, BANNIERES_FICHE());
+  const sansCode = !P.codesDe(a).length && !a.plu?.length;
+  const parts = [];
+  if (k.seul) parts.push(`<label class="conf"><input type="checkbox" data-conf-seul="${esc(k.seul)}"> C'est normal : je l'achète seulement chez ${esc(nomBanniere(k.seul))}</label>`);
+  if (k.sansPrix.length) parts.push(`<details class="conf"><summary>Aucun prix chez ${k.sansPrix.length} bannière(s) : coche celles qui ne vendent pas ce produit</summary>
+    ${k.sansPrix.map((b) => `<label class="conf"><input type="checkbox" data-conf-exclure="${esc(b)}"> ${esc(nomBanniere(b))}</label>`).join('')}</details>`);
+  if (k.exclues.length) parts.push(`<div class="doux conf">Ne vendent pas : ${k.exclues.map((b) => esc(nomBanniere(b))).join(', ')} <a href="#" data-conf-exclure-annuler>Annuler</a></div>`);
+  if (sansCode) parts.push(`<div class="rang conf"><input id="fConfCode" class="grandir" inputmode="numeric" placeholder="PLU (4011) ou code-barres" aria-label="PLU ou code-barres"><button class="btn sec" id="fConfCodeOk" style="padding:5px 10px">Ajouter</button></div><div class="doux" id="fConfCodeMsg"></div>`);
+  return parts.length ? `<div class="conf-bloc">${parts.join('')}</div>` : '';
+}
+function brancherAConfirmer(c, articleId, rouvrir) {
+  const changer = (fn, msg) => { S.maj((x) => { const ar = x.articles.find((i) => i.id === articleId); if (ar) fn(ar); }); if (msg) toast(msg); rouvrir(); };
+  $$('[data-conf-seul]', c).forEach((i) => { i.onchange = () => changer((ar) => { ar.seulChez = i.dataset.confSeul; }, 'Noté : un seul magasin pour ce produit'); });
+  $$('[data-conf-exclure]', c).forEach((i) => { i.onchange = () => changer((ar) => { ar.pasVenduChez = [...new Set([...(ar.pasVenduChez || []), i.dataset.confExclure])]; }); });
+  $('[data-conf-exclure-annuler]', c)?.addEventListener('click', (ev) => { ev.preventDefault(); changer((ar) => { delete ar.pasVenduChez; }); });
+  $('#fConfCodeOk', c)?.addEventListener('click', () => {
+    const a = S.get().articles.find((x) => x.id === articleId);
+    const r = P.codeSaisi($('#fConfCode', c).value, a);
+    if (r.erreur) { $('#fConfCodeMsg', c).textContent = r.erreur; return; }
+    if (r.code) {
+      const ailleurs = P.varianteParCode(S.get(), r.code);
+      if (ailleurs && ailleurs.article.id !== articleId) { $('#fConfCodeMsg', c).textContent = `Ce code appartient déjà à « ${ailleurs.article.nom} »`; return; }
+    }
+    changer((ar) => { if (r.plu) ar.plu = [...new Set([...(ar.plu || []), r.plu])]; else ar.codes = [...new Set([...(ar.codes || []), ...gtinVariantes(r.code)])]; },
+      r.plu ? `PLU ${r.plu} ajouté` : 'Code-barres ajouté');
+  });
+}
+
 // --- Fiche article ----------------------------------------------------
 export function ficheArticle(articleId, ligneId) {
   const e = S.get();
@@ -1524,8 +1598,8 @@ export function ficheArticle(articleId, ligneId) {
     ${a.exclusif ? `<div class="alerte ambre">Vendu seulement chez <b>${esc(nomBanniere(a.exclusif))}</b> : les autres bannières sont ignorées pour ce produit.</div>` : ''}
     <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres</button>
     <p class="doux" style="margin:-4px 0 10px">Remplit la fiche : nom, marque, format, catégorie, photo et prix.</p>
-    ${(() => { const c = P.completude(a, e); return c.manquants.length || c.alertes.length
-      ? `<div class="alerte ambre" style="margin-bottom:10px">À compléter (${c.ok}/${c.total}) : ${c.manquants.map((m) => `${m.icone} ${esc(m.texte)}`).join(' · ')}${c.alertes.map((t) => `<br>⚠️ ${esc(t)}`).join('')}</div>` : ''; })()}
+    ${(() => { const c = P.completude(a, e, { nomBanniere }); const k = htmlAConfirmer(a, e); return c.manquants.length || c.alertes.length || k
+      ? `<div class="alerte ambre" style="margin-bottom:10px">${c.manquants.length || c.alertes.length ? `À compléter (${c.ok}/${c.total}) : ${c.manquants.map((m) => `${m.icone} ${esc(m.texte)}`).join(' · ')}${c.alertes.map((t) => `<br>⚠️ ${esc(t)}`).join('')}` : ''}${k}</div>` : ''; })()}
     ${htmlDernierAchat(l?.recu?.absent ? null : (l?.recu || a.dernierAchat), a.id)}
     ${l?.recu?.absent ? `<div class="alerte" style="margin-bottom:10px">🧾 Ce produit n'est pas sur la facture du ${esc(l.recu.date || '')}${l.recu.banniere ? ` (${esc(nomBanniere(l.recu.banniere))})` : ''}.</div>` : ''}
     ${htmlAchats(a.id)}
@@ -1580,6 +1654,7 @@ export function ficheArticle(articleId, ligneId) {
       ? `<div class="doux">Codes-barres : ${a.codes.map(esc).join(', ')}${a.codeSource === 'en ligne' ? ' <span class="pastille ambre">trouvé en ligne — vérifie en scannant le produit</span>' : ''}</div>`
       : `<div class="alerte" style="margin-top:8px">▥ <b>Pas de code-barres pour ce produit.</b> ${a.codesProposes?.length ? 'Codes possibles trouvés en ligne (vérifie la marque et le format) :' : a.codeCherche ? 'Rien de sûr trouvé en ligne.' : ''} Tu peux aussi le scanner (bouton ▥ en haut).
           ${(a.codesProposes || []).map((h) => `<button class="btn sec" data-code="${esc(h.code)}" style="width:100%;margin-top:6px;text-align:left">+ ${esc(h.code)} — ${esc([h.marque, h.nom, h.format].filter(Boolean).join(' · '))}</button>`).join('')}</div>`}
+    ${htmlPhotoProduit(a)}
     <h3 style="margin-top:14px">Photos</h3>
     <div class="vignettes" id="fPhotos">${photos.length ? '' : '<span class="doux">Aucune photo.</span>'}</div>
     <div class="rang envelopper" style="margin-top:12px">
@@ -1650,7 +1725,16 @@ export function ficheArticle(articleId, ligneId) {
       if (plusTard) ajouterTache({ type: 'prix', prixId: pid, photoId: photoPrixId });
       toast(plusTard ? 'Photo gardée : le prix sera lu au retour du réseau' : 'Prix ajouté'); ficheArticle(articleId, ligneId);
     };
+    const imageCollee = brancherPhotoProduit(c);
     $('#fSauver', c).onclick = () => {
+      const lienPhoto = $('#fLienPhoto', c)?.value.trim() || '';
+      const image = imageCollee();
+      if (image) {
+        Sync.envoyerPhotoCollee(a.id, image, lienPhoto).then((r) => {
+          if (r.ok) { marquerPhotoEnvoyee(a.id, lienPhoto); toast('Photo envoyée : l’ordinateur la prépare'); }
+          else toast(`Photo non envoyée : ${r.erreur}`);
+        });
+      }
       S.maj((x) => {
         const ar = x.articles.find((i) => i.id === a.id);
         ar.nom = $('#fNom', c).value.trim() || ar.nom; ar.uniteRef = $('#fUnite', c).value;
@@ -1659,6 +1743,7 @@ export function ficheArticle(articleId, ligneId) {
         if (rv !== '+' && rv !== ar.rayonId) { ar.rayonId = rv; ar.rayonManuel = true; }
         ar.format = $('#fFormat', c).value.trim(); ar.local = $('#fLocal', c).value === '1';
         ar.exclusif = $('#fExclusif', c).value || null;
+        if (lienPhoto) ar.lienPhoto = lienPhoto; else delete ar.lienPhoto;
         const li = x.liste.find((i) => i.id === ligneId);
         if (li) li.note = $('#fNote', c).value.trim();
       });
@@ -1666,6 +1751,7 @@ export function ficheArticle(articleId, ligneId) {
     };
     $('#fPhoto', c).onclick = () => photoProduit(a.id);
     brancherCaracteristiques(c, a.id);
+    brancherAConfirmer(c, a.id, () => ficheArticle(articleId, ligneId));
     // Mes achats : toucher un achat ouvre son reçu
     $$('[data-achat-recu]', c).forEach((li) => { li.onclick = () => ouvrirDetailRecu(li.dataset.achatRecu); });
     // Scan pour CET article : remplit nom, marque, format, catégorie, photo, code et vrais prix

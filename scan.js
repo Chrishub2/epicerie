@@ -367,7 +367,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
     const nouveau = [val('#sMarque'), lireFormat()].filter(Boolean).join(' · ') || 'à préciser dans la fiche';
     boite.innerHTML = `<div class="carte" style="padding:8px;margin:0 0 8px"><b>« ${esc(ex.nom)} » est déjà au catalogue.</b> <span class="doux">Ce code-barres est :</span>
       ${P.variantesActives(ex).map((v) => `<label class="rang" style="margin-top:4px"><input type="radio" name="sVar" value="${v.id}" ${v.id === coche ? 'checked' : ''} style="width:auto">
-        <span>${v === P.variantePref(ex) ? '★ ' : ''}${esc(P.libelleVariante(v))}</span></label>`).join('')}
+        <span>${v === P.variantePref(ex) ? '★ ' : ''}${esc(P.libelleVariante(v, ex))}</span></label>`).join('')}
       <label class="rang" style="margin-top:4px"><input type="radio" name="sVar" value="nouveau" ${coche === 'nouveau' ? 'checked' : ''} style="width:auto">
         <span>➕ Une nouvelle marque/format : ${esc(nouveau)}</span></label></div>`;
   };

@@ -351,15 +351,43 @@ export async function chercherCode(code) {
 }
 
 /**
- * Photos professionnelles APPROUVÉES par Chris (table photos_pro, journal/SPEC-photos-niveaux.md).
- * [{ article_id, source_url }] ; null hors ligne ou en erreur (on garde alors la dernière liste connue).
+ * Photos professionnelles du foyer (table photos_pro, journal/SPEC-photos-niveaux.md).
+ * [{ article_id, source_url, statut, page_url }] : une photo traitée par l'agent (image_chemin, Storage privé)
+ * reçoit une adresse signée valide 1 an. null hors ligne ou en erreur (on garde alors la dernière liste connue).
  */
 export async function photosPro() {
   if (!estPret() || !navigator.onLine) return null;
   try {
-    const { data, error } = await sb.from('photos_pro').select('article_id, source_url').eq('foyer_id', foyer.id).eq('statut', 'approuvee');
-    return error ? null : data;
+    const { data, error } = await sb.from('photos_pro').select('article_id, source_url, statut, page_url, image_chemin').eq('foyer_id', foyer.id)
+      .in('statut', ['approuvee', 'a_traiter', 'a_detourer']);
+    if (error) return null;
+    const chemins = data.filter((l) => l.statut === 'approuvee' && l.image_chemin).map((l) => l.image_chemin);
+    if (chemins.length) {
+      const { data: urls } = await sb.storage.from('photos').createSignedUrls(chemins, 365 * 24 * 3600);
+      const parChemin = new Map((urls || []).filter((u) => u.signedUrl).map((u) => [u.path, u.signedUrl]));
+      data.forEach((l) => { if (l.image_chemin && parChemin.has(l.image_chemin)) l.source_url = parChemin.get(l.image_chemin); });
+    }
+    return data;
   } catch { return null; }
+}
+
+/**
+ * Photo collée par Chris dans la fiche (maquette v102) : l'image brute part dans Storage, la ligne photos_pro
+ * passe « a_traiter ». L'agent du PC (agents/photos_a_traiter.py) retire le fond, la met à nos standards et la range.
+ * Rend { ok } ou { erreur }.
+ */
+export async function envoyerPhotoCollee(articleId, blob, pageUrl) {
+  if (!estPret()) return { erreur: 'Connecte-toi pour envoyer la photo' };
+  if (!navigator.onLine) return { erreur: 'Hors ligne : réessaie au retour du réseau' };
+  const ext = ({ 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' })[blob.type] || 'jpg';
+  const chemin = `${foyer.id}/pro-brut/${articleId}.${ext}`;
+  try {
+    const { error: e1 } = await sb.storage.from('photos').upload(chemin, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
+    if (e1) return { erreur: e1.message };
+    const { error: e2 } = await sb.from('photos_pro').upsert({ foyer_id: foyer.id, article_id: articleId, statut: 'a_traiter', source_type: 'chris',
+      page_url: pageUrl || null, brut_chemin: chemin, note: null, verifier: null, cherche_le: new Date().toISOString(), decide_le: null });
+    return e2 ? { erreur: e2.message } : { ok: true };
+  } catch (e) { return { erreur: String(e?.message || e) }; }
 }
 
 /**

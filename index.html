@@ -499,6 +499,13 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .mc-prix.rabais { color: var(--rouge); }
 .mc-prix small { display: block; font-size: 11px; font-weight: 500; color: var(--doux, inherit); opacity: .75; }
 .mc-rang.mc-vide .mc-quoi { grid-column: 1 / -1; }
+.coller { min-height: 110px; border: 1.5px dashed var(--doux); border-radius: 12px; display: grid; place-items: center; text-align: center; padding: 10px; color: var(--doux); font-size: 14px; cursor: pointer; outline: none; }
+.coller:focus-visible, .coller.actif { border-color: var(--vert); }
+.coller img { max-height: 150px; max-width: 100%; border-radius: 8px; background: #fff; }
+.conf-bloc { display: grid; gap: 6px; margin-top: 8px; color: var(--texte, inherit); }
+.conf-bloc label.conf { display: flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+.conf-bloc details.conf > summary { font-size: 14px; text-decoration: underline; }
+.conf-bloc details.conf label.conf { margin: 4px 0 0 4px; }
 .carac-rang { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 1.4fr) auto; gap: 8px; align-items: center; padding: 4px 0; }
 .pastille { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--gris-fond);
   color: var(--doux); margin-right: 4px; white-space: nowrap; }

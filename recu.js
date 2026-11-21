@@ -347,7 +347,8 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     if (!a && codes.length) { const t = P.varianteParCode(etatNow, codes); if (t) ({ article: a, variante: v } = t); }
     source('code');
     // ①b code PLU déjà associé à un produit (appris d'un reçu précédent ou ajouté à la main)
-    if (!a && pluL) a = etatNow.articles.find((x) => (x.plu || []).includes(pluL.plu));
+    // Spec S14 : le bio est un produit à part — 94011 ne va qu'à une fiche qui porte 94011, jamais à celle du 4011
+    if (!a && pluL) a = etatNow.articles.find((x) => (x.plu || []).includes(pluL.bio ? `9${pluL.plu}` : pluL.plu));
     source('plu');
     if (!a) { const t = P.varianteParAlias(etatNow, r.banniere, l.libelle); if (t) ({ article: a, variante: v } = t); }
     source('alias');
@@ -361,7 +362,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
     // (lien deviné : on ne l'apprend pas comme nom de reçu, pour ne pas répéter une erreur)
     let devine = lien === 'liste' || lien === 'base';
-    if (!a && pluL) { a = parNom(`${pluL.produit} ${pluL.variete}`, etatNow); devine = !!a; } // nom officiel du PLU
+    if (!a && pluL) { a = parNom(`${pluL.produit} ${pluL.variete}${pluL.bio ? ' biologique' : ''}`, etatNow); if (a && pluL.bio !== !!a.bio) a = null; devine = !!a; } // nom officiel du PLU ; bio ↔ bio seulement (S14)
     if (!a) { a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow); devine = !!a; }
     source('nom');
     // ④ lien d'une application précédente (ex. article retiré de la liste depuis) : gardé, mais à vérifier
