@@ -138,7 +138,8 @@ nav.onglets.masquee { transform: translateY(110%); }
 /* Fenêtre ouverte : la page derrière ne défile pas */
 html.modale-ouverte, html.modale-ouverte body { overflow: hidden; }
 /* ===== Liste — Préparation (tableau par bannière) ===== */
-.prep { margin: -12px -16px 0; }
+/* Marge de 14 px à gauche : la poignée du zoom (bord de l'écran) reste facile à attraper */
+.prep { margin: -12px -16px 0 -2px; }
 .prep-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 /* Tête des colonnes (Photo/Liste, Deal, bannières et totaux) : flotte sous l'en-tête pendant le défilement */
 .prep-tete { position: sticky; top: var(--haut-entete, 0px); z-index: 5; overflow-x: auto; scrollbar-width: none;
