@@ -26,7 +26,7 @@ import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
-import { chargerVisuels, photoDe, definirPhotosPro } from './visuels.js';
+import { chargerVisuels, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -369,7 +369,7 @@ function htmlItem(l, a) {
   const teinte = l.recu?.absent ? '' : l.recu?.statut === 'plus' ? 'recu-ecart' : (l.recu?.statut === 'ok' || l.recu?.statut === 'moins') ? 'recu-ok' : '';
   return `<div class="item item-liste ep ${teinte} ${l.coche ? 'coche' : ''} ${l.indisponible ? 'indisponible' : ''}" data-id="${l.id}">
     <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Dans le panier">
-    <div class="ep-photo" data-fiche="${a.id}">${photoDe(a) ? `<img src="${esc(photoDe(a))}" alt="">` : '<span aria-hidden="true">📦</span>'}</div>
+    <div class="ep-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}</div>
     <div class="grandir ep-txt" data-fiche="${a.id}">
       <div class="nom ep-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>
       <div class="ep-prix">${prix}${details.length ? ` · ${details.join(' · ')}` : ''}</div>
@@ -547,7 +547,7 @@ function htmlRangee(r, cols, seule) {
   const u = r.offre?.uniteRef || a.uniteRef;
   const sous = [formatLisible(a.format), a.marque].filter(Boolean);
   let h = `<tr class="pl ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="p-art">
-    <div class="p-photo" data-fiche="${a.id}">${photoDe(a) ? `<img src="${esc(photoDe(a))}" alt="">` : '<span aria-hidden="true">📦</span>'}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
+    <div class="p-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
     <div class="p-txt" data-fiche="${a.id}"><div class="p-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>${
       sous.length ? `<div class="p-sous">${esc(sous.join(' · '))}</div>` : ''}</div>
     <div class="p-pm"><button data-q="1" aria-label="Un de plus">+</button><button data-q="-1" aria-label="Un de moins">−</button></div></div></td>`;
@@ -626,7 +626,7 @@ function htmlRangeeListe(r, { groupe, rec }) {
     }
   }
   return `<tr class="pl ls ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="ls-r">
-    <div class="p-photo" data-fiche="${a.id}">${photoDe(a) ? `<img src="${esc(photoDe(a))}" alt="">` : '<span aria-hidden="true">📦</span>'}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
+    <div class="p-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
     <div class="ls-tx" data-fiche="${a.id}">
       <div class="ls-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}${sous.length ? ` <span class="ls-sous">· ${esc(sous.join(' · '))}</span>` : ''}</div>
       <div class="ls-prix">${o ? `${groupe === 'rayon' ? logo(o.banniere) : ''}<b class="ls-pp ${estRabais(o) ? 'promo' : ''}">${esc(etiquette) || '?'}</b>${

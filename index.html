@@ -285,6 +285,11 @@ h3 { font-size: 15px; margin: 0 0 6px; }
 .doux { color: var(--doux); font-size: 13px; }
 .rang { display: flex; gap: 8px; align-items: center; }
 #etatScan:empty { display: none; }
+/* Liste sans aucune photo : « ? » stylé sur fond blanc (même dessin que la maquette de la fiche produit) */
+.photo-q { width: 100%; height: 100%; display: grid; place-items: center; background: #fff; border-radius: 8px;
+  color: #8a97a5; font: 800 22px/1 system-ui, sans-serif; font-stretch: 80%; text-shadow: 0 1px 0 #fff, 0 2px 3px rgba(20,26,32,.18);
+  box-shadow: inset 0 0 0 1px rgba(20,26,32,.12); }
+.ep-photo .photo-q { font-size: 28px; }
 #modaleCorps input::placeholder { color: var(--doux); opacity: .55; }
 .rang.envelopper { flex-wrap: wrap; }
 .grandir { flex: 1; min-width: 0; }

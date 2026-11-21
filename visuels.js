@@ -52,6 +52,46 @@ export function cleVisuel(a, corr = correspondance, dispo = presentes) {
   return niveaux(corr[a.id]).find((k) => dispo.has(k)) || null;
 }
 
+/** Marques différentes d'une fiche (variantes actives ; sinon la marque de la fiche). */
+export function marquesDe(a) {
+  const vs = (a?.variantes || []).filter((v) => !v.retiree);
+  const liste = vs.length ? vs.map((v) => v.marque) : [a?.marque];
+  return [...new Set(liste.map((m) => String(m || '').trim().toLowerCase()).filter(Boolean))];
+}
+
+/**
+ * Photo de la marque pour la liste : photo PRO APPROUVÉE seulement (table photos_pro, règle « photos pro seulement »).
+ * Une photo Open Food Facts, de la base de codes-barres ou prise au téléphone ne compte pas (décision de Chris, 21 nov.).
+ */
+function photoMarque(a) {
+  return (a?.id && pro.get(a.id)) || '';
+}
+
+/**
+ * Photo d'une rangée de la liste d'épicerie (règle de Chris, 21 nov.) :
+ * - une seule marque (ou aucune) → photo pro de la marque, sinon l'image héritée (sorte → générique → sous-cat. → cat.) ;
+ * - 2 marques et plus → image du niveau 3 (produit générique), sinon les autres niveaux, sinon la photo pro ;
+ * - rien du tout → '' (la liste affiche le « ? »).
+ */
+export function photoListe(a, corr = correspondance, dispo = presentes) {
+  if (!a) return '';
+  const url = (k) => `${BASE}${k}.jpg`;
+  const marque = photoMarque(a);
+  if (marquesDe(a).length < 2) {
+    if (marque) return marque;
+    const k = cleVisuel(a, corr, dispo);
+    return k ? url(k) : '';
+  }
+  const nivs = niveaux(corr[a.id]);
+  const g = corr[a.id]?.g;
+  const ordre = g ? [g, ...nivs.filter((k) => k !== g)] : nivs;
+  const k = dispo ? ordre.find((x) => dispo.has(x)) : null;
+  return k ? url(k) : marque;
+}
+
+/** « ? » stylé (fond blanc) pour une rangée de la liste sans aucune photo. */
+export const PHOTO_VIDE = '<span class="photo-q" role="img" aria-label="Aucune photo">?</span>';
+
 /** Adresse de la photo à afficher : photo pro approuvée, sinon la photo de la fiche, sinon l'image héritée, sinon ''. */
 export function photoDe(a) {
   if (a?.id && pro.has(a.id)) return pro.get(a.id);
