@@ -7,7 +7,7 @@
 import * as S from './store.js';
 import { $, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, aujourdhui, nomBanniere, brancherSelecteurProduit } from './ui.js';
 import { parCodeBarres, actualiserArticle, MAGASINS_EC } from './epiceries.js';
-import { analyserFormat, analyserOffre, formatLisible, gtinVariantes } from './normalise.js';
+import { analyserFormat, analyserOffre, formatLisible, gtinVariantes, infoUnite } from './normalise.js';
 
 // Bases ouvertes interrogées dans l'ordre (aliments → beauté/pharmacie → autres produits).
 const BASES = [
@@ -29,6 +29,36 @@ function formatOFF(p) {
   const q = Number(p?.product_quantity), u = String(p?.product_quantity_unit || '').toLowerCase();
   if (q > 0 && /^(g|kg|ml|cl|l)$/.test(u)) return formatLisible(`${q} ${u}`);
   return texte;
+}
+
+// Unités offertes dans le menu « Format » (toutes reconnues par le normalisateur de prix),
+// suivies des unités créées par Chris (S.get().unitesPerso).
+const UNITES_FORMAT = ['g', 'kg', 'mL', 'L', 'lb', 'oz', 'unités', 'rouleaux', 'sachets', 'capsules', 'œufs', 'douzaine'];
+const NOUVELLE_UNITE = '__nouvelle__';
+function unitesDisponibles() {
+  const perso = (S.get().unitesPerso || []).filter((u) => !UNITES_FORMAT.some((b) => b.toLowerCase() === u.toLowerCase()));
+  return [...UNITES_FORMAT, ...perso];
+}
+
+/** « 454 g » → { qte: '454', unite: 'g' } ; « 12 x 355 ml » → { qte: '12 x 355', unite: 'mL' }. Illisible → tout dans qte. */
+function separerFormat(txt) {
+  const s = String(txt || '').trim();
+  const m = s.match(/^(\d[\d.,\s]*(?:\s*[x×]\s*\d[\d.,]*)?)\s*([^\d\s].*)$/i);
+  if (!m) return { qte: s, unite: '' };
+  const brute = m[2].trim();
+  const connue = unitesDisponibles().find((u) => u.toLowerCase() === brute.toLowerCase());
+  return { qte: m[1].trim(), unite: connue || brute };
+}
+
+/** Raison de douter d'une nouvelle unité (ou '' si elle a l'air correcte). */
+function douteUnite(nom) {
+  if (/\d/.test(nom)) return 'contient des chiffres (le nombre va dans la case de gauche)';
+  if (/[^a-zà-ÿœ.\s'’-]/i.test(nom)) return 'contient des symboles inhabituels';
+  if (nom.length > 20) return 'est très long pour une unité';
+  if (nom.replace(/[.\s]/g, '').length < 2) return 'est très court';
+  const info = infoUnite(nom);
+  if (info) return `est déjà connue du calcul des prix (même chose que ${info.base === 'kg' ? 'g / kg' : info.base === 'l' ? 'mL / L' : 'unités'})`;
+  return '';
 }
 
 /** Ce qu'Open Food Facts nous dit en plus : produit du Québec, bio, allergènes. */
@@ -124,7 +154,7 @@ export function lireCode(titre = 'Scanner un code-barres') {
       quandFermee(() => fin(null));
       try {
         const stop = await demarrerCamera($('#video', c), traiter);
-        if (fini) stop(); else { arret = stop; $('#etatScan', c).textContent = 'Vise le code-barres du produit.'; }
+        if (fini) stop(); else { arret = stop; $('#etatScan', c).textContent = ''; }
       } catch {
         $('#etatScan', c).textContent = 'Caméra indisponible : tape le code sous l\'image.';
       }
@@ -143,7 +173,7 @@ export function ouvrirScan(surArticle, opts = {}) {
     ${opts.inventaire ? '<p class="doux" style="margin-top:0">Fais le tour de tes produits : rien n\'est ajouté à ta liste d\'épicerie. Pour un produit inconnu, choisis sa fiche (▾) ou garde le nom proposé pour en créer une.</p>' : ''}
     <video class="scan" id="video" playsinline muted></video>
     <p class="doux" id="etatScan">Démarrage de la caméra…</p>
-    <label class="rang doux"><input type="checkbox" id="rafale" style="width:auto" ${opts.inventaire ? 'checked' : ''}> Mode rafale (scanner plusieurs produits d'affilée)</label>
+    <label class="rang" style="justify-content:flex-end;font-size:16px;font-weight:600;margin-top:6px;text-align:right">Mode rafale (scanner plusieurs produits d'affilée) <input type="checkbox" id="rafale" style="width:30px;height:30px;margin:0" ${opts.inventaire ? 'checked' : ''}></label>
     <div class="rang" style="margin-top:8px"><input id="codeManuel" inputmode="numeric" placeholder="ou tape le code (8 à 14 chiffres)"><button class="btn sec" id="okCode">OK</button></div>
     <div id="resultat" style="margin-top:10px"></div>`, async (c) => {
     const etat = $('#etatScan', c);
@@ -160,7 +190,7 @@ export function ouvrirScan(surArticle, opts = {}) {
     quandFermee(() => { arret?.(); arret = null; opts.surFin?.(); });
     try {
       arret = await demarrerCamera($('#video', c), traiter);
-      etat.textContent = 'Vise le code-barres.';
+      etat.textContent = '';
     } catch (err) {
       etat.textContent = 'Caméra indisponible (permission refusée ou navigateur non compatible). Tape le code ou prends une photo.';
     }
@@ -244,8 +274,9 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   const local = e.articles.find((a) => a.codes?.some((c) => variantes.includes(c)));
   if (local && local.id !== cibleId) {
     surArticle(local);
-    zone.innerHTML = `<div class="alerte vert">✓ ${esc(local.nom)} (déjà au catalogue)</div>`;
-    if (libelleOk !== 'Ajouter à la liste' && !enRafale()) setTimeout(fermerModale, 700);
+    // Déjà connu : hors rafale, on ferme tout de suite sans message (le produit est ajouté par surArticle)
+    if (enRafale()) zone.innerHTML = `<div class="alerte vert">✓ ${esc(local.nom)} (déjà au catalogue)</div>`;
+    else if (zone.isConnected) fermerModale();
     return;
   }
   zone.innerHTML = `<p class="doux">Recherche du produit ${esc(code)}${code.length === 14 ? ' (code de caisse, je cherche aussi le produit à l\'unité)' : ''}…</p>`;
@@ -257,6 +288,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   const nomPropose = p ? (p.product_name_fr || p.product_name || '') : (ecp?.name || '');
   const fmt = formatOFF(p) || (ecp?.size ? formatLisible(ecp.size) : '');
   const details = detailsOFF(p);
+  const fmtSep = separerFormat(fmt);
   // Rayon proposé (deviné, ou celui choisi à la main sur la fiche visée) ; modifiable dans le formulaire
   const cible = cibleId ? S.get().articles.find((x) => x.id === cibleId) : null;
   let rayonId = cible?.rayonManuel ? cible.rayonId : p ? devinerRayon(p.categories_tags || []) : (cible?.rayonId || rayonParDefaut());
@@ -268,10 +300,12 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
           ${resumeDetails(details)}
           ${image ? `<img src="${esc(image)}" alt="" style="display:block;max-height:160px;max-width:100%;margin:0 auto 8px;border-radius:8px;background:#fff">` : ''}`
         : `<div class="alerte ambre">Produit inconnu dans les bases ouvertes (code ${esc(code)}). Fréquent pour les produits Kirkland/Costco. Tape le nom ou prends une photo : le code sera retenu pour la prochaine fois.</div>`}
-    <div class="champ"><label>Nom (en français, à ta façon)</label><input id="sNom" value="${esc(nomPropose)}">
+    <div class="champ"><label>Nom (en français, à ta façon)</label><input id="sNom" value="${esc(nomPropose)}" placeholder="[Texte]">
       ${cibleId ? '' : '<button type="button" class="btn sec" id="sChoix" style="width:100%;margin-top:6px;text-align:left">📚 C\'est un produit de ma liste ou de mon catalogue ▾</button><div id="sPanneau" hidden></div>'}</div>
-    <div class="rang"><div class="champ grandir"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}"></div>
-      <div class="champ grandir"><label>Format</label><input id="sFormat" value="${esc(fmt)}" placeholder="454 g"></div></div>
+    <div class="champ"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}" placeholder="[Texte]"></div>
+    <div class="champ"><label>Format</label><div class="rang"><input id="sQte" class="grandir" inputmode="decimal" value="${esc(fmtSep.qte)}" placeholder="[Nombre]">
+      <select id="sUnite" class="grandir"></select></div>
+      <div id="sNouvU" hidden><div class="rang" style="margin-top:6px"><input id="sUniteNom" class="grandir" placeholder="[Texte]"><button type="button" class="btn sec" id="sUniteOk">Sauvegarder</button></div></div></div>
     <div class="champ"><label>Rayon</label><button type="button" class="btn sec" id="sRayon" style="width:100%;text-align:left">${esc(texteBoutonRayon(rayonId))}</button><div id="sRayonPanneau" hidden></div></div>
     <div id="sVar"></div>
     <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
@@ -281,13 +315,48 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   // Relier à une fiche existante : le nom choisi rattache le code à cette fiche (pas de doublon)
   // Produit déjà au catalogue : ce code est-il une variante existante ou une nouvelle marque/format ?
   const val = (id) => zone.querySelector(id).value.trim();
+  // Format = nombre + unité (menu). « Créer une unité… » en dernier : sauvegardée pour les prochaines fois.
+  const selU = zone.querySelector('#sUnite');
+  const remplirUnites = (choisie) => {
+    const liste = unitesDisponibles();
+    if (choisie && !liste.some((u) => u.toLowerCase() === choisie.toLowerCase())) liste.push(choisie);
+    selU.innerHTML = `<option value="">[Unité]</option>${liste.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join('')}<option value="${NOUVELLE_UNITE}">➕ Créer une unité…</option>`;
+    selU.value = liste.find((u) => u.toLowerCase() === String(choisie || '').toLowerCase()) || '';
+  };
+  remplirUnites(fmtSep.unite);
+  let uniteAvant = selU.value;
+  selU.addEventListener('change', () => {
+    const boite = zone.querySelector('#sNouvU');
+    if (selU.value === NOUVELLE_UNITE) { boite.hidden = false; zone.querySelector('#sUniteNom').focus(); return; }
+    boite.hidden = true; uniteAvant = selU.value;
+  });
+  zone.querySelector('#sUniteOk').onclick = () => {
+    const nom = val('#sUniteNom').replace(/\s+/g, ' ');
+    if (!nom) { toast('Entre le nom de l\'unité'); return; }
+    const existe = unitesDisponibles().find((u) => u.toLowerCase() === nom.toLowerCase());
+    if (!existe) {
+      const doute = douteUnite(nom);
+      if (doute && !confirm(`« ${nom} » ${doute}.\n\nEst-ce que ça fait vraiment du sens comme unité ?`)) return;
+      S.maj((x) => { x.unitesPerso = [...(x.unitesPerso || []), nom]; });
+      toast(`Unité « ${nom} » sauvegardée`);
+    }
+    remplirUnites(existe || nom);
+    uniteAvant = selU.value;
+    zone.querySelector('#sNouvU').hidden = true;
+    zone.querySelector('#sUniteNom').value = '';
+    majVar();
+  };
+  const lireFormat = () => {
+    const q = val('#sQte'), u = selU.value === NOUVELLE_UNITE ? uniteAvant : selU.value;
+    return q ? `${q} ${u}`.trim() : '';
+  };
   const majVar = () => {
     const boite = zone.querySelector('#sVar');
     const ex = !cibleId && val('#sNom') ? trouverArticle(val('#sNom')) : null;
     if (!ex) { boite.innerHTML = ''; return; }
-    const reco = P.varianteDeLAchat(ex, { codes: variantes, marque: val('#sMarque'), format: val('#sFormat') });
+    const reco = P.varianteDeLAchat(ex, { codes: variantes, marque: val('#sMarque'), format: lireFormat() });
     const coche = reco.nouvelle ? 'nouveau' : reco.variante?.id;
-    const nouveau = [val('#sMarque'), val('#sFormat')].filter(Boolean).join(' · ') || 'à préciser dans la fiche';
+    const nouveau = [val('#sMarque'), lireFormat()].filter(Boolean).join(' · ') || 'à préciser dans la fiche';
     boite.innerHTML = `<div class="carte" style="padding:8px;margin:0 0 8px"><b>« ${esc(ex.nom)} » est déjà au catalogue.</b> <span class="doux">Ce code-barres est :</span>
       ${P.variantesActives(ex).map((v) => `<label class="rang" style="margin-top:4px"><input type="radio" name="sVar" value="${v.id}" ${v.id === coche ? 'checked' : ''} style="width:auto">
         <span>${v === P.variantePref(ex) ? '★ ' : ''}${esc(P.libelleVariante(v))}</span></label>`).join('')}
@@ -300,13 +369,13 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
     choix.textContent = `📚 Fiche choisie : ${nom} ▾`;
     majVar();
   }, { aucun: false });
-  ['#sNom', '#sMarque', '#sFormat'].forEach((id) => zone.querySelector(id).addEventListener('change', majVar));
+  ['#sNom', '#sMarque', '#sQte', '#sUnite'].forEach((id) => zone.querySelector(id).addEventListener('change', majVar));
   majVar();
   brancherRayon(zone.querySelector('#sRayon'), zone.querySelector('#sRayonPanneau'), () => rayonId, (id) => { rayonId = id; rayonChoisi = true; });
   zone.querySelector('#sOk').onclick = () => {
     const nom = zone.querySelector('#sNom').value.trim();
     if (!nom) { toast('Entre un nom'); return; }
-    const format = zone.querySelector('#sFormat').value.trim();
+    const format = lireFormat();
     const f = analyserFormat(format);
     if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, rayonChoisi, p, ec, ecp, variantes, details });
       surArticle(S.get().articles.find((x) => x.id === cibleId)); fermerModale(); return; }
