@@ -104,7 +104,8 @@ function vignette(a, grande = false) {
 function jauge(n, total = 5) {   // S17 : format, marque (fiche d'une seule marque), photo du produit, vrai prix, rayon
   let b = '';
   for (let i = 0; i < total; i++) b += `<i class="${i < n ? 'plein' : ''}"></i>`;
-  return `<span class="jauge" data-n="${n}" title="${n}/${total} données de base">${b}</span><span class="n">${n}/${total}</span>`;
+  const etat = n >= total ? 'complet' : total - n === 1 ? 'presque' : 'bas';   // couleur : vert / jaune / rouge
+  return `<span class="jauge" data-n="${n}" data-etat="${etat}" title="${n}/${total} données de base">${b}</span><span class="n">${n}/${total}</span>`;
 }
 function prios(liste) {
   if (!liste?.length) return '<span class="discret">—</span>';

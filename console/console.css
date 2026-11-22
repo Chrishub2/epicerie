@@ -152,9 +152,10 @@ input.champ { width: 260px; }
 .jauge { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; vertical-align: middle; }
 .jauge i { display: block; width: 3px; background: var(--trait-fort); border-radius: 1px; }
 .jauge i:nth-child(odd) { height: 16px; } .jauge i:nth-child(even) { height: 12px; }
-.jauge[data-n="6"] i { background: var(--ok); }
-.jauge[data-n="5"] i.plein, .jauge[data-n="4"] i.plein { background: var(--etiquette); }
+/* Couleur selon ce qui manque (le total varie : 4 ou 5) : complet = vert, 1 manque = jaune, plus = rouge */
 .jauge i.plein { background: var(--erreur); }
+.jauge[data-etat="presque"] i.plein { background: var(--etiquette); }
+.jauge[data-etat="complet"] i { background: var(--ok); }
 .jauge + .n { margin-left: 6px; font: 11px var(--police-mono); color: var(--texte-3); }
 
 /* Marqueurs de priorité */
