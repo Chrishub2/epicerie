@@ -1124,11 +1124,13 @@ function suivreRecherche(id, quantite) {
 function htmlRechercheBannieres(r, groupes) {
   const av = RB.avancement(r);
   const trouve = RB.ORDRE.filter((b) => av.etats[b] === 'fait').length;
-  const icones = { attente: '⏳', fait: '✓', rien: '—', bloque: '⚠', erreur: '⚠' };
+  // Roue qui tourne : la recherche de cette bannière est en cours (ou attend l'ordinateur)
+  const ROUE = '<i class="rb-roue" aria-hidden="true"></i>';
+  const icones = { attente: ROUE, fait: '✓', rien: '—', bloque: '⚠', erreur: '⚠' };
   const titres = { attente: 'recherche…', fait: 'trouvé', rien: 'rien trouvé', bloque: 'le site demande une vérification', erreur: 'erreur' };
   const silence = !av.fait && Date.now() - Date.parse(r.le) > 80000;
   const chip = (o) => `<span class="rb-chip${o.regulier ? ' r' : ''}">${esc(nomBanniere(o.banniere))} ${esc(argent(o.prix))}${o.regulier ? ' · rabais' : ''}</span>`;
-  return `<div class="rb-titre"><span>Chez tes bannières · ton Chrome</span><span>${av.fait < av.total ? `recherche… ${av.fait} sur ${av.total}` : `${trouve} sur ${av.total}`}</span></div>
+  return `<div class="rb-titre"><span>Chez tes bannières · ton Chrome</span><span>${av.fait < av.total ? `${ROUE} recherche… ${av.fait} sur ${av.total}` : `${trouve} sur ${av.total}`}</span></div>
     <div class="rb-etats">${RB.ORDRE.map((b) => `<span class="rb-e ${av.etats[b]}" title="${esc(titres[av.etats[b]])}">${icones[av.etats[b]]} ${esc(nomBanniere(b))}</span>`).join('')}</div>
     ${silence ? '<div class="rb-note">Ton ordinateur n\'a pas encore répondu : la recherche se fera dès que Chrome y sera ouvert.</div>' : ''}
     ${groupes.map((g, i) => {
