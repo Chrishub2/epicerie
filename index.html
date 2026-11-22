@@ -506,6 +506,14 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .conf-bloc label.conf { display: flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
 .conf-bloc details.conf > summary { font-size: 14px; text-decoration: underline; }
 .conf-bloc details.conf label.conf { margin: 4px 0 0 4px; }
+/* Maquette lecteur v1 : source de chaque champ (du code, auto, à toi) */
+.src { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: rgba(42,111,201,.13); color: #3a7fd6; white-space: nowrap; font-weight: 500; }
+.src.auto { background: rgba(122,90,224,.14); color: #8a6be6; }
+.src.toi { background: var(--gris-fond); color: var(--doux); }
+.legende-src { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--doux); margin-bottom: 8px; }
+.sous-titre { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--doux); margin: 14px 0 6px; }
+.carac-titre { font-size: 12.5px; color: var(--doux, inherit); opacity: .8; text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 2px; }
+#fCaracListe:not(:empty) { margin-bottom: 8px; }
 .carac-rang { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 1.4fr) auto; gap: 8px; align-items: center; padding: 4px 0; }
 .pastille { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--gris-fond);
   color: var(--doux); margin-right: 4px; white-space: nowrap; }

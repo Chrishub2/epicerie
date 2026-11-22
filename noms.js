@@ -104,6 +104,19 @@ export function pertinenceNoms(a, texte) {
 }
 
 /** Ajoute des noms alternatifs : singulier, sans doublon, jamais le nom générique lui-même. Retourne la nouvelle liste. */
+/** Marques connues d'une fiche : sa marque et celles de ses produits vendus (avec leur nom), sans les retirés. */
+export function marquesArticle(a) {
+  return [a?.marque, ...(a?.variantes || []).filter((v) => !v.retiree).flatMap((v) => [v.marque, v.nom])].filter(Boolean);
+}
+/** Recherche par nom de produit OU par marque : « tilda » trouve « Riz basmati blanc ». Texte vide = tout. */
+export function trouveParNomOuMarque(a, texte) {
+  const t = sansAccents(texte).trim();
+  if (!t) return true;
+  return pertinenceNoms(a, texte) > 0 || marquesArticle(a).some((m) => sansAccents(m).includes(t));
+}
+/** Texte de recherche d'une fiche (noms + marques), sans accents : pour filtrer une liste déjà affichée. */
+export const texteRecherche = (a) => sansAccents([...nomsArticle(a).map((x) => x.t), ...marquesArticle(a)].join(' '));
+
 export function ajouterNomsAlt(liste, texte, generique, langue = 'fr') {
   const out = [...(liste || [])];
   const gen = cleNom(generique, langue);

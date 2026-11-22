@@ -4,6 +4,7 @@ import { get } from './store.js';
 import { BANNIERES } from './demo-data.js';
 import { prixEnVigueur } from './rabais.js';
 import { jourQuebec } from './couverture-circulaires.js';
+import { trouveParNomOuMarque } from './noms.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -125,7 +126,7 @@ export function brancherSelecteurProduit(bouton, panneau, surChoix, opts = {}) {
     const surListe = new Set(e.liste.map((l) => l.articleId));
     const tri = (a, b) => a.nom.localeCompare(b.nom, 'fr');
     const t = norm(q.trim());
-    const f = (a) => !t || norm(a.nom).includes(t) || norm(a.marque).includes(t);
+    const f = (a) => trouveParNomOuMarque(a, q.trim());   // par nom de produit ou par marque
     const l1 = e.articles.filter((a) => surListe.has(a.id) && f(a)).sort(tri);
     const l2 = e.articles.filter((a) => !surListe.has(a.id) && f(a)).sort(tri);
     const existe = t && e.articles.some((a) => norm(a.nom) === t);
@@ -142,7 +143,7 @@ export function brancherSelecteurProduit(bouton, panneau, surChoix, opts = {}) {
     if (ouvert) return;
     panneauOuvert = panneau;
     panneau.hidden = false;
-    panneau.innerHTML = `<input class="selFiltre" placeholder="🔎 Chercher ou taper un nouveau nom…" style="margin-top:6px;width:100%"><div class="selRes" style="max-height:45vh;overflow-y:auto"></div>`;
+    panneau.innerHTML = `<input class="selFiltre" placeholder="🔎 Produit ou marque, ou un nouveau nom…" style="margin-top:6px;width:100%"><div class="selRes" style="max-height:45vh;overflow-y:auto"></div>`;
     const inp = panneau.querySelector('.selFiltre'), res = panneau.querySelector('.selRes');
     remplir(res, '');
     inp.oninput = () => remplir(res, inp.value);

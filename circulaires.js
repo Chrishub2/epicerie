@@ -9,6 +9,7 @@
 // =====================================================================
 import { couverture, tableauHtml, jourQuebec } from './couverture-circulaires.js';
 import { raisonLien } from './choix.js';
+import { trouveParNomOuMarque } from './noms.js';
 
 /** Sources de circulaires (même liste que le serveur : supabase/functions/lire-circulaires/rapprochement.js). */
 export const SOURCES_CIRC = [
@@ -546,11 +547,10 @@ export function monterCirculaires(conteneur, opts) {
   function ouvrirRecherche(zone, choisir) {
     const panneau = zone.querySelector('[data-recherche]');
     panneau.hidden = false;
-    panneau.innerHTML = '<input type="search" placeholder="🔎 Chercher dans ton catalogue" aria-label="Chercher un produit"><div class="c-choix"></div>';
+    panneau.innerHTML = '<input type="search" placeholder="🔎 Produit ou marque" aria-label="Chercher un produit par nom ou par marque"><div class="c-choix"></div>';
     const inp = panneau.querySelector('input'), res = panneau.querySelector('.c-choix');
     const remplir = () => {
-      const t = sansAccents(inp.value.trim());
-      const l = articles().filter((a) => !t || sansAccents(`${a.nom} ${a.marque || ''}`).includes(t))
+      const l = articles().filter((a) => trouveParNomOuMarque(a, inp.value.trim()))
         .sort((a, b) => a.nom.localeCompare(b.nom, 'fr')).slice(0, 40);
       res.innerHTML = l.map((a) => `<button type="button" class="c-btn" data-a="${esc(a.id)}">${esc([a.nom, a.marque, a.format].filter(Boolean).join(' · '))}</button>`).join('')
         || '<p class="c-doux">Aucun produit. Crée-le d\'abord dans le catalogue.</p>';

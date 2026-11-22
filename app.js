@@ -1474,16 +1474,19 @@ function htmlMeilleursChoix(a) {
         : `<div class="mc-quoi doux">${esc(r.vide)}</div>`}
     </div>`).join('')}</div>`;
 }
-function htmlCaracteristiques(a, nouvel = '') {
+// Maquette fiche v107 : les caractéristiques ajoutées sont toujours visibles ; le repliable sert seulement à en ajouter.
+// Aucune n'est obligatoire et une absente n'est jamais « à compléter » (spec v1.3, S8 et S15).
+function htmlCaracListe(a) {
   const liste = caracteristiques(a);
+  return liste.length ? `<div class="carac-titre">Caractéristiques</div>${liste.map((c) => `<div class="carac-rang"><span class="doux">${esc(c.nom)}</span>
+      <select data-carac="${c.k}" aria-label="${esc(c.nom)}">${attributDe(c.k).vals.map((v) => `<option ${v === c.valeur ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+      <button class="icone" data-carac-retirer="${c.k}" title="Retirer ${esc(c.nom)}" aria-label="Retirer ${esc(c.nom)}">✕</button></div>`).join('')}` : '';
+}
+function htmlCaracAjout(a, nouvel = '') {
   const libres = DICO_ATTRIBUTS.filter((d) => !a.caracteristiques?.[d.k]);
   const nouv = attributDe(nouvel);
-  return `${liste.length ? liste.map((c) => `<div class="carac-rang"><span class="doux">${esc(c.nom)}</span>
-      <select data-carac="${c.k}" aria-label="${esc(c.nom)}">${attributDe(c.k).vals.map((v) => `<option ${v === c.valeur ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
-      <button class="icone" data-carac-retirer="${c.k}" title="Retirer ${esc(c.nom)}" aria-label="Retirer ${esc(c.nom)}">✕</button></div>`).join('')
-    : '<p class="doux" style="margin:4px 0">Aucune : ajoute seulement ce qui distingue ce produit.</p>'}
-    ${libres.length ? `<div class="rang envelopper"><select id="caracAjout" aria-label="Ajouter une caractéristique"><option value="">+ Ajouter une caractéristique…</option>${libres.map((d) => `<option value="${d.k}" ${d.k === nouvel ? 'selected' : ''}>${esc(d.nom)}</option>`).join('')}</select>
-      ${nouv ? `<select id="caracValeur" aria-label="Valeur de ${esc(nouv.nom)}"><option value="">Choisir la valeur…</option>${nouv.vals.map((v) => `<option>${esc(v)}</option>`).join('')}</select>` : ''}</div>` : ''}`;
+  return libres.length ? `<div class="rang envelopper"><select id="caracAjout" aria-label="Ajouter une caractéristique"><option value="">Choisir…</option>${libres.map((d) => `<option value="${d.k}" ${d.k === nouvel ? 'selected' : ''}>${esc(d.nom)}</option>`).join('')}</select>
+      ${nouv ? `<select id="caracValeur" aria-label="Valeur de ${esc(nouv.nom)}"><option value="">Choisir la valeur…</option>${nouv.vals.map((v) => `<option>${esc(v)}</option>`).join('')}</select>` : ''}</div>` : '';
 }
 function brancherCaracteristiques(c, articleId) {
   const boite = $('#fCarac', c);
@@ -1491,8 +1494,10 @@ function brancherCaracteristiques(c, articleId) {
   const article = () => S.get().articles.find((x) => x.id === articleId);
   const redessiner = (nouvel = '') => {
     const a = article(); if (!a) return;
-    $('#fCaracCorps', c).innerHTML = htmlCaracteristiques(a, nouvel);
-    $('#fCaracNb', c).textContent = caracteristiques(a).length;
+    $('#fCaracListe', c).innerHTML = htmlCaracListe(a);
+    const ajout = htmlCaracAjout(a, nouvel);
+    $('#fCaracCorps', c).innerHTML = ajout;
+    $('#fCaracAjouter', c).hidden = !ajout;
   };
   const changer = (fn) => S.maj((x) => { const ar = x.articles.find((i) => i.id === articleId); if (ar) fn(ar); });
   boite.addEventListener('change', (ev) => {
@@ -1645,8 +1650,9 @@ export function ficheArticle(articleId, ligneId) {
       ${Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement).map(([k, b]) => `<option value="${k}" ${a.exclusif === k ? 'selected' : ''}>${esc(b.nom)}</option>`).join('')}</select></div>
     ${(() => { const r = remplacementDe(a, e.utilisateur); return `<div class="champ"><label for="fRempl">Remplacement accepté <span class="doux" id="fRemplDefaut" ${r === REMPLACEMENT_DEFAUT ? '' : 'hidden'}>(défaut)</span> <span class="pastille">pour toi seulement</span></label>
       <select id="fRempl">${REMPLACEMENTS.map((x) => `<option value="${x.k}" ${x.k === r ? 'selected' : ''}>${esc(x.nom)}</option>`).join('')}</select></div>`; })()}
-    <details id="fCarac" class="carac"><summary class="btn sec" style="display:inline-block">Caractéristiques (<span id="fCaracNb">${caracteristiques(a).length}</span>)</summary>
-      <div id="fCaracCorps" style="margin-top:8px">${htmlCaracteristiques(a)}</div></details>
+    <div id="fCarac" class="carac"><div id="fCaracListe">${htmlCaracListe(a)}</div>
+      ${(() => { const ajout = htmlCaracAjout(a); return `<details id="fCaracAjouter" ${ajout ? '' : 'hidden'}><summary class="btn sec" style="display:inline-block">+ Ajouter une caractéristique</summary>
+      <div id="fCaracCorps" style="margin-top:8px">${ajout}</div></details>`; })()}</div>
     ${l ? `
     <div class="champ"><label>Note</label><input id="fNote" value="${esc(l.note || '')}" placeholder="ex. sans lactose, gros format"></div>` : ''}
     ${l ? `<div class="doux">Ajouté à la liste par <b>${esc(l.ajoutePar || '?')}</b>${l.cree ? ` le ${esc(new Date(l.cree).toLocaleDateString('fr-CA'))}` : ''}</div>` : ''}

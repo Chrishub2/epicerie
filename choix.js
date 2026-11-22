@@ -70,7 +70,7 @@ export const DICO_ATTRIBUTS = [
   { k: 'calibre', nom: 'Calibre', vals: ['petit', 'moyen', 'gros', 'extra-gros'] },
   { k: 'intensite', nom: 'Intensité', vals: ['doux', 'moyen', 'fort', 'extra-fort'] },
   { k: 'coupe', nom: 'Coupe', vals: ['maigre', 'mi-maigre', 'extra-maigre'] },
-  { k: 'teneur_mg', nom: 'Matières grasses', vals: ['0 %', '1 %', '2 %', '3,25 %', '10 %', '15 %', '35 %'] },
+  // Spec v1.3 (S15) : pas de « Matières grasses » — la teneur en gras change la comparaison, c'est donc la sorte du lait, pas une caractéristique
   { k: 'sans_gluten', nom: 'Sans gluten', vals: OUI_NON },
   { k: 'sans_lactose', nom: 'Sans lactose', vals: OUI_NON },
   { k: 'grade', nom: 'Grade', vals: ['Canada Fancy', 'Canada no 1', 'catégorie A'] },
@@ -89,6 +89,24 @@ export function retirerCaracteristique(article, k) {
   const c = { ...article.caracteristiques }; delete c[k];
   if (Object.keys(c).length) article.caracteristiques = c; else delete article.caracteristiques;
 }
+/**
+ * Maquette lecteur v1 : caractéristiques lisibles avec le code-barres (Open Food Facts).
+ * p = produit OFF (origins_tags, labels_tags), quebec = produit du Québec déjà détecté.
+ * Rend [[clé, valeur], …] ; seulement ce qui est clairement écrit (jamais « non » deviné).
+ */
+export function caracteristiquesDuCode(p, quebec = false) {
+  if (!p) return [];
+  const simple = (l) => (l || []).join(' ').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const origines = simple(p.origins_tags), labels = simple(p.labels_tags);
+  const out = [];
+  if (quebec) out.push(['provenance', 'Québec']);
+  else if (/canada/.test(origines)) out.push(['provenance', 'Canada']);
+  else if (origines.trim()) out.push(['provenance', 'importé']);
+  if (/gluten-free|no-gluten|sans-gluten/.test(labels)) out.push(['sans_gluten', 'oui']);
+  if (/lactose-free|no-lactose|sans-lactose/.test(labels)) out.push(['sans_lactose', 'oui']);
+  return out;
+}
+
 /** Caractéristiques valides seulement (une valeur hors dictionnaire est ignorée). */
 export function caracteristiques(article) {
   return Object.entries(article?.caracteristiques || {})

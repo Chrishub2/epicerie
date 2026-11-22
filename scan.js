@@ -15,7 +15,7 @@ const BASES = [
   ['Open Beauty Facts', 'https://world.openbeautyfacts.org'],
   ['Open Products Facts', 'https://world.openproductsfacts.org'],
 ];
-const CHAMPS = 'product_name_fr,product_name,brands,quantity,product_quantity,product_quantity_unit,categories_tags,nutriscore_grade,'
+const CHAMPS = 'product_name_fr,product_name,product_name_en,brands,quantity,product_quantity,product_quantity_unit,categories_tags,nutriscore_grade,'
   + 'labels_tags,origins_tags,manufacturing_places,allergens_tags,image_front_url,image_url';
 
 const ALLERGENES_FR = { milk: 'lait', gluten: 'gluten', eggs: 'œufs', nuts: 'noix', peanuts: 'arachides', soybeans: 'soja', fish: 'poisson',
@@ -87,6 +87,14 @@ function appliquerDetails(ar, d) {
 }
 import { assurerArticle, ajouterALaListe, rayonParDefaut, trouverArticle, brancherRayon, texteBoutonRayon } from './app.js';
 import * as P from './produits.js';
+import { DICO_ATTRIBUTS, attributDe, definirCaracteristique, caracteristiquesDuCode, REMPLACEMENTS, REMPLACEMENT_DEFAUT, definirRemplacement } from './choix.js';
+import { ajouterNomsAlt } from './noms.js';
+import { BANNIERES } from './demo-data.js';
+
+// Maquette lecteur v1 : chaque champ dit d'où vient sa valeur
+const SOURCE = { code: 'du code', auto: 'auto', toi: 'à toi' };
+const TITRE_SOURCE = { code: 'Lu en ligne avec le code-barres', auto: 'Déduit par l’app', toi: 'Rien ne le remplit : à toi' };
+const src = (k) => `<span class="src ${k}" title="${TITRE_SOURCE[k]}">${SOURCE[k]}</span>`;
 
 const ZXING_URL = 'https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
 let arret = null;      // fonction qui coupe la caméra
@@ -303,14 +311,16 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
           ${resumeDetails(details)}
           ${image ? `<img src="${esc(image)}" alt="" style="display:block;max-height:160px;max-width:100%;margin:0 auto 8px;border-radius:8px;background:#fff">` : ''}`
         : `<div class="alerte ambre">Produit inconnu dans les bases ouvertes (code ${esc(code)}). Fréquent pour les produits Kirkland/Costco. Tape le nom ou prends une photo : le code sera retenu pour la prochaine fois.</div>`}
-    <div class="champ"><label>Nom (en français, à ta façon)</label><input id="sNom" value="${esc(nomPropose)}" placeholder="[Texte]">
+    ${cibleId ? '' : `<div class="legende-src">Source de chaque champ : ${src('code')} ${src('auto')} ${src('toi')}</div>`}
+    <div class="champ"><label>Nom (en français, à ta façon) ${cibleId ? '' : src(nomPropose ? 'code' : 'toi')}</label><input id="sNom" value="${esc(nomPropose)}" placeholder="[Texte]">
       ${cibleId ? '' : '<button type="button" class="btn sec" id="sChoix" style="width:100%;margin-top:6px;text-align:left">📚 C\'est un produit de ma liste ou de mon catalogue ▾</button><div id="sPanneau" hidden></div>'}</div>
-    <div class="champ"><label>Marque</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}" placeholder="[Texte]"></div>
-    <div class="champ"><label>Format</label><div class="rang"><input id="sQte" class="grandir" inputmode="decimal" value="${esc(fmtSep.qte)}" placeholder="[Nombre]">
+    <div class="champ"><label>Marque ${cibleId ? '' : src(p?.brands || ecp?.brand ? 'code' : 'toi')}</label><input id="sMarque" value="${esc(p?.brands?.split(',')[0] || ecp?.brand || '')}" placeholder="[Texte]"></div>
+    <div class="champ"><label>Format ${cibleId ? '' : src(fmt ? 'code' : 'toi')}</label><div class="rang"><input id="sQte" class="grandir" inputmode="decimal" value="${esc(fmtSep.qte)}" placeholder="[Nombre]">
       <select id="sUnite" class="grandir"></select></div>
       <div id="sNouvU" hidden><div class="rang" style="margin-top:6px"><input id="sUniteNom" class="grandir" placeholder="[Texte]"><button type="button" class="btn sec" id="sUniteOk">Sauvegarder</button></div></div></div>
-    <div class="champ"><label>Rayon</label><button type="button" class="btn sec" id="sRayon" style="width:100%;text-align:left">${esc(texteBoutonRayon(rayonId))}</button><div id="sRayonPanneau" hidden></div></div>
+    <div class="champ"><label>Rayon ${cibleId ? '' : src('auto')}</label><button type="button" class="btn sec" id="sRayon" style="width:100%;text-align:left">${esc(texteBoutonRayon(rayonId))}</button><div id="sRayonPanneau" hidden></div></div>
     <div id="sVar"></div>
+    ${cibleId ? '' : champsFiche({ p, details, fmt, nomPropose })}
     <p class="doux">${cibleId ? 'Vérifie au besoin, puis remplis la fiche : nom, marque, format, catégorie, photo et prix seront mis à jour.' : 'Si le nom correspond à un article de ton catalogue, le code y sera simplement rattaché.'}</p>
     ${image ? '' : '<div id="sPhotos" class="champ"><label>Photo du produit</label><p class="doux">Recherche de photos en ligne…</p></div>'}
     <div id="sMaPhoto" class="champ" hidden><label>Ta photo (jointe à la fiche à la sauvegarde)</label>
@@ -380,6 +390,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   ['#sNom', '#sMarque', '#sQte', '#sUnite'].forEach((id) => zone.querySelector(id).addEventListener('change', majVar));
   majVar();
   brancherRayon(zone.querySelector('#sRayon'), zone.querySelector('#sRayonPanneau'), () => rayonId, (id) => { rayonId = id; rayonChoisi = true; });
+  const fiche = cibleId ? null : brancherChampsFiche(zone, { p, details, lireFormat, val });
   // La photo prise dans le formulaire est rattachée à la fiche (comme « 📷 Photo du produit » le faisait)
   const joindrePhoto = (articleId) => {
     if (!maPhotoId) return;
@@ -393,6 +404,9 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
     if (cibleId) { remplirFiche(cibleId, { nom, format, f, marque: zone.querySelector('#sMarque').value.trim(), image, rayonId, rayonChoisi, p, ec, ecp, variantes, details });
       joindrePhoto(cibleId);
       surArticle(S.get().articles.find((x) => x.id === cibleId)); fermerModale(); return; }
+    const prixVu = fiche?.lirePrix();
+    if (prixVu?.erreur) { toast(prixVu.erreur); return; }
+    const existait = !!trouverArticle(nom);
     const choixVar = zone.querySelector('[name="sVar"]:checked')?.value || null;
     const a = assurerArticle(nom, { rayonId, ...(rayonChoisi ? { rayonManuel: true } : {}), format, uniteRef: f?.base || 'unite', marque: zone.querySelector('#sMarque').value.trim(),
       nutriscore: p?.nutriscore_grade?.length === 1 ? p.nutriscore_grade : null, imageUrl: image });
@@ -422,6 +436,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
         appliquerDetails(v, details);
         appliquerDetails(ar, details);
         lierLiens(ar);
+        fiche?.appliquer(ar, x, !existait, prixVu, v.id);
       });
       if (ecp) actualiserArticle(a.id, { force: true });
       joindrePhoto(a.id);
@@ -441,6 +456,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
       if (!ar.marque && marque) ar.marque = marque;
       if (/kirkland/i.test(`${ar.marque || ''} ${ar.nom}`) && !ar.exclusif) ar.exclusif = 'costco'; // Kirkland = Costco seulement
       lierLiens(ar);
+      fiche?.appliquer(ar, x, !existait, prixVu, null);
     });
     if (ecp) actualiserArticle(a.id, { force: true });
     joindrePhoto(a.id);
@@ -474,6 +490,105 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   if (!image) {
     proposerPhotos(code, nomPropose, zone, (url) => { image = url; });
   }
+}
+
+// ---------------------------------------------------------------------
+// Maquette lecteur v1 : tous les champs de la fiche dans le formulaire « nouveau produit »
+// (comparer au, noms, caractéristiques, local, bannière, remplacement, prix vu).
+// Fiche nouvelle : tout est appliqué. Fiche existante : on complète seulement ce qui manque.
+// ---------------------------------------------------------------------
+function champsFiche({ p, details, fmt, nomPropose }) {
+  const e = S.get();
+  const f = analyserFormat(fmt);
+  const nomEn = p?.product_name_en || '';
+  const kirkland = /kirkland/i.test(`${p?.brands || ''} ${nomPropose}`);
+  const bans = Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement);
+  const mags = (e.magasins || []).filter((m) => m.actif !== false);
+  const nutri = p?.nutriscore_grade?.length === 1 ? p.nutriscore_grade.toUpperCase() : '';
+  return `
+    <h3 class="sous-titre">Comparaison et recherche</h3>
+    <div class="rang">
+      <div class="champ grandir"><label for="sComp">Comparer au ${src(f ? 'auto' : 'toi')}</label><select id="sComp">
+        ${[['kg', '$/kg'], ['l', '$/L'], ['unite', '$/unité']].map(([k, t]) => `<option value="${k}" ${(f?.base || 'unite') === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="champ grandir"><label for="sLocal">Local 🍁 ${src(details.quebec ? 'code' : 'auto')}</label><select id="sLocal"><option value="1" ${details.quebec ? 'selected' : ''}>Oui</option><option value="0" ${details.quebec ? '' : 'selected'}>Non</option></select></div>
+    </div>
+    <div class="rang">
+      <div class="champ grandir"><label for="sNomEn">Nom anglais ${src(nomEn ? 'code' : 'toi')}</label><input id="sNomEn" value="${esc(nomEn)}" placeholder="ex. milk" lang="en"></div>
+      <div class="champ grandir"><label for="sAlias">Nom alternatif ${src('toi')}</label><input id="sAlias" placeholder="ex. lait 2 %"></div>
+    </div>
+    ${details.bio ? '<div class="alerte vert" id="sBio">🌱 Produit biologique : le bio est un produit à part (jamais comparé au non bio). <button type="button" class="btn sec" id="sBioNom" style="padding:4px 9px;margin-top:6px">Nommer « … biologique »</button></div>' : ''}
+    <h3 class="sous-titre">Caractéristiques</h3>
+    <div id="sCarac" class="carac"></div>
+    <details id="sCaracAjouter"><summary class="btn sec" style="display:inline-block">+ Ajouter une caractéristique</summary><div id="sCaracCorps" style="margin-top:8px"></div></details>
+    ${details.allergenes.length || nutri ? `<p class="doux" style="margin:6px 0 0">Lu aussi avec le code : ${[details.allergenes.length && `allergènes ${details.allergenes.join(', ')}`, nutri && `Nutri-Score ${nutri}`].filter(Boolean).map(esc).join(' · ')}.</p>` : ''}
+    <h3 class="sous-titre">Pour toi</h3>
+    <div class="rang">
+      <div class="champ grandir"><label for="sExclusif">Vendu seulement chez ${kirkland ? src('auto') : ''}</label><select id="sExclusif"><option value="">— Toutes les bannières —</option>
+        ${bans.map(([k, b]) => `<option value="${k}" ${kirkland && k === 'costco' ? 'selected' : ''}>${esc(b.nom)}</option>`).join('')}</select></div>
+      <div class="champ grandir"><label for="sRempl">Remplacement accepté <span class="pastille">pour toi seulement</span></label><select id="sRempl">
+        ${REMPLACEMENTS.map((x) => `<option value="${x.k}" ${x.k === REMPLACEMENT_DEFAUT ? 'selected' : ''}>${esc(x.nom)}</option>`).join('')}</select></div>
+    </div>
+    <details id="sPrixVu" class="carte" style="margin:10px 0 0;padding:8px 10px"><summary><b>💲 Prix vu</b> <span class="doux">(tu es au magasin ?)</span></summary>
+      <div class="rang" style="margin-top:8px"><div class="champ grandir"><label for="sPBan">Magasin</label><select id="sPBan">${mags.map((m) => `<option value="${esc(m.banniere)}" data-mag="${esc(m.id)}">${esc(m.nom)}</option>`).join('')}</select></div>
+        <div class="champ grandir"><label for="sPOffre">Prix affiché</label><input id="sPOffre" placeholder="4,99 $ · 2/5 $"></div></div>
+      <div class="rang"><div class="champ grandir"><label for="sPType">Type</label><select id="sPType"><option value="regulier">Prix régulier</option><option value="circulaire">Circulaire / rabais</option></select></div>
+        <div class="champ grandir"><label for="sPFin">Fin du rabais</label><input id="sPFin" type="date"></div></div>
+    </details>`;
+}
+
+function brancherChampsFiche(zone, { p, details, lireFormat, val }) {
+  const q = (id) => zone.querySelector(id);
+  const caracs = new Map(caracteristiquesDuCode(p, details.quebec));
+  let compTouche = false;
+  q('#sComp').addEventListener('change', () => { compTouche = true; });
+  // « Comparer au » suit le format tant que tu n'y as pas touché
+  const suivreFormat = () => { if (compTouche) return; const f = analyserFormat(lireFormat()); if (f) q('#sComp').value = f.base; };
+  ['#sQte', '#sUnite'].forEach((id) => q(id).addEventListener('change', suivreFormat));
+  q('#sBioNom')?.addEventListener('click', () => {
+    const n = q('#sNom'); if (n.value.trim() && !/biologique/i.test(n.value)) n.value = `${n.value.trim()} biologique`;
+    n.dispatchEvent(new Event('change'));
+  });
+  const rendre = (nouvel = '') => {
+    q('#sCarac').innerHTML = caracs.size ? [...caracs].map(([k, v]) => { const d = attributDe(k);
+      return `<div class="carac-rang"><span class="doux">${esc(d.nom)}</span><select data-scarac="${k}" aria-label="${esc(d.nom)}">${d.vals.map((x) => `<option ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <button type="button" class="icone" data-scarac-retirer="${k}" aria-label="Retirer ${esc(d.nom)}">✕</button></div>`; }).join('')
+      : '<p class="doux" style="margin:2px 0">Aucune lue avec le code. Ce n’est pas un problème : ajoute seulement ce qui distingue le produit.</p>';
+    const libres = DICO_ATTRIBUTS.filter((d) => !caracs.has(d.k)), nouv = attributDe(nouvel);
+    q('#sCaracAjouter').hidden = !libres.length;
+    q('#sCaracCorps').innerHTML = `<div class="rang envelopper"><select id="sCaracAjout" aria-label="Ajouter une caractéristique"><option value="">Choisir…</option>${libres.map((d) => `<option value="${d.k}" ${d.k === nouvel ? 'selected' : ''}>${esc(d.nom)}</option>`).join('')}</select>
+      ${nouv ? `<select id="sCaracValeur" aria-label="Valeur de ${esc(nouv.nom)}"><option value="">Choisir la valeur…</option>${nouv.vals.map((x) => `<option>${esc(x)}</option>`).join('')}</select>` : ''}</div>`;
+  };
+  rendre();
+  // Écouteurs sur les éléments du formulaire (recréés à chaque scan), jamais sur `zone` (réutilisée en rafale)
+  q('#sCarac').addEventListener('change', (ev) => { const t = ev.target; if (t.dataset.scarac) caracs.set(t.dataset.scarac, t.value); });
+  q('#sCarac').addEventListener('click', (ev) => { const b = ev.target.closest('[data-scarac-retirer]'); if (b) { caracs.delete(b.dataset.scaracRetirer); rendre(); } });
+  q('#sCaracCorps').addEventListener('change', (ev) => {
+    const t = ev.target;
+    if (t.id === 'sCaracAjout') rendre(t.value);
+    else if (t.id === 'sCaracValeur' && t.value) { caracs.set(q('#sCaracAjout').value, t.value); rendre(); }
+  });
+  return {
+    /** Prix vu : null si rien tapé ; { erreur } si illisible. */
+    lirePrix() {
+      const offre = val('#sPOffre');
+      if (!offre) return null;
+      if (!analyserOffre(offre)) return { erreur: 'Prix vu illisible : ex. 4,99 $, 2/5 $ ou 1,99 $/lb' };
+      const opt = q('#sPBan').selectedOptions[0];
+      return { offre, banniere: q('#sPBan').value, magasinId: opt?.dataset.mag, type: q('#sPType').value, fin: q('#sPFin').value || null };
+    },
+    /** Applique les champs à la fiche (appelé dans S.maj). neuve = fiche créée par ce scan. */
+    appliquer(ar, x, neuve, prixVu, varianteId) {
+      if (neuve) ar.uniteRef = q('#sComp').value;
+      if (q('#sLocal').value === '1') ar.local = true; else if (neuve) ar.local = false;
+      const nomEn = val('#sNomEn'); if (nomEn && (neuve || !ar.nomEn)) ar.nomEn = nomEn;
+      const alias = val('#sAlias'); if (alias) ar.nomsAlt = ajouterNomsAlt(ar.nomsAlt, alias, ar.nom);
+      for (const [k, v] of caracs) if (neuve || !ar.caracteristiques?.[k]) definirCaracteristique(ar, k, v);
+      const excl = q('#sExclusif').value; if (excl && (neuve || !ar.exclusif)) ar.exclusif = excl;
+      const rempl = q('#sRempl').value; if (neuve || rempl !== REMPLACEMENT_DEFAUT) definirRemplacement(ar, x.utilisateur, rempl);
+      if (prixVu) x.prix.push({ id: S.uid('p'), articleId: ar.id, ...(varianteId ? { varianteId } : {}), banniere: prixVu.banniere, magasinId: prixVu.magasinId,
+        offre: prixVu.offre, format: lireFormat() || ar.format, type: prixVu.type, fin: prixVu.fin, source: 'manuel', observeLe: new Date().toISOString().slice(0, 10) });
+    },
+  };
 }
 
 /**

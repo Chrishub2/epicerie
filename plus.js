@@ -12,6 +12,7 @@ import { analyserOffre, analyserFormat } from './normalise.js';
 import { ajouterTache } from './attente.js';
 import * as Sync from './sync.js';
 import * as P from './produits.js';
+import { texteRecherche, sansAccents as sansAccentsNom } from './noms.js';
 import { monterCirculaires } from './circulaires.js';
 import { natureLigne, etatLigne, candidatsLignes, choixEvident, ressemblanceMutuelle, lignesIdentiques } from './lignes-recu.js';
 import { gtinVariantes, formatLisible } from './normalise.js';
@@ -164,12 +165,12 @@ function ouvrirFusion(apres) {
       <div class="rang" style="margin-top:6px"><button class="btn" data-paire="${i}">🔗 Fusionner…</button><button class="btn sec" data-pasdoublon="${i}">Pas un doublon</button></div></div>`).join('')}`
       : '<p class="doux">Aucun doublon évident repéré. Tu peux en choisir toi-même ci-dessous.</p>'}
     <h3>Choisir moi-même</h3>
-    <input id="fuFiltre" placeholder="🔎 Chercher un produit…" style="width:100%">
-    <div id="fuListe" style="max-height:40vh;overflow-y:auto;margin-top:6px">${tri.map((a) => `<label class="item" data-nomf="${esc(a.nom.toLowerCase())}" style="cursor:pointer">
+    <input id="fuFiltre" placeholder="🔎 Produit ou marque…" style="width:100%">
+    <div id="fuListe" style="max-height:40vh;overflow-y:auto;margin-top:6px">${tri.map((a) => `<label class="item" data-nomf="${esc(texteRecherche(a))}" style="cursor:pointer">
       <input type="checkbox" data-fu="${a.id}" style="width:auto"><span class="grandir">${esc(a.nom)} <span class="doux">${esc([a.marque, a.format].filter(Boolean).join(' · '))}</span></span></label>`).join('')}</div>
     <button class="btn" id="fuSuite" style="width:100%;margin-top:8px" disabled>Fusionner la sélection…</button>`, (c) => {
     const cases = () => $$('[data-fu]:checked', c).map((x) => x.dataset.fu);
-    $('#fuFiltre', c).oninput = (ev) => { const q = ev.target.value.toLowerCase().trim(); $$('[data-nomf]', c).forEach((l) => { l.hidden = q && !l.dataset.nomf.includes(q); }); };
+    $('#fuFiltre', c).oninput = (ev) => { const q = sansAccentsNom(ev.target.value).trim(); $$('[data-nomf]', c).forEach((l) => { l.hidden = q && !l.dataset.nomf.includes(q); }); };
     $('#fuListe', c).onchange = () => { const n = cases().length; $('#fuSuite', c).disabled = n < 2; $('#fuSuite', c).textContent = n < 2 ? 'Fusionner la sélection…' : `Fusionner ces ${n} produits…`; };
     $('#fuSuite', c).onclick = () => confirmerFusion(cases(), apres);
     $$('[data-paire]', c).forEach((b) => b.onclick = () => { const p = paires[Number(b.dataset.paire)]; confirmerFusion([p.a.id, p.b.id], apres); });
