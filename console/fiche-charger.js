@@ -88,9 +88,18 @@ style.textContent = `#barreSauver { position: fixed; left: 50%; bottom: max(16px
 #barreSauver .bs-actions { display: flex; gap: 8px; }
 #barreSauver .bs-ok { background: var(--etiquette, #e9c46a); color: var(--etiquette-texte, #111); font-weight: 600; }
 #barreSauver[data-etat="erreur"] #bsTexte { color: var(--erreur, #ff8a8a); }
-#barreSauver[data-etat="ok"] #bsTexte { color: var(--ok, #5fd69c); }`;
+#barreSauver[data-etat="ok"] #bsTexte { color: var(--ok, #5fd69c); }
+#bsEntete { font: inherit; font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+  background: var(--etiquette, #e9c46a); color: var(--etiquette-texte, #111); border: 1px solid transparent; }
+#bsEntete:disabled { cursor: default; background: transparent; color: var(--texte-3, #8a94a0); border-color: var(--trait, #333c44); font-weight: 500; }`;
 document.head.appendChild(style);
 document.body.appendChild(barre);
+// Bouton toujours visible dans l'en-tête, à côté du menu des produits (gris quand il n'y a rien à enregistrer)
+const boutonEntete = document.createElement('button');
+boutonEntete.type = 'button'; boutonEntete.id = 'bsEntete'; boutonEntete.disabled = true;
+boutonEntete.textContent = '💾 Enregistrer';
+$('choixProduit').closest('label').after(boutonEntete);
+boutonEntete.onclick = () => $('bsOk').click();
 
 let ecriture = false;
 function changements() {
@@ -102,16 +111,19 @@ function changements() {
 function majBarre(message, type) {
   if (ecriture) return;
   const ch = changements();
-  if (message) { barre.dataset.etat = type; $('bsTexte').textContent = message; barre.hidden = false; $('bsOk').hidden = $('bsAnnuler').hidden = type === 'ok'; return; }
+  if (message) { boutonEntete.disabled = true; barre.dataset.etat = type; $('bsTexte').textContent = message; barre.hidden = false; $('bsOk').hidden = $('bsAnnuler').hidden = type === 'ok'; return; }
   delete barre.dataset.etat;
-  if (ch.erreur) { barre.dataset.etat = 'erreur'; $('bsTexte').textContent = ch.erreur; $('bsOk').hidden = true; $('bsAnnuler').hidden = false; barre.hidden = false; return; }
+  if (ch.erreur) { boutonEntete.disabled = true; boutonEntete.title = ch.erreur; barre.dataset.etat = 'erreur'; $('bsTexte').textContent = ch.erreur; $('bsOk').hidden = true; $('bsAnnuler').hidden = false; barre.hidden = false; return; }
   barre.hidden = !ch.liste.length;
   $('bsOk').hidden = $('bsAnnuler').hidden = false;
   const noms = [...new Set(ch.liste.map((x) => NOMS_CHAMPS[x.champ] || x.champ))];
   $('bsTexte').textContent = `${noms.length} changement${noms.length > 1 ? 's' : ''} : ${noms.join(', ')}`;
+  boutonEntete.disabled = !noms.length;
+  boutonEntete.textContent = noms.length ? `💾 Enregistrer (${noms.length})` : '💾 Enregistrer';
+  boutonEntete.title = noms.length ? `À enregistrer : ${noms.join(', ')}` : 'Aucun changement à enregistrer';
 }
 // Après chaque geste dans la page (les gestionnaires de la page passent d'abord)
-['change', 'click', 'input', 'keydown'].forEach((t) => document.addEventListener(t, (ev) => { if (!barre.contains(ev.target)) setTimeout(() => majBarre(), 0); }));
+['change', 'click', 'input', 'keydown'].forEach((t) => document.addEventListener(t, (ev) => { if (!barre.contains(ev.target) && ev.target !== boutonEntete) setTimeout(() => majBarre(), 0); }));
 
 $('bsAnnuler').onclick = () => { const a = E.articles.find((x) => x.id === courant.id); chargerProduit(a.id); };
 $('bsOk').onclick = async () => {
