@@ -1,5 +1,5 @@
 // Outils partagés : échappement, fenêtre modale, calculs de prix.
-import { normaliser, libelleUnitaire, classer } from './normalise.js';
+import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable } from './normalise.js';
 import { get } from './store.js';
 import { BANNIERES } from './demo-data.js';
 import { prixEnVigueur } from './rabais.js';
@@ -227,31 +227,40 @@ export function offresArticle(article) {
     const v = variantes.get(p.varianteId);
     if (v?.retiree) continue;
     // Format du prix, sinon celui de SA variante (pas celui de la fiche : 2 kg ≠ 900 g)
-    let n = normaliser(p.offre, p.format || v?.format || article.format, article.uniteRef);
+    const fmt = p.format || v?.format || article.format;
+    let n = normaliser(p.offre, fmt, article.uniteRef);
+    // Produit compté à l'unité : poids ou volume du contenant (sert à comparer des casseaux de 255 g et de 680 g)
+    const fc = article.uniteRef === 'unite' ? analyserFormat(fmt) : null;
+    const contenu = fc && fc.base !== 'unite' ? { base: fc.base, total: fc.total } : null;
     // Format illisible mais prix unitaire fourni par la source (épiceries.ca) dans la bonne unité
     if (n.erreur && p.uniteSource && p.uniteSource.unite === article.uniteRef) {
       n = { prixUnitaire: p.uniteSource.pu, uniteRef: article.uniteRef, prixArticle: null };
     }
     const economie = p.prixRegulier && p.prixNum && p.prixRegulier > p.prixNum + 0.004 ? p.prixRegulier - p.prixNum : null;
     lignes.push({ ...p, pu: n.prixUnitaire ?? null, prixArticle: n.prixArticle ?? null, uniteRef: n.uniteRef || article.uniteRef, erreur: n.erreur, economie,
-      produitOffre: produitDeLOffre(article, p, v) });
+      contenu, produitOffre: produitDeLOffre(article, p, v) });
   }
+  // Contenants de poids différents : on compare au kg (ou au L), l'affichage reste à l'unité
+  comparerParPoids(lignes);
+  const cmp = (l) => prixComparable(l) ?? Infinity;
   for (const r of rabaisPersoActifs()) {
     const m = e.magasins.find((x) => x.id === r.magasinId);
     if (!m || m.actif === false) continue;
-    const base = lignes.filter((l) => l.banniere === m.banniere && !l.perso && l.pu != null).sort((a, b) => a.pu - b.pu)[0];
+    const base = lignes.filter((l) => l.banniere === m.banniere && !l.perso && l.pu != null).sort((a, b) => cmp(a) - cmp(b))[0];
     if (!base) continue;
     const k = 1 - r.pct / 100;
     lignes.push({ ...base, perso: true, magasinNom: m.nom, pu: base.pu * k, prixArticle: base.prixArticle == null ? null : base.prixArticle * k,
+      ...(base.pc !== undefined ? { pc: base.pc == null ? null : base.pc * k } : {}),
       rabaisTexte: `−${r.pct} % perso${r.plafond ? ` (sur ${r.plafond} $)` : ''}` });
   }
-  lignes.sort((a, b) => (a.pu ?? Infinity) - (b.pu ?? Infinity));
-  const avecPrix = lignes.filter((l) => l.pu != null);
-  const meilleur = avecPrix[0]?.pu ?? null;
-  const pire = avecPrix.length > 1 ? avecPrix[avecPrix.length - 1].pu : null;
+  lignes.sort((a, b) => cmp(a) - cmp(b) || (a.pu ?? Infinity) - (b.pu ?? Infinity));
+  const avecPrix = lignes.filter((l) => prixComparable(l) != null);
+  const meilleur = avecPrix.length ? prixComparable(avecPrix[0]) : null;
+  const pire = avecPrix.length > 1 ? prixComparable(avecPrix[avecPrix.length - 1]) : null;
   lignes.forEach((l) => {
-    l.classe = classer(l.pu, meilleur);
-    if (pire != null && l.pu === pire && pire > meilleur) l.classe = 'cher'; // rouge = le plus cher
+    const c = prixComparable(l);
+    l.classe = classer(c, meilleur);
+    if (pire != null && c === pire && pire > meilleur) l.classe = 'cher'; // rouge = le plus cher
   });
   return lignes;
 }

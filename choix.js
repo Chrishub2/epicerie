@@ -37,7 +37,8 @@ export function definirRemplacement(article, personne, regle) {
  * Rend [{ libs: [...], offre|null, vide, ecart }] ; un même prix n'apparaît qu'une fois, avec plusieurs étiquettes.
  */
 export function meilleursChoix(offres, { prefId = null, variantes = [], regle = REMPLACEMENT_DEFAUT } = {}) {
-  const avec = (offres || []).filter((o) => o.pu != null).sort((a, b) => a.pu - b.pu);
+  const cmp = (o) => (o.pc !== undefined ? o.pc : o.pu) ?? Infinity;   // au kg si contenants de poids différents (normalise.js)
+  const avec = (offres || []).filter((o) => o.pu != null).sort((a, b) => cmp(a) - cmp(b));
   const estPref = (o) => !o.varianteId || o.varianteId === prefId;
   const marqueDe = (id) => (variantes.find((v) => v.id === id)?.marque || '').trim().toLowerCase();
   const marquePref = marqueDe(prefId);
@@ -55,7 +56,8 @@ export function meilleursChoix(offres, { prefId = null, variantes = [], regle = 
   ajouter(tous, 'Le moins cher de tous', 'Aucun prix');
   ajouter(pref, 'Ta variante habituelle ★', 'Aucun prix pour ta variante habituelle');
   ajouter(sub, 'Substitut accepté', regle === 'identique' ? 'Aucun : tu veux le même produit' : 'Aucun substitut avec un prix');
-  for (const r of rangs) r.ecart = r.offre && tous && r.offre.pu > tous.pu + 1e-9 ? r.offre.pu - tous.pu : null;
+  // Écart « de plus » à l'unité : seulement quand la comparaison est à l'unité (sinon il mélangerait des casseaux de poids différents)
+  for (const r of rangs) r.ecart = r.offre && tous && r.offre.pc === undefined && r.offre.pu > tous.pu + 1e-9 ? r.offre.pu - tous.pu : null;
   return rangs;
 }
 

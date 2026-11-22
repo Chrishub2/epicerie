@@ -38,6 +38,7 @@ export function photoMaisonPermise(articleId) { const et = etatsPro.get(articleI
 let presentes = null;   // Set des clés d'images disponibles
 let correspondance = {}; // articleId → { g: 'CAT-001-SC-01-P-001', s: 'gala' | null }
 let referentiel = null;  // produits génériques du référentiel v3 (rattachement automatique des nouvelles fiches)
+let alternatifs = {};    // leurs noms alternatifs français et anglais
 
 /** Charge les fichiers (une fois). Sans réseau ni cache : on garde les vraies photos seulement. */
 export async function chargerVisuels() {
@@ -49,11 +50,12 @@ export async function chargerVisuels() {
     presentes = new Set(i);
     correspondance = c || {};
   } catch { /* hors ligne avant la première mise en cache : rien d'hérité */ }
+  try { alternatifs = (await fetch(BASE + 'noms-alternatifs.json').then((r) => r.json())) || {}; } catch { /* sans eux : noms français seulement */ }
   try { referentiel = (await fetch(BASE + 'referentiel.json').then((r) => r.json()))?.generiques || null; } catch { /* sans référentiel : pas de rattachement */ }
 }
 
 /** Génériques du référentiel et correspondance faite d'avance (pour rattacher.js), ou null avant le chargement. */
-export function sourcesRattachement() { return referentiel ? { generiques: referentiel, corr: correspondance } : null; }
+export function sourcesRattachement() { return referentiel ? { generiques: referentiel, corr: correspondance, alternatifs } : null; }
 
 /** Niveaux du plus précis au plus général, pour une correspondance { g, s }. */
 export function niveaux(m) {

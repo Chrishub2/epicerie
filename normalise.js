@@ -222,6 +222,29 @@ export function rabaisPerso(totalPanier, pct, plafond) {
   return Math.round(base * pct) / 100;
 }
 
+/**
+ * Contenants « à l'unité » de poids différents (casseau de tomates cerises 255 g, 341 g, 680 g…) :
+ * le prix reste affiché à l'unité (pu), mais la comparaison se fait au kg (ou au L) — pc / pcUnite.
+ * lignes : offres d'un produit compté à l'unité, chacune avec contenu = { base: 'kg'|'l', total } ou null.
+ * Actif dès que 2 offres ont un contenu de même base ; une offre sans poids connu n'est alors plus comparable (pc = null).
+ * Rend la base utilisée ('kg' | 'l') ou null (rien changé).
+ */
+export function comparerParPoids(lignes) {
+  const n = { kg: 0, l: 0 };
+  for (const l of lignes) if (l.pu != null && l.contenu && l.contenu.base in n) n[l.contenu.base]++;
+  const base = n.kg >= 2 && n.kg >= n.l ? 'kg' : n.l >= 2 ? 'l' : null;
+  if (!base) return null;
+  for (const l of lignes) {
+    const ok = l.pu != null && l.prixArticle != null && l.contenu?.base === base && l.contenu.total > 0;
+    l.pc = ok ? arrondi(l.prixArticle / l.contenu.total) : null;
+    l.pcUnite = base;
+  }
+  return base;
+}
+
+/** Valeur qui classe une offre : prix au kg/L si la comparaison au poids est active (pc), sinon le prix unitaire. */
+export const prixComparable = (o) => (o && o.pc !== undefined ? o.pc : o?.pu ?? null);
+
 /** Couleur de comparaison : 'meilleur' | 'proche' (≤ seuil %) | 'autre'. */
 export function classer(prix, meilleur, seuilPct = 5) {
   if (prix == null || meilleur == null) return 'autre';

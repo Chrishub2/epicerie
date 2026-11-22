@@ -1,20 +1,23 @@
 // =====================================================================
 // Rattachement automatique d'une fiche au référentiel v3 (famille + sorte)
 // Pour les fiches créées après la correspondance faite d'avance (visuels/correspondance.json) :
-// le nom de la fiche est comparé aux 514 produits génériques du référentiel (visuels/referentiel.json).
-// Règle « dans le doute, on ne rattache pas » : tous les mots du générique doivent être dans le nom,
-// et si deux génériques différents arrivent à égalité, la fiche reste sans famille.
+// le nom de la fiche est comparé aux 514 produits génériques du référentiel (visuels/referentiel.json),
+// et à leurs noms alternatifs français et anglais (visuels/noms-alternatifs.json, journal/referentiel/noms-en.txt).
+// Règle « dans le doute, on ne rattache pas » : tous les mots du nom du générique doivent être dans le nom de la fiche,
+// le mot principal doit correspondre (le PREMIER en français, le DERNIER en anglais), et si deux génériques
+// différents arrivent à égalité — ou qu'un autre nom de 2 mots et plus est aussi dans la fiche — elle reste sans famille.
 // =====================================================================
 
 // Mots sans valeur pour reconnaître un produit (articles, prépositions, formats)
 const VIDES = new Set(['de', 'du', 'des', 'd', 'la', 'le', 'les', 'l', 'a', 'au', 'aux', 'en', 'et', 'pour', 'avec', 'un', 'une',
-  'g', 'kg', 'mg', 'ml', 'l', 'lb', 'oz', 'un', 'x', 'paquet', 'pot', 'pots', 'sac', 'chacun', 'format']);
+  'g', 'kg', 'mg', 'ml', 'l', 'lb', 'oz', 'un', 'x', 'paquet', 'pot', 'pots', 'sac', 'chacun', 'format',
+  'of', 'and', 'with', 'the', 'an', 'ea', 'pk', 'ct', 'pack']);
 
 /** « Pâtes Œufs 2 % » → ['pate', 'oeuf'] : minuscules, sans accents, au singulier, sans chiffres ni mots vides. */
 export function mots(t) {
   const s = String(t || '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae')
     .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\([^)]*\)/g, ' ').replace(/[^a-z0-9]+/g, ' ');
-  return s.split(' ').filter((m) => m && !/^\d/.test(m) && !VIDES.has(m)).map((m) => (m.length > 3 ? m.replace(/[sx]$/, '') : m));
+  return s.split(' ').filter((m) => m && !/^\d/.test(m) && !VIDES.has(m)).map((m) => (m.length <= 3 ? m : m.replace(/ies$/, 'y').replace(/oes$/, 'o').replace(/[sx]$/, '')));   // berries → berry, tomatoes → tomato
 }
 
 /** Code de sorte sans accents, comme dans la correspondance (« Blé entier » → « ble-entier »). */
@@ -27,22 +30,34 @@ const contient = (sac, cherches) => cherches.length > 0 && cherches.every((m) =>
  * Famille du référentiel pour un nom de fiche : { g: 'CAT-006-SC-01-P-003', s: 'ble-entier' | null } ou null (dans le doute).
  * generiques : { id: [catégorie, sous-catégorie, générique, attribut, valeurs typiques] } (referentiel.json).
  */
-export function rattacher(nom, generiques) {
+export function rattacher(nom, generiques, alternatifs = {}) {
   const liste = mots(nom), sac = new Set(liste);
   if (!sac.size || !generiques) return null;
-  const [h0, h1] = liste;   // mot principal : le premier du nom (« Pesto de basilic » est un pesto, pas du basilic)
+  const [h0, h1] = liste;            // français : le premier mot (« Pesto de basilic » est un pesto, pas du basilic)
+  const hEn = liste[liste.length - 1]; // anglais : le dernier (« Parboiled white rice » est du riz)
+  const tetesFr = tetesFrancaises(generiques);
   let meilleur = null, score = 0, egalite = false;
+  const parLangue = { fr: { id: null, sc: 0 }, en: { id: null, sc: 0 } };   // meilleur générique de chaque règle
+  const longs = [];   // autres noms de 2 mots et plus présents dans la fiche (« fruit juice » dans « Hydra Fruit Juice … Apple »)
   for (const [id, r] of Object.entries(generiques)) {
-    const m = mots(r[2]);
-    if (!contient(sac, m)) continue;
-    // Le générique commence par le mot principal ; un premier mot qui nomme la catégorie (« Pâtes spaghetti ») cède la place au suivant.
+    const alt = alternatifs[id] || {};
+    // Un premier mot qui nomme la catégorie (« Pâtes spaghetti ») cède la place au suivant.
     const classe = new Set([...mots(r[0]), ...mots(r[1])]);
     const tetes = classe.has(h0) && h1 ? [h0, h1] : [h0];
-    if (!tetes.includes(m[0])) continue;
-    const sc = m.join(' ').length;   // le générique le plus précis gagne (« Riz basmati » avant « Riz »)
-    if (sc > score) { meilleur = id; score = sc; egalite = false; } else if (sc === score && id !== meilleur) egalite = true;
+    const noms = [...[r[2], ...(alt.fr || [])].map((t) => [mots(t), 'fr']), ...(alt.en || []).map((t) => [mots(t), 'en'])];
+    for (const [m, langue] of noms) {
+      if (!contient(sac, m)) continue;
+      const sc = m.join(' ').length;   // le nom le plus précis gagne (« Riz basmati » avant « Riz »)
+      if (m.length >= 2) longs.push({ id, sc });
+      // Nom anglais : seulement si le nom de la fiche ne commence pas par un mot principal français (« Tartinade de tofu » n'est pas du tofu)
+      if (langue === 'fr' ? !tetes.includes(m[0]) : m[m.length - 1] !== hEn || (tetesFr.has(h0) && m[0] !== h0)) continue;
+      if (sc > parLangue[langue].sc) parLangue[langue] = { id, sc };
+      if (sc > score) { meilleur = id; score = sc; egalite = false; } else if (sc === score && id !== meilleur) egalite = true;
+    }
   }
-  if (!meilleur || egalite) return null;
+  if (!meilleur || egalite || longs.some((x) => x.id !== meilleur && x.sc >= score)) return null;
+  // Les deux règles désignent des produits différents (« Peanut Butter Cookies » : beurre d'arachide ou biscuits ?) → dans le doute
+  if (parLangue.fr.id && parLangue.en.id && parLangue.fr.id !== parLangue.en.id) return null;
   // Sorte : UNE valeur typique présente dans le nom (« non salé » l'emporte sur « salé » qu'il contient) ;
   // deux valeurs distinctes (« écrémé » et « 2 % ») → pas de sorte, dans le doute.
   const gen = new Set(mots(generiques[meilleur][2])), sacS = new Set(motsSorte(nom));
@@ -53,18 +68,30 @@ export function rattacher(nom, generiques) {
   return { g: meilleur, s: trouvees.length === 1 ? slugSorte(trouvees[0].v) : null };
 }
 
+// Premiers mots des noms français du référentiel (« tartinade », « jus », « sauce »…), calculés une fois
+const cacheTetes = new WeakMap();
+function tetesFrancaises(generiques) {
+  if (!cacheTetes.has(generiques)) {
+    const t = new Set();
+    // Noms officiels seulement : les noms alternatifs « français » contiennent parfois de l'anglais (« peanut butter »)
+    for (const r of Object.values(generiques)) { const m = mots(r[2]); if (m[0]) t.add(m[0]); }
+    cacheTetes.set(generiques, t);
+  }
+  return cacheTetes.get(generiques);
+}
+
 const dejaVus = new Map();   // nom → résultat (null compris) : un nom non reconnu n'est pas recalculé à chaque rendu
 
 /**
  * Fiches à relier : sans famille enregistrée (generique / generiqueNom), absentes de la correspondance faite d'avance,
  * et reconnues sans doute. Renvoie [{ id, g, s }] ; ne modifie rien.
  */
-export function aRelier(articles, generiques, corr = {}) {
+export function aRelier(articles, generiques, corr = {}, alternatifs = {}) {
   if (!generiques) return [];
   const res = [];
   for (const a of articles || []) {
     if (!a?.id || !a.nom || a.generique || a.generiqueNom || corr[a.id]) continue;
-    if (!dejaVus.has(a.nom)) dejaVus.set(a.nom, rattacher(a.nom, generiques));
+    if (!dejaVus.has(a.nom)) dejaVus.set(a.nom, rattacher(a.nom, generiques, alternatifs));
     const r = dejaVus.get(a.nom);
     if (r) res.push({ id: a.id, ...r });
   }

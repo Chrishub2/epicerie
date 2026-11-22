@@ -7,7 +7,7 @@ import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
   libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive, magasinsActifs } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
-import { analyserOffre, analyserFormat, formatLisible, gtinVariantes, normaliser } from './normalise.js';
+import { analyserOffre, analyserFormat, formatLisible, gtinVariantes, normaliser, prixComparable } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
 import { memeNom, pertinenceNoms } from './noms.js';
@@ -83,7 +83,7 @@ let reliageprevu = false, syncFaite = false;
 function relierFamilles() {
   const src = sourcesRattachement();
   if (!src || !syncFaite) return;
-  const liens = aRelier(S.get().articles, src.generiques, src.corr);
+  const liens = aRelier(S.get().articles, src.generiques, src.corr, src.alternatifs);
   if (liens.length) S.maj((e) => appliquerFamilles(e.articles, liens));
 }
 S.abonner(() => { if (!reliageprevu) { reliageprevu = true; setTimeout(() => { reliageprevu = false; relierFamilles(); }, 0); } });
@@ -547,7 +547,8 @@ function htmlPrixCase(o, u, { avecMax = true } = {}) {
   const max = avecMax ? maxParClient(o) : null;
   const dessous = o.perso
     ? `<span class="prg perso">${esc((o.rabaisTexte || '').match(/−\s*\d+\s*%/)?.[0] || 'perso')}</span>`
-    : `<span class="prg">${o.economie && o.prixNum ? argent(o.pu * o.prixRegulier / o.prixNum) : ''}</span>`;
+    : o.economie && o.prixNum ? `<span class="prg">${argent(o.pu * o.prixRegulier / o.prixNum)}</span>`
+    : `<span class="prg${o.pc != null ? ' pkg' : ''}">${o.pc != null ? puCourt(o.pc, o.pcUnite) : ''}</span>`;   // contenants de poids différents : prix au kg dessous (c'est lui qui compare)
   return `${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}`;
 }
 
@@ -878,7 +879,7 @@ function vueListe(v) {
   });
   $('#btnDeal', v)?.addEventListener('click', () => {
     // Meilleur prix parmi les bannières affichées (r.offre sans choix = la moins chère d'entre elles)
-    const cles = Object.fromEntries(rangees.map((r) => { const m = Object.values(r.parBan).sort((x, y) => x.pu - y.pu)[0]; return [r.l.id, m ? cleOffre(m) : null]; }));
+    const cles = Object.fromEntries(rangees.map((r) => { const m = Object.values(r.parBan).sort((x, y) => (prixComparable(x) ?? Infinity) - (prixComparable(y) ?? Infinity))[0]; return [r.l.id, m ? cleOffre(m) : null]; }));
     S.maj((x) => x.liste.forEach((li) => { if (cles[li.id]) li.magasinCible = cles[li.id]; }));
     toast('Tout au meilleur prix');
   });

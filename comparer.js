@@ -7,7 +7,7 @@ import * as S from './store.js';
 import { $, $$, esc, argent, offresArticle, libelleUnitaire, libelleFin, joursRestants, nomBanniere, nomBanniereVille,
   banniereActive, nomOffre, puce, toast, logo, logoVille, logoMagasin } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
-import { analyserFormat, formatLisible } from './normalise.js';
+import { analyserFormat, formatLisible, prixComparable } from './normalise.js';
 import { photoDe } from './visuels.js';
 
 let vue = 'tableau';      // 'tableau' | 'details' | 'online' | 'econo'
@@ -304,7 +304,7 @@ function matrice(articles) {
     <thead><tr><th>Aliment</th>${cles.map((k) => `<th>${logoCleHtml(k)}${k.startsWith('perso:') ? '<div class="doux">rabais perso</div>' : ''}</th>`).join('')}</tr></thead>
     <tbody>${offres.map(({ a, os }) => {
       const parCle = {};
-      for (const o of os) { if (o.pu == null) continue; const k = cleOffre(o); if (!parCle[k] || o.pu < parCle[k].pu) parCle[k] = o; }
+      for (const o of os) { if (o.pu == null) continue; const k = cleOffre(o); if (!parCle[k] || (prixComparable(o) ?? Infinity) < (prixComparable(parCle[k]) ?? Infinity)) parCle[k] = o; }
       return `<tr><th data-art="${a.id}">${celluleProduit(a)}</th>${cles.map((k) => {
         const o = parCle[k];
         if (!o) return '<td class="vide-cel"><div class="cel-pu">—</div></td>';
