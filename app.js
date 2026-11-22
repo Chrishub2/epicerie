@@ -16,6 +16,7 @@ import { REMPLACEMENTS, REMPLACEMENT_DEFAUT, remplacementDe, definirRemplacement
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique, rechercherSouple } from './epiceries.js';
+import * as RB from './recherche-bannieres.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
 import * as Sync from './sync.js';
 import { surveillerMisesAJour } from './maj.js';
@@ -683,22 +684,31 @@ function htmlBilanListe(rangees, { total, ecoTot, recs }) {
 // Préparation est celle-ci. Les choix restent modifiables : on revient à « Prépa. » à tout moment.
 // ---------------------------------------------------------------------
 const PREF_MODE = 'liste.mode';   // « prep » ou une bannière (ce téléphone)
+// Le choix est aussi gardé ici : si la mémoire du téléphone est pleine (localStorage refuse d'écrire),
+// la puce touchée reste quand même choisie jusqu'à la fermeture de l'app.
+let modeChoisi = null;
+window.addEventListener('epicerie:memoire-pleine', () => toast('Mémoire du téléphone pleine : il n\'enregistre plus tes changements sur place. Ils partent en ligne si tu es connecté.'));
 function modeListe(cols) {
-  let m = 'prep';
-  try { m = localStorage.getItem(PREF_MODE) || 'prep'; } catch { /* navigation privée */ }
+  let m = modeChoisi || 'prep';
+  if (!modeChoisi) try { m = localStorage.getItem(PREF_MODE) || 'prep'; } catch { /* navigation privée */ }
   return m === 'prep' || cols.includes(m) ? m : 'prep';
 }
 
 const etatAnneau = new Map();    // bannière → dernier % « trouvés » affiché
 const eclatJusqua = new Map();   // bannière → fin de l'animation d'éclat (ms)
 
+/** Coché pendant la visite en cours (moins de 12 h) : reste affiché, barré, dans « Dans le panier ». */
+const VISITE_MS = 12 * 3600 * 1000;
+const cocheCetteVisite = (l) => !!l.coche && Date.now() - Date.parse(l.cocheLe || '') < VISITE_MS;
+
 function vueEpicerie(v, b, toutes) {
   const e = S.get();
-  const ici = toutes.filter((r) => r.ban === b);
+  // Exactement les choix de Prépa. pour cette bannière (case choisie, sinon la moins chère) — pas plus, pas moins.
+  // Les articles cochés lors d'une visite précédente ne reviennent pas ; ceux sans prix restent dans Prépa.
+  const ici = toutes.filter((r) => r.ban === b && (!r.l.coche || cocheCetteVisite(r.l)));
   const aPrendre = ici.filter((r) => !r.l.coche && !r.l.indisponible);
   const panier = ici.filter((r) => r.l.coche);
   const indispos = ici.filter((r) => !r.l.coche && r.l.indisponible);
-  const sansPrix = toutes.filter((r) => !r.ban && !r.l.coche && !r.l.indisponible);
   const nom = esc(nomBanniere(b));
 
   // Ordre des rayons de la succursale de cette bannière (sinon l'ordre par défaut)
@@ -721,7 +731,6 @@ function vueEpicerie(v, b, toutes) {
     h += `<div class="vide">Rien à acheter chez ${nom}. Dans « Prépa. », touche un prix de la colonne ${nom} pour y placer un article.</div>`;
   }
   h += parRayons(aPrendre);
-  if (sansPrix.length) h += `<section class="rayon"><h3>Sans prix connu <span class="doux">(${sansPrix.length})</span> <span class="doux" style="font-size:12px;font-weight:400">— à prendre où tu les trouves</span></h3>${sansPrix.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
   if (indispos.length) h += `<section class="rayon"><h3>🚫 Pas disponible <span class="doux">(${indispos.length})</span></h3>${indispos.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
   if (panier.length) {
     h += `<section class="rayon"><h3>🛒 Dans le panier <span class="doux">(${panier.length})</span></h3>${panier.map((r) => htmlItem(r.l, r.a)).join('')}</section>`;
@@ -788,7 +797,8 @@ function vueListe(v) {
     + cols.map((b) => `<button class="${mode === b ? 'actif' : ''}" data-mode="${b}">${esc(nomBanniere(b))}</button>`).join('');
   $$('#pucesMag [data-mode]').forEach((b) => b.onclick = () => {
     if (b.dataset.mode === mode) return;
-    try { localStorage.setItem(PREF_MODE, b.dataset.mode); } catch { /* navigation privée */ }
+    modeChoisi = b.dataset.mode;
+    try { localStorage.setItem(PREF_MODE, b.dataset.mode); } catch { /* mémoire pleine ou navigation privée : gardé en mémoire vive */ }
     rendre();
     window.scrollTo(0, 0);
   });
@@ -806,11 +816,11 @@ function vueListe(v) {
   const nCol = seule ? 1 : cols.length + 3;
   const bascule = (id, lib, on) => `<label class="bascule"><span class="interrupteur"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></span><span class="lib">${lib}</span></label>`;
   // Largeur fixe : sans largeur de tableau, le navigateur élargit la colonne produit au nom le plus long
-  const largeur = (photo ? 52 : 172) + 72 + cols.length * 72 + 40;
+  const largeur = (photo ? 52 : 184) + 72 + cols.length * 72 + 40;
   // Deux tableaux de mêmes colonnes : la tête (bannières, totaux) flotte en haut pendant le défilement,
   // le corps défile dessous ; leurs défilements horizontaux restent synchronisés.
   const ouvrirTable = () => `<table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>${seule ? ''
-    : `<colgroup><col style="width:${photo ? 52 : 172}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`}`;
+    : `<colgroup><col style="width:${photo ? 52 : 184}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`}`;
   let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
   // Les deux interrupteurs restent toujours à leur place (Photo s'applique quand Liste est désactivée)
   // À droite des interrupteurs : nombre d'articles sur la liste (Prépa. = ceux qui restent à acheter)
@@ -933,6 +943,7 @@ function montrerPuces() {
 
 function terminerSaisie() {
   const saisie = $('#saisie');
+  arreterRechercheVue();
   saisie.value = '';
   masquerSuggestions();
   $('#champAjout').classList.remove('ouvert');
@@ -1047,6 +1058,8 @@ async function valider() {
   if (!seul || !navigator.onLine) { terminerSaisie(); ajouterTexte(brut); return; }
   masquerSuggestions();
   champ.classList.add('charge');
+  // Demande de recherche chez tes bannières (faite par l'extension Chrome de l'ordinateur), déposée tout de suite
+  const rech = deposerRecherche(seul.nom);
   let res = [];
   try { res = await rechercherSouple(seul.nom); } catch { res = []; }
   champ.classList.remove('charge');
@@ -1057,16 +1070,93 @@ async function valider() {
     if (vus.has(k)) return false;
     vus.add(k); return true;
   }).slice(0, 6);
-  if (!props.length) { terminerSaisie(); ajouterTexte(brut); return; }
+  if (!props.length && !rech) { terminerSaisie(); ajouterTexte(brut); return; }
   const zone = $('#suggestions');
-  zone.innerHTML = props.map((r, i) => `<button class="sugg" data-enligne="${i}">${r.image ? `<img class="vignette petite" src="${esc(r.image)}" alt="">` : '<span class="vignette petite"></span>'}
+  zone.innerHTML = (props.length && rech ? '<div class="rb-titre"><span>Dans les épiceries · épiceries.ca</span><span>tout de suite</span></div>' : '')
+    + props.map((r, i) => `<button class="sugg" data-enligne="${i}">${r.image ? `<img class="vignette petite" src="${esc(r.image)}" alt="">` : '<span class="vignette petite"></span>'}
       <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(r.name)}</span>
       <span class="doux une-ligne" style="display:block;font-size:12px">${esc([r.brand, r.size ? formatLisible(r.size) : ''].filter(Boolean).join(' · '))}</span></span></button>`).join('')
+    + (rech ? '<div id="rbZone"></div>' : '')
     + `<button class="sugg" data-telquel="1"><span class="vignette petite" style="display:grid;place-items:center">＋</span><span class="grandir une-ligne">Garder « ${esc(brut)} » tel quel</span></button>`;
   zone.classList.remove('cache');
   champ.classList.add('ouvert'); // le clavier a pu se fermer pendant la recherche : le champ reste ouvert avec les propositions
   $$('[data-enligne]', zone).forEach((b) => b.onclick = () => { terminerSaisie(); ajouterDepuisEnLigne(props[Number(b.dataset.enligne)], seul.quantite); });
   $('[data-telquel]', zone).onclick = () => { terminerSaisie(); ajouterTexte(brut); };
+  if (rech) suivreRecherche(rech.id, seul.quantite);
+}
+
+// --- Recherche chez tes bannières (maquette recherche-bannieres-v1) ---
+let rechercheVue = null;   // { id, desabonner } : la demande affichée sous le champ, redessinée quand l'ordinateur répond
+function arreterRechercheVue() { rechercheVue?.desabonner(); rechercheVue = null; }
+
+/** Dépose la demande (synchronisée vers l'ordinateur) ; null si le téléphone n'est pas relié à ton foyer. */
+function deposerRecherche(q) {
+  if (!Sync.estPret()) return null;
+  const r = RB.nouvelleRecherche(q, S.uid('rch'));
+  S.maj((e) => {
+    const vieilles = new Set(RB.aRetirer(e.recherches));
+    e.recherches = (e.recherches || []).filter((x) => !vieilles.has(x.id));
+    e.recherches.push(r);
+  });
+  return r;
+}
+
+function suivreRecherche(id, quantite) {
+  arreterRechercheVue();
+  let avant = null;
+  const dessiner = () => {
+    const boite = $('#rbZone');
+    const r = (S.get().recherches || []).find((x) => x.id === id);
+    if (!boite || !r) return;
+    const empreinte = JSON.stringify(r.bannieres || {});
+    if (empreinte === avant) return;
+    avant = empreinte;
+    const groupes = RB.regrouper(r).slice(0, 8);
+    boite.innerHTML = htmlRechercheBannieres(r, groupes);
+    $$('[data-rb]', boite).forEach((b) => b.onclick = () => { terminerSaisie(); ajouterDepuisBannieres(groupes[Number(b.dataset.rb)], quantite); });
+  };
+  rechercheVue = { id, desabonner: S.abonner(dessiner) };
+  dessiner();
+  // « Ton ordinateur ne répond pas encore » : redessiné une fois après 90 s si rien n'est venu
+  setTimeout(() => { if (rechercheVue?.id === id) { avant = null; dessiner(); } }, 90000);
+}
+
+function htmlRechercheBannieres(r, groupes) {
+  const av = RB.avancement(r);
+  const trouve = RB.ORDRE.filter((b) => av.etats[b] === 'fait').length;
+  const icones = { attente: '⏳', fait: '✓', rien: '—', bloque: '⚠', erreur: '⚠' };
+  const titres = { attente: 'recherche…', fait: 'trouvé', rien: 'rien trouvé', bloque: 'le site demande une vérification', erreur: 'erreur' };
+  const silence = !av.fait && Date.now() - Date.parse(r.le) > 80000;
+  const chip = (o) => `<span class="rb-chip${o.regulier ? ' r' : ''}">${esc(nomBanniere(o.banniere))} ${esc(argent(o.prix))}${o.regulier ? ' · rabais' : ''}</span>`;
+  return `<div class="rb-titre"><span>Chez tes bannières · ton Chrome</span><span>${av.fait < av.total ? `recherche… ${av.fait} sur ${av.total}` : `${trouve} sur ${av.total}`}</span></div>
+    <div class="rb-etats">${RB.ORDRE.map((b) => `<span class="rb-e ${av.etats[b]}" title="${esc(titres[av.etats[b]])}">${icones[av.etats[b]]} ${esc(nomBanniere(b))}</span>`).join('')}</div>
+    ${silence ? '<div class="rb-note">Ton ordinateur n\'a pas encore répondu : la recherche se fera dès que Chrome y sera ouvert.</div>' : ''}
+    ${groupes.map((g, i) => {
+      const m = g.meilleur;
+      return `<button class="sugg" data-rb="${i}">${g.image ? `<img class="vignette petite" src="${esc(g.image)}" alt="">` : '<span class="vignette petite"></span>'}
+        <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(g.nom)}</span>
+        <span class="doux une-ligne" style="display:block;font-size:12px">${esc([g.format, `${g.offres.length} bannière${g.offres.length > 1 ? 's' : ''}`].filter(Boolean).join(' · '))}</span>
+        <span class="rb-chips">${g.offres.map(chip).join('')}</span></span>
+        <span class="rb-px">${esc(argent(m.prix))}<small>${esc(nomBanniere(m.banniere))}${m.regulier ? `, rég. ${esc(argent(m.regulier))}` : ''}</small></span></button>`;
+    }).join('')}`;
+}
+
+/** Produit choisi chez les bannières → fiche (ou fiche existante au même code-barres) + un prix par bannière. */
+function ajouterDepuisBannieres(g, quantite = 1) {
+  const f = RB.ficheDuGroupe(g);
+  const codes = f.codes.flatMap(gtinVariantes);
+  let a = codes.length ? S.get().articles.find((x) => (x.codes || []).some((c) => codes.includes(c))) : null;
+  if (!a) {
+    a = { id: S.uid('a'), nom: f.nom, marque: f.marque, rayonId: rayonParDefaut(), uniteRef: f.uniteRef, format: f.format,
+      local: f.local, codes, imageUrl: f.imageUrl };
+    const nouveau = a;
+    S.maj((e) => e.articles.push(nouveau));
+  }
+  const prix = RB.prixDuGroupe(g, a.id);
+  S.maj((e) => e.prix.push(...prix));
+  ajouterALaListe(a.id, quantite);
+  toast(`${a.nom} ajouté · prix de ${prix.length} bannière${prix.length > 1 ? 's' : ''}`);
+  montrerAjout(a.id);
 }
 
 /** Produit trouvé en ligne (épiceries.ca) → fiche remplie (nom, marque, format, photo, lien) + ses prix en arrière-plan. */

@@ -7,8 +7,8 @@
 // - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
 // À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
 // =====================================================================
-const CACHE = 'epicerie-v114';
-const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'marques.js', 'couverture.js', 'couverture-circulaires.js', 'demo-data.js',
+const CACHE = 'epicerie-v115';
+const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'marques.js', 'recherche-bannieres.js', 'couverture.js', 'couverture-circulaires.js', 'demo-data.js',
   'ui.js', 'rabais.js', 'noms.js', 'calendrier.js', 'choix.js', 'comparer.js', 'circulaires.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'lignes-recu.js', 'plu.js', 'plu.json', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
   'retouche.js', 'maj.js', 'secteurs.js', 'bannieres-registre.js', 'scan.js', 'recettes.js', 'plus.js', 'envoi.js', 'manifest.webmanifest', 'icone.svg',
   'visuels.js', 'visuels/index.json', 'visuels/correspondance.json', 'visuels/referentiel.json', 'visuels/noms-alternatifs.json', 'rattacher.js',

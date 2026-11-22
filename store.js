@@ -51,6 +51,8 @@ export function copieAvantV3() {
 }
 
 const CLE = 'epicerie-demo-v1';
+/** Vrai quand la dernière sauvegarde sur ce téléphone a échoué (mémoire du navigateur pleine). */
+export let memoirePleine = false;
 let etat = null;
 const abonnes = new Set();
 
@@ -59,6 +61,9 @@ export function charger() {
     const brut = localStorage.getItem(CLE);
     const lu = brut ? JSON.parse(brut) : null;
     const versionLue = lu?.version || 1;
+    // v115 (accord de Chris, 2026-11-22) : la copie d'avant la migration v3 prenait la moitié de la mémoire du
+    // navigateur (≈ 1,9 million de caractères) ; une fois la migration faite, elle est retirée. Tes données sont en ligne.
+    if (versionLue >= 3) try { localStorage.removeItem(CLE_AVANT_V3); } catch { /* rien à faire */ }
     etat = lu ? migrer(lu) : etatDemo();
     // Migration faite : on l'enregistre tout de suite (sinon elle serait refaite à chaque ouverture)
     // (essai séparé : un échec ici ne doit JAMAIS faire tomber dans le cas « données de démo » plus bas)
@@ -74,11 +79,16 @@ export function charger() {
 
 export function get() { return etat || charger(); }
 
+
 export function sauver() {
   // Garde la structure produit → variantes cohérente après chaque modification,
   // une synchro (téléphone encore en v30), un import ou une réinitialisation.
   try { normaliserProduits(etat); } catch (e) { console.warn('Variantes', e); }
-  try { localStorage.setItem(CLE, JSON.stringify(etat)); } catch (e) { console.warn('Sauvegarde impossible', e); }
+  try { localStorage.setItem(CLE, JSON.stringify(etat)); memoirePleine = false; } catch (e) {
+    console.warn('Sauvegarde impossible', e);
+    // Signalé une fois par ouverture de l'app (app.js affiche l'avertissement)
+    if (!memoirePleine) { memoirePleine = true; try { window.dispatchEvent(new CustomEvent('epicerie:memoire-pleine')); } catch { /* hors navigateur */ } }
+  }
   abonnes.forEach((f) => f(etat));
 }
 
