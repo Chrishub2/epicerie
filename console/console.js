@@ -642,6 +642,7 @@ function rendreDetail() {
           <span class="badge mono">${a.id}</span><span class="discret">modifié ${dateCourte(a.maj)} par ${esc(a.majPar || '—')}</span>
         </div>
       </div>
+      ${MODE === 'reel' ? `<a class="btn petit" href="fiche.html?id=${encodeURIComponent(a.id)}" target="_blank" rel="noopener" title="Fiche produit complète (lecture seule, données réelles)">Fiche complète ↗</a>` : ''}
       <button class="btn petit danger" id="supprimerFiche" title="Supprimer ce produit du catalogue">🗑 Supprimer</button>
       <button class="bouton-icone" id="fermerDetail" title="Fermer (Échap)">✕</button>
     </div>
