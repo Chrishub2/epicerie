@@ -604,6 +604,8 @@ th.tri-case { text-align: left; }
 .src svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
 .src b { font-weight: 600; }
 .src .d { color: var(--texte-2); }
+.src a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }   /* v114 — source cliquable */
+.src a:hover b { text-decoration: none; }
 .src-circ svg, .src-circ b { color: var(--src-circ); }
 .src-web svg, .src-web b { color: var(--src-web); }
 .src-mag svg, .src-mag b { color: var(--src-mag); }
@@ -1156,7 +1158,9 @@ const SOURCES = {
   'Reçu': ['recu', '<path d="M4 2.5h8v11l-1.6-1-1.2 1-1.2-1-1.2 1-1.2-1-1.6 1z"/><path d="M6 6h4M6 8.5h4"/>'],
 };
 const SRC = (v) => { const [k, ic] = SOURCES[v.src] || ['autre', ''];
-  return `<span class="src src-${k}"><svg viewBox="0 0 16 16" aria-hidden="true">${ic}</svg><b>${v.src}</b><span class="d"> · ${v.date}</span></span>`; };
+  // v114 — La source est un lien quand on en a un : page du produit en ligne, ou circulaire de la bannière pendant le rabais
+  const nom = v.lien ? `<a href="${v.lien}" target="_blank" rel="noopener" title="${v.src === 'En ligne' ? 'Voir le produit chez l’épicier' : 'Voir la circulaire de la bannière'} (nouvel onglet)"><b>${v.src}</b></a>` : `<b>${v.src}</b>`;
+  return `<span class="src src-${k}"><svg viewBox="0 0 16 16" aria-hidden="true">${ic}</svg>${nom}<span class="d"> · ${v.date}</span></span>`; };
 // v87 — Badge « produit du Québec » : rond bleu et fleur de lys blanche (dessin maison, pas le logo d'une organisation)
 const QC = '<span class="qc" title="Produit du Québec">Québec</span>'; // v88 : simplement « Québec » en bleu
 const ETOILE = '<svg class="etoile" viewBox="0 0 24 24" role="img" aria-label="Le moins cher"><title>Le moins cher</title><path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z"/></svg>';
@@ -1683,7 +1687,7 @@ menu.addEventListener('click', (e) => {
   const a = e.target.closest('[data-autre]');
   if (a) { menu.innerHTML = `<div class="groupe">Maquette</div><button type="button"><span class="ex">Seule la fiche « Pomme » est dessinée dans cette version.</span></button>`; }
 });
-// v113 — Instantané recalculé avec app/console/fiche-donnees.js (sorte dite dans le nom, sinon à confirmer)
+// v114 — Instantané recalculé avec app/console/fiche-donnees.js (sorte dite dans le nom, liens des sources)
 const REELS = {};   // rempli au chargement avec les vraies données (fiche-charger.js)
 
 // v104 — Confirmations de la Santé, par produit (dans l'app : écrites dans la fiche, avec l'historique)
@@ -1814,5 +1818,5 @@ window.addEventListener('resize', ajusterEchelle);
   }, true);
 })(); // style retenu par Chris (v11)
 </script>
-<script type="module" src="fiche-charger.js?v=epicerie-v102"></script>
-<!-- Construit depuis journal/maquettes/fiche-produit-v113.html par console/construire_fiche.py -->
+<script type="module" src="fiche-charger.js?v=epicerie-v103"></script>
+<!-- Construit depuis journal/maquettes/fiche-produit-v114.html par console/construire_fiche.py -->

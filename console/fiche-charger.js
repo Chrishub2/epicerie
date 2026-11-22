@@ -179,7 +179,9 @@ async function demarrer() {
     afficherEtat('Chargement de tes produits…');
     E = construireEtat(await src.chargerObjets((n) => afficherEtat(`Chargement de tes produits… ${n.toLocaleString('fr-CA')} objets`)), src.membres);
     const [ref, corr, index] = await Promise.all([json('referentiel.json'), json('correspondance.json'), json('index.json')]);
-    opts = { ref, corr: corr || {}, dispo: new Set(index || []), base: '../visuels/', depuis: depuis() };
+    opts = { ref, corr: corr || {}, dispo: new Set(index || []), base: '../visuels/', depuis: depuis(),
+      // Circulaire en ligne de chaque bannière (lien de la source « Circulaire » pendant le rabais)
+      circulaires: Object.fromEntries(Object.entries(BANNIERES).filter(([, b]) => b.circulaire).map(([k, b]) => [k, b.circulaire])) };
     for (const a of E.articles) { try { construire(a); } catch (err) { console.warn('Fiche non construite :', a.id, err); } }
     for (const [k, b] of Object.entries(BANNIERES)) if (!BAN[k]) BAN[k] = { nom: b.nom, c: '#8d99ae' };
     for (const r of Object.values(REELS)) for (const v of [...r.var, ...r.liens]) if (v.ban && !BAN[v.ban]) BAN[v.ban] = { nom: v.ban, c: '#8d99ae' };

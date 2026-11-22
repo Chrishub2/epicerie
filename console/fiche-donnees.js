@@ -67,6 +67,23 @@ export function raisonSorte(nomLu, etiquette, valeurs) {
   return null;
 }
 
+/**
+ * Lien de la source d'un prix (Chris, 21 nov.) :
+ *  - en ligne (épiceries.ca) : la page du produit chez l'épicier ;
+ *  - circulaire ou Flipp : la circulaire en ligne de la bannière, SEULEMENT tant que le rabais dure
+ *    (les images des pages lues sont effacées après lecture ; après la fin, la circulaire en ligne est celle d'une autre semaine) ;
+ *  - reçu, vu en magasin : aucun lien.
+ */
+export function lienSource(p, opts = {}) {
+  if (p.source === 'epiceries_ca') return p.lienMarchand || p.url || null;
+  if (p.source === 'circulaire' || p.source === 'flipp') {
+    const auj = opts.aujourdhui || new Date().toISOString().slice(0, 10);
+    const url = opts.circulaires?.[p.banniere];
+    return url && p.fin && p.fin >= auj ? url : null;
+  }
+  return null;
+}
+
 const echapper = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Marque reconnue dans le nom lu, sinon celle de la fiche, sinon « Sans marque » (remplacée plus loin par le nom). */
 export function marqueDe(np, art, marques = MARQUES) {
@@ -141,7 +158,7 @@ export function construireFiche(art, prix, opts = {}) {
       detail = reste ? reste.charAt(0).toUpperCase() + reste.slice(1) : '—';   // la marque n'est pas répétée devant le nom
     }
     const base = { id: p.id, sorte: m, marque: detail, ban: p.banniere, reg, fin: p.fin || null, local: !!art.local && src === 'Reçu',
-      src, date: jour(le), vu: le || null, photo: true, code: !!(art.codes?.length || art.plu?.length) };
+      src, date: jour(le), vu: le || null, photo: true, code: !!(art.codes?.length || art.plu?.length), lien: lienSource(p, opts) };
     let raison = null, v;
     if (par === 'lb') v = { ...base, fmt: 'Au poids', prix: montant, unite: 'lb' };
     else if (par === 'kg') v = { ...base, fmt: 'Au poids (prix au kg)', prix: montant, unite: 'ch', kg: 1 };
