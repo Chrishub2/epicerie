@@ -60,7 +60,17 @@ export function niveaux(m) {
 /** Clé de l'image héritée la plus précise qui existe, ou null. */
 export function cleVisuel(a, corr = correspondance, dispo = presentes) {
   if (!a || !dispo) return null;
-  return niveaux(corr[a.id]).find((k) => dispo.has(k)) || null;
+  return niveaux(familleDe(a, corr)).find((k) => dispo.has(k)) || null;
+}
+
+/**
+ * Famille et sorte d'une fiche : celles enregistrées dans la fiche d'abord (fiche créée ou reclassée dans la Console),
+ * sinon la correspondance faite d'avance. Même règle que la fiche complète (fiche-donnees.js).
+ */
+export function familleDe(a, corr = correspondance) {
+  const c = corr[a?.id];
+  if (!a?.generique) return c;
+  return { g: a.generique, s: a.sorte || (c?.g === a.generique ? c?.s : null) || null };
 }
 
 /** Marques différentes d'une fiche (variantes actives ; sinon la marque de la fiche). */
@@ -93,8 +103,8 @@ export function photoListe(a, corr = correspondance, dispo = presentes) {
     const k = cleVisuel(a, corr, dispo);
     return k ? url(k) : '';
   }
-  const nivs = niveaux(corr[a.id]);
-  const g = corr[a.id]?.g;
+  const nivs = niveaux(familleDe(a, corr));
+  const g = familleDe(a, corr)?.g;
   const ordre = g ? [g, ...nivs.filter((k) => k !== g)] : nivs;
   const k = dispo ? ordre.find((x) => dispo.has(x)) : null;
   return k ? url(k) : marque;
