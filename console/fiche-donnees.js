@@ -40,10 +40,18 @@ const normal = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\
 const slug = (t) => normal(t).replace(/[^a-z0-9%]+/g, '-').replace(/%/g, '').replace(/^-|-$/g, '');
 /** Valeurs de sorte du référentiel (« salé, non salé ») ; « selon… » n'est pas une valeur. */
 export const valeursSorte = (txt) => String(txt || '').split(/,\s+/)   /* « 3,25 % » reste entier */.map((v) => v.trim().replace(/…$/, '').trim()).filter((v) => v && !/^selon/i.test(v));
-/** Étiquette de la sorte enregistrée : « sale » → « salé » (d'après les valeurs du référentiel), sinon telle quelle. */
+// Sortes enregistrées en code sans accents (correspondance) qui ne sont pas dans les valeurs du référentiel : leur nom écrit
+const LIBELLES_SORTE = {
+  'ble-entier': 'blé entier', desossee: 'désossée', 'flocons-de-mais-givres': 'flocons de maïs givrés', '100-pur': '100 % pur',
+  'melange-pour-sauce': 'mélange pour sauce', mais: 'maïs', rape: 'râpé', 'en-des': 'en dés', legumes: 'légumes', 'nacho-epice': 'nacho épicé',
+  etuve: 'étuvé', assaisonne: 'assaisonné', 'soda-sales': 'soda salés', 'melon-d-eau-pomme': 'melon d’eau et pomme', regulier: 'régulier',
+  reguliere: 'régulière', 'sans-sel-ajoute': 'sans sel ajouté', 'carres-de-mais': 'carrés de maïs', proteine: 'protéiné', gaufre: 'gaufré',
+  'a-l-ancienne': 'à l’ancienne', fume: 'fumé', sale: 'salé', 'non-sale': 'non salé',
+};
+/** Étiquette de la sorte enregistrée : « sale » → « salé » (valeurs du référentiel, sinon nom écrit connu, sinon tirets → espaces). */
 export function etiquetteSorte(ref, valeurs) {
   if (!ref || ref === 'a-preciser') return null;
-  return valeurs.find((v) => slug(v) === slug(ref)) || ref;
+  return valeurs.find((v) => slug(v) === slug(ref)) || LIBELLES_SORTE[ref] || String(ref).replace(/-/g, ' ');
 }
 /**
  * La sorte de la fiche est-elle dite dans le nom lu ? (Chris, 21 nov. : salé et non salé sont deux produits ;
