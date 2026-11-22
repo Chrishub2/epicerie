@@ -28,7 +28,7 @@ import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
 import { aRelier, appliquerFamilles } from './rattacher.js';
-import { construireArbre, nouvelleFicheGenerique } from './arbre-recherche.js';
+import { construireArbre, nouvelleFicheGenerique, enfantsGenerique } from './arbre-recherche.js';
 import { chargerVisuels, sourcesRattachement, familleDe, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, aPhotoPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
 let onglet = 'liste';
@@ -164,7 +164,69 @@ export function ajouterALaListe(articleId, quantite = 1, extra = {}) {
         recettes: extra.recette ? [extra.recette] : [], note: extra.note || '' });
     }
   });
+  lancerVerifications(articleId);   // v118 : prix revérifiés chez les bannières (au plus une fois par semaine de circulaires)
   return fusion;
+}
+
+// --- v118 : vérification des prix à l'ajout (maquette recherche-niveaux-v2) ---
+/** Fiches à vérifier pour une fiche ajoutée : elle-même, ou toutes ses fiches dessous si c'est un niveau 1 ou 2. */
+function fichesAVerifier(a) {
+  const e = S.get();
+  return a?.estGenerique ? enfantsGenerique(a, e.articles, familleDe) : a ? [a] : [];
+}
+
+/** Dépose une demande par fiche pas encore vérifiée depuis jeudi (et sans demande en cours). Rien hors connexion au foyer. */
+function lancerVerifications(articleId) {
+  if (!Sync.estPret()) return;
+  const e = S.get();
+  const jour = jourQuebec();
+  const a = e.articles.find((x) => x.id === articleId);
+  const nouvelles = fichesAVerifier(a)
+    .filter((x) => !RB.verifieCetteSemaine(x, jour) && !RB.verificationOuverte(e.recherches, x.id))
+    .map((x) => ({ ...RB.nouvelleRecherche(RB.requeteFiche(x), S.uid('rch')), articleId: x.id, but: 'verif' }))
+    .filter((r) => r.q.length >= 2);
+  if (!nouvelles.length) return;
+  S.maj((x) => {
+    const vieilles = new Set(RB.aRetirer(x.recherches));
+    x.recherches = [...(x.recherches || []).filter((r) => !vieilles.has(r.id)), ...nouvelles];
+  });
+}
+
+/** Les bannières ont répondu : relevés datés ajoutés à la fiche (même produit seulement), fiche marquée vérifiée. */
+let applicationPrevue = false;
+function appliquerVerifications() {
+  const e = S.get();
+  const prets = RB.aAppliquer(e.recherches);
+  if (!prets.length) return;
+  const changements = [];
+  let nPrix = 0;
+  S.maj((x) => {
+    const ids = new Set(x.prix.map((p) => p.id));
+    for (const r0 of prets) {
+      const r = x.recherches.find((y) => y.id === r0.id);
+      const fiche = x.articles.find((a) => a.id === r.articleId);
+      r.appliqueLe = new Date().toISOString();
+      if (!fiche) continue;
+      const codes = P.codesDe(fiche).flatMap(gtinVariantes);
+      const res = RB.prixVerification(r, fiche, x.prix, codes);
+      for (const p of res.prix) if (!ids.has(p.id)) { x.prix.push(p); ids.add(p.id); nPrix++; }
+      if (r.etat === 'fait') fiche.prixVerifieLe = jourQuebec();
+      res.changements.forEach((c) => changements.push({ ...c, nom: fiche.nom }));
+    }
+  });
+  if (changements.length) toast(`Prix régulier changé : ${changements.slice(0, 3).map((c) => `${c.nom} chez ${nomBanniere(c.banniere)} ${argent(c.avant)} → ${argent(c.apres)}`).join(' · ')} (noté dans l'historique)`);
+  else if (nPrix) toast(`Prix vérifiés chez les bannières · ${nPrix} relevé${nPrix > 1 ? 's' : ''} ajouté${nPrix > 1 ? 's' : ''}`);
+}
+S.abonner(() => { if (!applicationPrevue) { applicationPrevue = true; setTimeout(() => { applicationPrevue = false; appliquerVerifications(); }, 0); } });
+
+/** Panier qui tourne sur la photo : une vérification ou une recherche de cette fiche (ou de ses fiches dessous) est en cours. */
+const SVG_PANIER = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 13 L13 5 M23 13 L19 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/><path d="M4 13 H28 L25 26 a2 2 0 0 1 -2 1.6 H9 a2 2 0 0 1 -2 -1.6 Z" fill="currentColor"/><path d="M11 17 V23 M16 17 V23 M21 17 V23" stroke="var(--carte, #1b211e)" stroke-width="2" stroke-linecap="round"/></svg>';
+function panierQuiTourne(a) {
+  const e = S.get();
+  if (!(e.recherches || []).length) return '';
+  const ids = a.estGenerique ? fichesAVerifier(a).map((x) => x.id) : [a.id];
+  const encours = ids.some((id) => RB.verificationOuverte(e.recherches, id) && (e.recherches || []).some((r) => r.articleId === id && !r.appliqueLe && r.etat !== 'fait'));
+  return encours ? `<span class="panier-tourne" title="Je vérifie les prix chez les bannières">${SVG_PANIER}</span>` : '';
 }
 
 /**
@@ -383,7 +445,7 @@ function htmlItem(l, a) {
   const teinte = l.recu?.absent ? '' : l.recu?.statut === 'plus' ? 'recu-ecart' : (l.recu?.statut === 'ok' || l.recu?.statut === 'moins') ? 'recu-ok' : '';
   return `<div class="item item-liste ep ${teinte} ${l.coche ? 'coche' : ''} ${l.indisponible ? 'indisponible' : ''}" data-id="${l.id}">
     <input type="checkbox" ${l.coche ? 'checked' : ''} aria-label="Dans le panier">
-    <div class="ep-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}</div>
+    <div class="ep-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}${panierQuiTourne(a)}</div>
     <div class="grandir ep-txt" data-fiche="${a.id}">
       <div class="nom ep-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>
       <div class="ep-prix">${prix}${details.length ? ` · ${details.join(' · ')}` : ''}</div>
@@ -562,7 +624,7 @@ function htmlRangee(r, cols, seule) {
   const u = r.offre?.uniteRef || a.uniteRef;
   const sous = [formatLisible(a.format), a.marque].filter(Boolean);
   let h = `<tr class="pl ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="p-art">
-    <div class="p-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
+    <div class="p-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}${a.rappel ? SVG_RAPPEL : ''}${panierQuiTourne(a)}<span class="p-qte">${l.quantite}</span></div>
     <div class="p-txt" data-fiche="${a.id}"><div class="p-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}</div>${
       sous.length ? `<div class="p-sous">${esc(sous.join(' · '))}</div>` : ''}</div>
     <div class="p-pm"><button data-q="1" aria-label="Un de plus">+</button><button data-q="-1" aria-label="Un de moins">−</button></div></div></td>`;
@@ -641,7 +703,7 @@ function htmlRangeeListe(r, { groupe, rec }) {
     }
   }
   return `<tr class="pl ls ${l.indisponible ? 'indisponible' : ''}" data-l="${l.id}"><td class="pc"><div class="ls-r">
-    <div class="p-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}${a.rappel ? SVG_RAPPEL : ''}<span class="p-qte">${l.quantite}</span></div>
+    <div class="p-photo" data-fiche="${a.id}">${photoListe(a) ? `<img src="${esc(photoListe(a))}" alt="">` : PHOTO_VIDE}${a.rappel ? SVG_RAPPEL : ''}${panierQuiTourne(a)}<span class="p-qte">${l.quantite}</span></div>
     <div class="ls-tx" data-fiche="${a.id}">
       <div class="ls-nom">${esc(a.nom)}${a.local ? ' <span title="Produit local (Québec)">🍁</span>' : ''}${sous.length ? ` <span class="ls-sous">· ${esc(sous.join(' · '))}</span>` : ''}</div>
       <div class="ls-prix">${o ? `${groupe === 'rayon' ? logo(o.banniere) : ''}<b class="ls-pp ${estRabais(o) ? 'promo' : ''}">${esc(etiquette) || '?'}</b>${
@@ -1092,7 +1154,7 @@ function arreterRechercheVue() { rechercheVue?.desabonner(); rechercheVue = null
 /** Dépose la demande (synchronisée vers l'ordinateur) ; null si le téléphone n'est pas relié à ton foyer. */
 function deposerRecherche(q, articleId = null) {
   if (!Sync.estPret()) return null;
-  const r = { ...RB.nouvelleRecherche(q, S.uid('rch')), ...(articleId ? { articleId } : {}) };   // articleId : la fiche à compléter
+  const r = { ...RB.nouvelleRecherche(q, S.uid('rch')), ...(articleId ? { articleId, but: 'nom' } : {}) };   // articleId : la fiche à compléter
   S.maj((e) => {
     const vieilles = new Set(RB.aRetirer(e.recherches));
     e.recherches = (e.recherches || []).filter((x) => !vieilles.has(x.id));
@@ -1256,8 +1318,8 @@ function ajouterTelQuel(txt) {
   if (!nom) return;
   const existant = S.get().articles.find((a) => sansAccents(a.nom) === sansAccents(nom));
   const a = existant || creerArticle(nom);
-  ajouterALaListe(a.id, quantite);
   if (!existant) deposerRecherche(nom, a.id);
+  ajouterALaListe(a.id, quantite);
   toast(`${a.nom} ajouté`);
   montrerAjout(a.id);
 }

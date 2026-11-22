@@ -86,10 +86,11 @@ export function regrouper(r, seuil = 0.75) {
 
 const prixTexte = (v) => `${Number(v).toLocaleString('fr-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
 
-/** Prix à ajouter à la fiche : un par bannière du groupe (ajout seulement, comme tous les prix). */
-export function prixDuGroupe(g, articleId, jour = new Date().toISOString().slice(0, 10)) {
+/** Prix à ajouter à la fiche : un par bannière du groupe (ajout seulement, comme tous les prix).
+ *  Chaque prix a son identifiant (sans lui, la synchro ne peut pas l'envoyer — corrigé en v118). */
+export function prixDuGroupe(g, articleId, jour = new Date().toISOString().slice(0, 10), nouvelId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`) {
   return g.offres.map((o) => ({
-    articleId, banniere: o.banniere, offre: prixTexte(o.prix), prixNum: o.prix,
+    id: nouvelId(o.banniere), articleId, banniere: o.banniere, offre: prixTexte(o.prix), prixNum: o.prix,
     prixRegulier: o.regulier && o.regulier > o.prix ? o.regulier : null,
     format: g.format ? formatLisible(g.format) : null,
     type: o.regulier && o.regulier > o.prix ? 'circulaire' : 'regulier', fin: null,
@@ -112,3 +113,99 @@ export function ficheDuGroupe(g) {
   };
 }
 const RE_TAILLE_AFFICHE = /\s*\b\d+(?:[.,]\d+)?\s*(?:x\s*\d+(?:[.,]\d+)?\s*)?(?:kg|g|ml|l|lb|oz)\b/gi;
+
+// =====================================================================
+// v118 — Vérification des prix à l'ajout (maquette recherche-niveaux-v2, accord de Chris 2026-11-22)
+// Ajouter un produit à la liste → ses prix sont revérifiés chez les 9 bannières, au plus une fois par semaine
+// de circulaires (du jeudi au mercredi). Chaque relevé est daté et ajouté (jamais modifié) ; un prix régulier
+// qui change est signalé (regulierAvant). Dans le doute (nom ou format qui ne colle pas), rien n'est rattaché.
+// =====================================================================
+
+/** Premier jour (jeudi) de la semaine de circulaires qui contient ce jour (AAAA-MM-JJ). */
+export function debutSemaine(jour) {
+  const d = new Date(`${jour}T12:00:00Z`);
+  const recul = (d.getUTCDay() - 4 + 7) % 7;   // jeudi = 4
+  d.setUTCDate(d.getUTCDate() - recul);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Prix encore bons ? Vérifiés depuis le dernier jeudi → on ne refait pas la recherche. */
+export const verifieCetteSemaine = (a, jour) => !!a?.prixVerifieLe && a.prixVerifieLe >= debutSemaine(jour);
+
+/** Texte cherché sur les sites pour une fiche : marque + nom + format (« Kraft Beurre d'arachide crémeux 1 kg »). */
+export function requeteFiche(a) {
+  const nom = String(a?.nom || '').trim();
+  const marque = String(a?.marque || '').trim();
+  const avecMarque = marque && !sansAcc(nom).includes(sansAcc(marque)) ? `${marque} ${nom}` : nom;
+  const fmt = a?.format && !RE_TAILLE.test(sansAcc(avecMarque)) ? ` ${formatLisible(a.format)}` : '';
+  RE_TAILLE.lastIndex = 0;
+  return `${avecMarque}${fmt}`.replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+/**
+ * Le même produit que la fiche, parmi les résultats d'UNE bannière, ou null (dans le doute).
+ * Même code-barres → oui. Sinon : même format ET tous les mots de la fiche (marque comprise) dans le nom du site ;
+ * fiche sans marque (« Lait 2 % 4 L ») → le moins cher qui remplit ces conditions. Deux candidats de prix
+ * différents pour une fiche AVEC marque → dans le doute, aucun.
+ */
+export function memeProduit(fiche, produits, codes = []) {
+  const parCode = (produits || []).find((p) => p.code && codes.includes(p.code));
+  if (parCode) return parCode;
+  const cf = cleFormat(fiche?.format);
+  if (!cf) return null;
+  const voulus = mots(`${fiche.marque || ''} ${fiche.nom || ''}`);
+  if (!voulus.size) return null;
+  const ok = (produits || []).filter((p) => cleFormat(p.format || p.nom) === cf && [...voulus].every((m) => mots(p.nom).has(m)));
+  if (!ok.length) return null;
+  ok.sort((x, y) => x.prix - y.prix);
+  if (fiche.marque && ok.length > 1 && ok.some((p) => p.prix !== ok[0].prix)) return null;
+  return ok[0];
+}
+
+/** Dernier prix régulier connu d'une fiche chez une bannière (prix déjà enregistrés, du plus récent au plus vieux). */
+export function dernierRegulier(prix, articleId, banniere) {
+  const l = (prix || []).filter((p) => p.articleId === articleId && p.banniere === banniere && !p.annule && !p.perso)
+    .map((p) => ({ jour: String(p.observeLe || '').slice(0, 10), r: p.prixRegulier || (p.type === 'regulier' ? p.prixNum : null) }))
+    .filter((x) => x.r && x.jour).sort((a, b) => (a.jour < b.jour ? 1 : -1));
+  return l[0]?.r ?? null;
+}
+
+/**
+ * Prix à ajouter après une vérification : un relevé daté par bannière où le même produit a été trouvé.
+ * Identifiant fixe (recherche + bannière) : appliqué deux fois (deux téléphones), c'est le même prix.
+ * → { prix: [...], changements: [{ banniere, avant, apres }] }
+ */
+export function prixVerification(r, fiche, prixExistants = [], codes = []) {
+  const prix = [], changements = [];
+  for (const b of ORDRE) {
+    const res = r?.bannieres?.[b];
+    if (res?.etat !== 'fait') continue;
+    const p = memeProduit(fiche, res.produits, codes);
+    if (!p) continue;
+    const rabais = p.regulier && p.regulier > p.prix;
+    const regulier = rabais ? p.regulier : p.prix;
+    const avant = dernierRegulier(prixExistants, fiche.id, b);
+    const change = avant != null && Math.abs(avant - regulier) > 0.009;
+    if (change) changements.push({ banniere: b, avant, apres: regulier });
+    prix.push({
+      id: `px-${r.id}-${b}`, articleId: fiche.id, banniere: b, offre: prixTexte(p.prix), prixNum: p.prix,
+      prixRegulier: rabais ? p.regulier : null, format: p.format ? formatLisible(p.format) : (fiche.format || null),
+      type: rabais ? 'circulaire' : 'regulier', fin: null, source: SOURCE,
+      observeLe: String(res.le || r.finiLe || r.le).slice(0, 10), nomProduit: p.nom, url: p.url || null,
+      ...(change ? { regulierAvant: avant } : {}),
+    });
+  }
+  return { prix, changements };
+}
+
+/** Demande de vérification encore ouverte pour cette fiche (déposée, pas encore appliquée, moins de 24 h). */
+export function verificationOuverte(recherches, articleId, maintenant = Date.now()) {
+  return (recherches || []).some((r) => r.articleId === articleId && !r.appliqueLe && r.etat !== 'annule'
+    && maintenant - Date.parse(r.le) < 24 * 3600000);
+}
+
+/** Demandes terminées (ou de plus de 24 h) à appliquer à leur fiche. */
+export function aAppliquer(recherches, maintenant = Date.now()) {
+  return (recherches || []).filter((r) => r.but === 'verif' && r.articleId && !r.appliqueLe
+    && (r.etat === 'fait' || maintenant - Date.parse(r.le) >= 24 * 3600000));
+}
