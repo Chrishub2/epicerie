@@ -37,8 +37,9 @@ export function photoMaisonPermise(articleId) { const et = etatsPro.get(articleI
 
 let presentes = null;   // Set des clés d'images disponibles
 let correspondance = {}; // articleId → { g: 'CAT-001-SC-01-P-001', s: 'gala' | null }
+let referentiel = null;  // produits génériques du référentiel v3 (rattachement automatique des nouvelles fiches)
 
-/** Charge les deux fichiers (une fois). Sans réseau ni cache : on garde les vraies photos seulement. */
+/** Charge les fichiers (une fois). Sans réseau ni cache : on garde les vraies photos seulement. */
 export async function chargerVisuels() {
   try {
     const [i, c] = await Promise.all([
@@ -48,7 +49,11 @@ export async function chargerVisuels() {
     presentes = new Set(i);
     correspondance = c || {};
   } catch { /* hors ligne avant la première mise en cache : rien d'hérité */ }
+  try { referentiel = (await fetch(BASE + 'referentiel.json').then((r) => r.json()))?.generiques || null; } catch { /* sans référentiel : pas de rattachement */ }
 }
+
+/** Génériques du référentiel et correspondance faite d'avance (pour rattacher.js), ou null avant le chargement. */
+export function sourcesRattachement() { return referentiel ? { generiques: referentiel, corr: correspondance } : null; }
 
 /** Niveaux du plus précis au plus général, pour une correspondance { g, s }. */
 export function niveaux(m) {
