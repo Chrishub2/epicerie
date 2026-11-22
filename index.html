@@ -98,8 +98,16 @@ body:not(.onglet-liste) .barre-liste, body:not(.onglet-liste) .puces-mag { displ
 .champ-ajout input:focus { outline: none; }
 .champ-ajout button { width: 40px; flex: none; border: 0; font-size: 18px; font-weight: 700; cursor: pointer;
   background: var(--entete-ok-fond, #2fbf7a); color: var(--entete-ok-texte, #0f3d27); }
-.champ-ajout.charge button { font-size: 0; }
-.champ-ajout.charge button::after { content: ''; display: inline-block; width: 16px; height: 16px; border-radius: 50%;
+/* « ← » : fermer le champ sans rien ajouter (visible seulement quand le champ est ouvert) */
+.champ-ajout .fermer-saisie { display: none; width: 40px; background: transparent; color: inherit; font-size: 20px; font-weight: 600; }
+.champ-ajout.ouvert .fermer-saisie { display: block; }
+/* Pendant la saisie : le reste de l'écran passe sous un voile ; seuls le champ et ses propositions restent nets */
+.voile-saisie { display: none; position: fixed; inset: 0; z-index: 6; background: rgba(0, 0, 0, .55); }
+body.saisie-active .voile-saisie { display: block; }
+body.saisie-active header :is(.cal-entete, .puces-mag, .mode-magasin) { opacity: .25; }
+body.saisie-active nav.onglets { opacity: .25; pointer-events: none; }
+.champ-ajout.charge button:not(.fermer-saisie) { font-size: 0; }
+.champ-ajout.charge button:not(.fermer-saisie)::after { content: ''; display: inline-block; width: 16px; height: 16px; border-radius: 50%;
   border: 2px solid currentColor; border-right-color: transparent; animation: tourne .8s linear infinite; }
 @keyframes tourne { to { transform: rotate(360deg); } }
 .puces-mag { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(62px, 1fr); gap: 5px; margin: 8px auto 0;
@@ -664,6 +672,7 @@ try { var s = localStorage.getItem('epicerie.skin'); if (s && s !== 'classique')
     </button>
     <div class="total-liste" id="totalListe"></div>
     <div class="champ-ajout" id="champAjout">
+      <button type="button" id="btnFermerSaisie" class="fermer-saisie" aria-label="Fermer sans rien ajouter" title="Fermer sans rien ajouter">←</button>
       <input id="saisie" placeholder="Ajouter…" autocomplete="off" enterkeyhint="done" aria-label="Ajouter un produit (ex. beurre, 2 lait)">
       <button id="btnEntree" aria-label="Ajouter">✓</button>
     </div>
@@ -672,6 +681,8 @@ try { var s = localStorage.getItem('epicerie.skin'); if (s && s !== 'classique')
   <div class="mode-magasin" id="modeMagasin" hidden></div>
   <div id="suggestions" class="suggestions cache"></div>
 </header>
+<!-- Pendant la saisie : voile sur le reste de l'écran (toucher le voile = fermer sans ajouter) -->
+<div class="voile-saisie" id="voileSaisie" aria-hidden="true"></div>
 <div class="bandeau-demo cache" id="bandeauDemo"></div>
 <!-- Taille d'affichage : barre semi-cachée à gauche (ne touche pas l'en-tête) -->
 <div class="zoom-vue" id="zoomVue"><button class="zoom-poignee" id="zoomPoignee" aria-label="Taille d'affichage"></button>

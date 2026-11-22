@@ -26,7 +26,8 @@ import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
-import { chargerVisuels, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
+import { aRelier, appliquerFamilles } from './rattacher.js';
+import { chargerVisuels, sourcesRattachement, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -75,9 +76,20 @@ const rendCalendrier = () => { const c = $('#calEntete'); if (c) c.innerHTML = c
 rendCalendrier();
 setInterval(rendCalendrier, 15 * 60 * 1000);
 addEventListener('resize', rendCalendrier);
-chargerVisuels().then(() => rendre()); // photos par niveau (catégorie → sorte) pour les fiches sans vraie photo
+chargerVisuels().then(() => { rendre(); relierFamilles(); }); // photos par niveau (catégorie → sorte) pour les fiches sans vraie photo
+// Nouvelles fiches (app, autre téléphone, reçus, MCP) : reliées au référentiel dès qu'elles arrivent, si le nom ne laisse aucun doute
+// (seulement après la première récupération de la base : on n'écrit jamais par-dessus une fiche pas encore à jour)
+let reliageprevu = false, syncFaite = false;
+function relierFamilles() {
+  const src = sourcesRattachement();
+  if (!src || !syncFaite) return;
+  const liens = aRelier(S.get().articles, src.generiques, src.corr);
+  if (liens.length) S.maj((e) => appliquerFamilles(e.articles, liens));
+}
+S.abonner(() => { if (!reliageprevu) { reliageprevu = true; setTimeout(() => { reliageprevu = false; relierFamilles(); }, 0); } });
 setTimeout(async () => {
   await Sync.initialiser().catch(() => {});   // connexion + partage (si déjà connecté)
+  syncFaite = true; relierFamilles();         // nouvelles fiches → famille du référentiel
   Sync.photosPro().then((l) => { if (l) { definirPhotosPro(l); rendre(); } }); // photos studio approuvées
   brancherIA(Sync.lireAvecIA);                // l'IA lit les photos quand le foyer est connecté
   await traiterFile().catch(() => {});        // photos prises hors ligne
@@ -935,6 +947,21 @@ function terminerSaisie() {
     masquerSuggestions();
     if (!champ.classList.contains('charge')) saisie.value = '';
   };
+  // Sortir sans rien ajouter : « ← » dans le champ, toucher le voile, ou le bouton Retour du téléphone
+  const fermerBtn = $('#btnFermerSaisie'), voile = $('#voileSaisie');
+  fermerBtn.addEventListener('pointerdown', (ev) => ev.preventDefault());
+  fermerBtn.addEventListener('click', () => terminerSaisie());
+  // Le voile garde le toucher pour lui (sinon le doigt tomberait sur la liste dessous une fois le voile retiré)
+  voile.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+  voile.addEventListener('click', () => terminerSaisie());
+  // Champ ouvert : voile sur le reste de l'écran + une étape d'historique, pour que Retour ferme le champ au lieu de quitter
+  new MutationObserver(() => {
+    const ouvert = champ.classList.contains('ouvert');
+    document.body.classList.toggle('saisie-active', ouvert);
+    if (ouvert && !history.state?.saisie) history.pushState({ saisie: true }, '');
+    if (!ouvert && history.state?.saisie) history.back();
+  }).observe(champ, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('popstate', () => { if (champ.classList.contains('ouvert')) terminerSaisie(); });
   // Le champ s'élargit par-dessus l'en-tête quand on écrit, puis reprend sa place
   saisie.addEventListener('focus', () => champ.classList.add('ouvert'));
   saisie.addEventListener('blur', () => setTimeout(() => {
