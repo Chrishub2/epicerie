@@ -294,9 +294,14 @@ function panierQuiTourne(a) {
   const e = S.get();
   if (!(e.recherches || []).length) return '';
   if (choixNomDe(a.id)) return '<span class="point-choix" title="Les bannières ont répondu : touche pour choisir"></span>';
-  const ids = a.estGenerique ? fichesAVerifier(a).map((x) => x.id) : [a.id];
-  const encours = ids.some((id) => RB.verificationOuverte(e.recherches, id) && (e.recherches || []).some((r) => r.articleId === id && !r.appliqueLe && r.etat !== 'fait'));
-  return encours ? `<span class="panier-tourne" title="Je vérifie les prix chez les bannières">${SVG_PANIER}</span>` : '';
+  const ids = new Set(a.estGenerique ? fichesAVerifier(a).map((x) => x.id) : [a.id]);
+  const ouvertes = (e.recherches || []).filter((r) => ids.has(r.articleId) && !r.appliqueLe && r.etat !== 'fait'
+    && RB.verificationOuverte(e.recherches, r.articleId));
+  if (!ouvertes.length) return '';
+  // v121 : le panier TOURNE seulement quand une bannière a commencé à répondre ; en file d'attente, il reste immobile
+  const cherche = ouvertes.some((r) => Object.keys(r.bannieres || {}).length > 0);
+  return cherche ? `<span class="panier-tourne" title="Je cherche chez les bannières">${SVG_PANIER}</span>`
+    : `<span class="panier-tourne attente" title="En attente de recherche chez les bannières">${SVG_PANIER}</span>`;
 }
 
 /**

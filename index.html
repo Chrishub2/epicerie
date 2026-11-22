@@ -385,6 +385,8 @@ button.icone { font-size: 20px; width: 44px; height: 44px; border-radius: 10px; 
   color: var(--accent, #2fbf7a); pointer-events: none; }
 .panier-tourne svg { width: 60%; height: 60%; animation: tourne 1.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .panier-tourne svg { animation-duration: 4s; } }
+/* v121 : en file d'attente, le panier est là mais immobile (il tourne seulement pendant la recherche) */
+.panier-tourne.attente svg { animation: none; opacity: .75; }
 /* v120 : point ambre = les bannières ont répondu pour ton nom, choix à faire */
 .point-choix { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--ambre, #f0b43c);
   border: 2px solid var(--carte, #1b211e); pointer-events: none; }
