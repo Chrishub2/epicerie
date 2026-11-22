@@ -1058,6 +1058,8 @@ function rendArbre() {
   document.getElementById('arbre').innerHTML =
     n('Catégorie', P.cat) + n('Sous-catégorie', P.sc) +
     n('Générique', `<b>${P.gen}</b>`, (etat.choix ? '' : 'courant') + ' cliquable', `data-sorte="" role="button" tabindex="0" title="${etat.choix ? `Revenir à ${P.gen} (toutes)` : `${P.gen} (toutes)`}"`) +
+    // v113 — Vrai produit : niveau 4 = la sorte (ex. Salé), niveau 5 = les marques (Beurre → Salé → Lactantia…)
+    (P.reel ? n(P.sorteAttr || 'Sorte', P.sorteRef && P.sorteRef !== 'a-preciser' ? `<b>${P.sorteRef.charAt(0).toUpperCase() + P.sorteRef.slice(1)}</b>` : '<span class="ex">à préciser</span>') : '') +
     n(P.sorteNom, etat.choix ? `<b>${etat.choix}</b>` : '<span class="ex">toutes (au moins cher)</span>', etat.choix ? 'courant' : '');
   // Sortes : une par ligne, de la moins chère à la plus chère (meilleur prix au kg et sa bannière)
   const meilleur = (liste) => [...liste].sort((a, b) => parKg(a) - parKg(b))[0];
@@ -1681,6 +1683,7 @@ menu.addEventListener('click', (e) => {
   const a = e.target.closest('[data-autre]');
   if (a) { menu.innerHTML = `<div class="groupe">Maquette</div><button type="button"><span class="ex">Seule la fiche « Pomme » est dessinée dans cette version.</span></button>`; }
 });
+// v113 — Instantané recalculé avec app/console/fiche-donnees.js (sorte dite dans le nom, sinon à confirmer)
 const REELS = {};   // rempli au chargement avec les vraies données (fiche-charger.js)
 
 // v104 — Confirmations de la Santé, par produit (dans l'app : écrites dans la fiche, avec l'historique)
@@ -1811,5 +1814,5 @@ window.addEventListener('resize', ajusterEchelle);
   }, true);
 })(); // style retenu par Chris (v11)
 </script>
-<script type="module" src="fiche-charger.js?v=epicerie-v101"></script>
-<!-- Construit depuis journal/maquettes/fiche-produit-v112.html par console/construire_fiche.py -->
+<script type="module" src="fiche-charger.js?v=epicerie-v102"></script>
+<!-- Construit depuis journal/maquettes/fiche-produit-v113.html par console/construire_fiche.py -->

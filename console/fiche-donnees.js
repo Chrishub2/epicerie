@@ -35,6 +35,38 @@ export function quantite(texte, unite) {
   return vals.size === 1 ? [...vals][0] : null;
 }
 
+// Texte comparable : minuscules, sans accents, « 2 % » = « 2% », espaces simples
+const normal = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s*%/g, '%').replace(/\s+/g, ' ').trim();
+const slug = (t) => normal(t).replace(/[^a-z0-9%]+/g, '-').replace(/%/g, '').replace(/^-|-$/g, '');
+/** Valeurs de sorte du référentiel (« salé, non salé ») ; « selon… » n'est pas une valeur. */
+export const valeursSorte = (txt) => String(txt || '').split(/,\s+/)   /* « 3,25 % » reste entier */.map((v) => v.trim().replace(/…$/, '').trim()).filter((v) => v && !/^selon/i.test(v));
+/** Étiquette de la sorte enregistrée : « sale » → « salé » (d'après les valeurs du référentiel), sinon telle quelle. */
+export function etiquetteSorte(ref, valeurs) {
+  if (!ref || ref === 'a-preciser') return null;
+  return valeurs.find((v) => slug(v) === slug(ref)) || ref;
+}
+/**
+ * La sorte de la fiche est-elle dite dans le nom lu ? (Chris, 21 nov. : salé et non salé sont deux produits ;
+ * sans précision = doute → à confirmer, jamais classé tout seul.)
+ * Rend null si c'est bien la sorte, sinon la raison (à confirmer).
+ */
+export function raisonSorte(nomLu, etiquette, valeurs) {
+  if (!etiquette || !nomLu) return null;
+  let t = normal(nomLu);
+  // Sorte hors des valeurs du référentiel (ex. « désossée » pour une coupe) : on vérifie seulement qu'elle est dite
+  const connue = valeurs.some((v) => slug(v) === slug(etiquette));
+  const autres = (connue ? valeurs : []).filter((v) => slug(v) !== slug(etiquette)).sort((a, b) => b.length - a.length).filter((v) => {
+    const n = normal(v); if (!t.includes(n)) return false;
+    t = t.split(n).join(' | ');   // « non salé » retiré avant de chercher « salé »
+    return true;
+  });
+  const dite = t.includes(normal(etiquette));
+  if (autres.length && dite) return `Offre double (${etiquette} ou ${autres.join(' ou ')}) : vérifier laquelle`;
+  if (autres.length) return `Autre sorte : ${autres.join(', ')} (pas ${etiquette})`;
+  if (!dite) return `Sorte non précisée : ${etiquette} ?`;
+  return null;
+}
+
 const echapper = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Marque reconnue dans le nom lu, sinon celle de la fiche, sinon « Sans marque » (remplacée plus loin par le nom). */
 export function marqueDe(np, art, marques = MARQUES) {
@@ -64,6 +96,8 @@ export function construireFiche(art, prix, opts = {}) {
   const c = { g: art.generique || c0.g, s: art.sorte || c0.s };
   const g = c.g || '';
   const r = (g && opts.ref?.generiques?.[g]) || [opts.nomRayon || '', '', art.generiqueNom || art.nom, 'Sorte', ''];
+  const valeurs = valeursSorte(r[4]);
+  const etiquette = etiquetteSorte(c.s, valeurs);   // « sale » → « salé »
   const u = { kg: 'kg', l: 'l', unite: 'u' }[art.uniteRef || 'kg'] || 'kg';
   const depuis = opts.depuis || '0000';
   const marques = [...new Set([art.marque, ...(art.variantes || []).filter((v) => !v.retiree).map((v) => v.marque), ...MARQUES].filter(Boolean))]
@@ -125,21 +159,27 @@ export function construireFiche(art, prix, opts = {}) {
     const bas = np.toLowerCase();
     if (bas.includes('trempette')) raison = 'Produit différent : trempette, pas du fromage à la crème';
     if (bas.includes('en grains')) raison = raison || (bas.includes('moulu') ? 'Offre double (moulu ou en grains) : vérifier lequel' : 'État différent : café en grains, pas moulu');
-    // S15 : la teneur en gras est la sorte ; un prix dont le nom ne la dit pas ne se compare pas (dans le doute, on ne rattache pas)
-    if (/teneur/i.test(r[3]) && c.s && np && !bas.includes(String(c.s).toLowerCase())) raison = raison || `Teneur non indiquée : ${(r[2] || art.nom).toLowerCase()} ${c.s} % ?`;
-    if (raison) liens.push({ id: 'l' + p.id, raison, ban: v.ban, lu: np || detail, sorte: v.sorte, marque: v.marque, fmt: v.fmt, kg: v.kg ?? null, prix: v.prix,
-      unite: v.unite, reg: v.reg, fin: v.fin, local: v.local, date: v.date });
-    else var_.push(v);
+    // S15 + Chris (21 nov.) : la sorte doit être DITE dans le nom lu ; sinon doute → à confirmer (toutes les familles)
+    raison = raison || raisonSorte(np, etiquette, valeurs);
+    // Ta décision (✓ / ✗) enregistrée dans le produit : un ✓ fait compter le prix, un ✗ le garde hors de la fiche
+    const dec = art.liensDecides?.['l' + p.id];
+    if (raison) {
+      const lien = { id: 'l' + p.id, raison, ban: v.ban, lu: np || detail, sorte: v.sorte, marque: v.marque, fmt: v.fmt, kg: v.kg ?? null, prix: v.prix,
+        unite: v.unite, reg: v.reg, fin: v.fin, local: v.local, date: v.date };
+      if (dec?.d === 'ok' || dec?.d === 'non') { lien.statut = dec.d; lien.decide = dec; }
+      liens.push(lien);
+      if (dec?.d === 'ok') var_.push({ ...v, id: 'l-' + lien.id, src: v.src });
+    } else var_.push(v);
   }
   if (!var_.length) liens.push(...liensAnnules);   // prix annulés montrés seulement s'il ne reste aucun prix valide
   for (const l of liens) if (l.sorte === 'Sans marque') { const n = l.lu || art.nom; l.sorte = estMajuscules(n) ? capitaliser(n) : n; l.marque = '—'; }
   const favoris = var_.filter((v) => v.src === 'Reçu' || (art.marque && v.sorte === art.marque)).slice(0, 2).map((v) => v.id);
-  const catId = g.slice(0, 7), scId = g.slice(0, 13), sorteRef = c.s || null;
+  const catId = g.slice(0, 7), scId = g.slice(0, 13), sorteCle = c.s || null;
   return {
     cle: aid, nom: art.nom, genId: g || null, gen: art.generiqueNom && !art.generique ? art.generiqueNom : (r[2] || art.nom), cat: r[0], sc: r[1], sorteAttr: r[3] || 'Sorte', valeursTypiques: r[4] || '',
-    sorteRef, unite: u, rayon: opts.nomRayon || '', nomEn: art.nomEn || '', nomsAlt: art.nomsAlt || [], nomsAltEn: art.nomsAltEn || [],
+    sorteRef: etiquette || sorteCle, unite: u, rayon: opts.nomRayon || '', nomEn: art.nomEn || '', nomsAlt: art.nomsAlt || [], nomsAltEn: art.nomsAltEn || [],
     format: art.format || '', marqueFiche: art.marque || '', annules,
-    img: { cat: img(catId), sc: img(scId), gen: img(g), sorte: sorteRef ? img(`${g}~${sorteRef}`) : '' },
+    img: { cat: img(catId), sc: img(scId), gen: img(g), sorte: sorteCle ? img(`${g}~${sorteCle}`) : '' },
     codesFiche: [...(art.plu || []).map((x) => `PLU ${x}`), ...[...new Set(art.codes || [])].slice(0, 2)],
     var: var_, liens, favoris, sortes: [...new Set(var_.map((v) => v.sorte))].sort(),
   };
@@ -176,5 +216,12 @@ export function appliquerFiche(base, f, personne) {
   if (f.genNouveau && f.genNom) { delete d.generique; d.generiqueNom = f.genNom; }    // famille créée : en attente du référentiel
   else if (f.genId && f.genId !== (base.generique || f.genIdDepart)) { d.generique = f.genId; delete d.generiqueNom; }
   if (f.rempl) definirRemplacement(d, personne, f.rempl);
+  // Liens ✓ / ✗ : seulement ceux décidés ; une décision inchangée garde sa date et son auteur
+  if (f.liens) {
+    const avant = base.liensDecides || {}, apres = {};
+    const quand = f.aujourdhui || new Date().toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' });
+    for (const l of f.liens) if (l.statut === 'ok' || l.statut === 'non') apres[l.id] = avant[l.id]?.d === l.statut ? avant[l.id] : { d: l.statut, le: quand, par: personne };
+    mettre('liensDecides', apres);
+  }
   return { data: d, erreur: null };
 }

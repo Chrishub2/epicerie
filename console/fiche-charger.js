@@ -23,7 +23,7 @@ const json = (f) => fetch(`../visuels/${f}`).then((r) => (r.ok ? r.json() : null
 // Fenêtre des prix montrés : 45 jours (le plus récent par bannière et par produit lu)
 const depuis = () => new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
 const NOMS_CHAMPS = { sorte: 'sorte', seulChez: 'seulement chez', annulesVus: 'prix annulés vus', santeIgnores: 'avertissements ignorés', plu: 'PLU', codes: 'code-barres',
-  caracteristiques: 'caractéristiques', nomEn: 'nom anglais', nomsAlt: 'noms alternatifs', nomsAltEn: 'noms anglais', generique: 'famille', generiqueNom: 'famille (nouvelle)', remplacement: 'remplacement' };
+  caracteristiques: 'caractéristiques', nomEn: 'nom anglais', nomsAlt: 'noms alternatifs', nomsAltEn: 'noms anglais', liensDecides: 'liens confirmés ou refusés', generique: 'famille', generiqueNom: 'famille (nouvelle)', remplacement: 'remplacement' };
 
 const src = new SourceSupabase();
 let E = null, opts = null, personne = '', courant = null;   // courant = { id, version, base, genIdDepart }
@@ -73,6 +73,7 @@ function lireFiche() {
     annulesVus: c.annulesVus, ignores: c.ignores, code: c.code,
     caracs: [...carac], nomEn: $('fNomEn').value, alias: etat.alias,
     genId: P.genId, genIdDepart: courant.genIdDepart, genNouveau: P.genNouveau, genNom: P.gen, rempl: $('fRempl').value,
+    liens: LIENS.map((l) => ({ id: l.id, statut: l.statut })),
   }, personne);
 }
 
@@ -157,7 +158,14 @@ window.chargerProduit = (cle) => {
   }
   chargerPage(cle);
   const a = E?.articles.find((x) => x.id === cle);
-  if (a) { initialiser(a); history.replaceState(null, '', `?id=${encodeURIComponent(cle)}`); }
+  if (a) {
+    // Tes ✓ / ✗ déjà enregistrés : dans l'historique des liens, avec « Annuler »
+    for (const l of LIENS.filter((x) => x.statut)) HIST.push({ type: l.statut, txt: `${BAN[l.ban]?.nom || l.ban} « ${l.lu} » → ${P.gen} · ${l.sorte}`,
+      d: `${l.decide?.le || ''} · ${l.decide?.par || ''}`, lienId: l.id, varId: l.statut === 'ok' ? 'l-' + l.id : null });
+    rendLiens(); tout();
+    initialiser(a);
+    history.replaceState(null, '', `?id=${encodeURIComponent(cle)}`);
+  }
 };
 addEventListener('beforeunload', (ev) => { if (courant && changements().liste.length) { ev.preventDefault(); ev.returnValue = ''; } });
 
