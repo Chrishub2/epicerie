@@ -142,10 +142,35 @@ export function requeteFiche(a) {
   return `${avecMarque}${fmt}`.replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
+// Mots qui CHANGENT le produit : présents sur le site mais absents de ta fiche → ce n'est pas le même
+// (essai réel du 2026-11-22 : « Lactantia 2 % » rattaché par erreur à « Lactantia 2 % sans lactose »).
+const DISTINCTIFS = new Set(['sans', 'lactose', 'non', 'chocolat', 'chocolate', 'bio', 'biologique', 'organic', 'croquant', 'crunchy',
+  'naturel', 'natural', 'leger', 'light', 'allege', 'reduit', 'faible', 'decafeine', 'decaf', 'vanille', 'vanilla', 'fraise', 'fraises',
+  'framboise', 'bleuet', 'bleuets', 'cerise', 'peche', 'mangue', 'citron', 'erable', 'miel', 'epice', 'epicee', 'piquant', 'fume',
+  'ultra', 'extra', 'double', 'zero', 'diete', 'diet', 'proteine', 'proteines', 'protein', 'grec', 'greek', 'enrichi', 'omega',
+  'gluten', 'vegan', 'vegetalien', 'mini', 'jumbo', 'saveur', 'aromatise']);
+// Mots sans importance quand ils sont en trop sur le site (provenance, emballage)
+const BRUIT = new Set(['mg', 'prepare', 'quebec', 'canada', 'produit', 'origine', 'carton', 'bouteille', 'sac', 'boite', 'paquet', 'emballage', 'ch', 'chacun']);
+/** Mots stricts : comme mots(), mais les pourcentages comptent (« 2 % » → « 2pct ») et le prix unitaire est retiré. */
+export function motsStricts(nom) {
+  const t = sansAcc(nom).replace(/,?\s*\d+(?:[.,]\d+)?\s*\$\s*\/\s*\d*\s*(?:g|kg|ml|l|un)\b/g, ' ')
+    .replace(/(\d+(?:[.,]\d+)?)\s*%/g, (m, n) => ` ${n.replace(',', '.')}pct `)
+    .replace(/[ūû]/g, 'u');
+  const out = new Set();
+  for (const m of t.replace(RE_TAILLE, ' ').replace(/[^a-z0-9. ]/g, ' ').split(/\s+/)) {
+    const x = m.replace(/^\.+|\.+$/g, '');
+    if (/^\d+(?:\.\d+)?pct$/.test(x)) out.add(x);
+    else if (x.length >= 2 && !VIDES.has(x) && !/^\d/.test(x)) out.add(x.replace(/\./g, ''));
+  }
+  return out;
+}
+
 /**
  * Le même produit que la fiche, parmi les résultats d'UNE bannière, ou null (dans le doute).
- * Même code-barres → oui. Sinon : même format ET tous les mots de la fiche (marque comprise) dans le nom du site ;
- * fiche sans marque (« Lait 2 % 4 L ») → le moins cher qui remplit ces conditions. Deux candidats de prix
+ * Même code-barres → oui. Sinon : même format, tous les mots de la fiche (marque et pourcentage compris),
+ * aucun mot qui change le produit (sans lactose, chocolat, bio, léger, non salé…) absent de la fiche,
+ * et peu de mots en trop (2 au plus ; 4 pour une fiche sans marque, où la marque du site s'ajoute).
+ * Fiche sans marque (« Lait 2 % 4 L ») → le moins cher qui remplit ces conditions. Deux candidats de prix
  * différents pour une fiche AVEC marque → dans le doute, aucun.
  */
 export function memeProduit(fiche, produits, codes = []) {
@@ -153,9 +178,18 @@ export function memeProduit(fiche, produits, codes = []) {
   if (parCode) return parCode;
   const cf = cleFormat(fiche?.format);
   if (!cf) return null;
-  const voulus = mots(`${fiche.marque || ''} ${fiche.nom || ''}`);
-  if (!voulus.size) return null;
-  const ok = (produits || []).filter((p) => cleFormat(p.format || p.nom) === cf && [...voulus].every((m) => mots(p.nom).has(m)));
+  const voulus = new Set([...motsStricts(`${fiche.marque || ''} ${fiche.nom || ''}`)].filter((m) => !BRUIT.has(m)));
+  if (![...voulus].some((m) => !m.endsWith('pct'))) return null;
+  const maxTrop = fiche.marque ? 2 : 4;
+  const ok = (produits || []).filter((p) => {
+    if (cleFormat(p.format || p.nom) !== cf) return false;
+    const ms = motsStricts(p.nom);
+    if (![...voulus].every((m) => ms.has(m))) return false;
+    const trop = [...ms].filter((m) => !voulus.has(m) && !BRUIT.has(m));
+    if (trop.some((m) => DISTINCTIFS.has(m))) return false;
+    if (trop.some((m) => m.endsWith('pct'))) return false;   // 1 % ≠ 2 %, même si la fiche n'en dit rien
+    return trop.length <= maxTrop;
+  });
   if (!ok.length) return null;
   ok.sort((x, y) => x.prix - y.prix);
   if (fiche.marque && ok.length > 1 && ok.some((p) => p.prix !== ok[0].prix)) return null;
