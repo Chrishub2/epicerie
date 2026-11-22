@@ -21,6 +21,9 @@ function lirePro() { try { return JSON.parse(localStorage.getItem(CLE_PRO)) || [
 let etatsPro = new Map();
 
 /** Remplace la liste des photos pro (lignes { article_id, source_url, statut?, page_url? } venues de Supabase). */
+/** La fiche a-t-elle une vraie photo du produit (photo pro approuvée) ? Sert à la complétude (S17). */
+export const aPhotoPro = (id) => !!(id && pro.has(id));
+
 export function definirPhotosPro(lignes) {
   if (!Array.isArray(lignes)) return;
   const ok = (l) => l?.article_id && l?.source_url && (!l.statut || l.statut === 'approuvee');

@@ -12,8 +12,8 @@ const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août'
 const SRC = { circulaire: 'Circulaire', flipp: 'Circulaire', epiceries_ca: 'En ligne', recu: 'Reçu', photo: 'Vu en magasin', manuel: 'Vu en magasin' };
 const LB = 0.45359;
 // Marques fréquentes, reconnues au début ou au milieu du nom lu (complétées par les marques de la fiche)
-export const MARQUES = ['Maple Leaf Prime', 'Maple Leaf', 'Maxwell House', 'Giant Value', 'Gay Lea', 'Liberté', 'Lactantia', 'Président', 'Villaggio', 'Olymel', 'Nabob',
-  'Irrésistible', 'Cashmere', 'Selection', 'Cascades', 'Savvy', 'Royale', 'Philadelphia', 'Dainty', 'Kimora', 'PC', 'Natrel', 'Québon', 'Sélection', 'Compliments', 'Kirkland'];
+import { MARQUES } from '../marques.js';
+export { MARQUES };
 
 /** « 4,99 $ » → [4.99, ''] ; « 1,99 $/lb » → [1.99, 'lb'] ; illisible → [null, '']. */
 export function prixDe(o) {

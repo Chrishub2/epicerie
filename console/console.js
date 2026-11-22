@@ -101,7 +101,7 @@ function vignette(a, grande = false) {
   const h = (parseInt(String(a.rayonId).slice(1), 10) * 47) % 360;
   return `<span class="vignette${grande ? ' grande' : ''}" style="background:hsl(${h} 38% 38%)" title="Photo (fictive)">${esc(lettres)}</span>`;
 }
-function jauge(n, total = 6) {
+function jauge(n, total = 5) {   // S17 : format, marque (fiche d'une seule marque), photo du produit, vrai prix, rayon
   let b = '';
   for (let i = 0; i < total; i++) b += `<i class="${i < n ? 'plein' : ''}"></i>`;
   return `<span class="jauge" data-n="${n}" title="${n}/${total} données de base">${b}</span><span class="n">${n}/${total}</span>`;
@@ -280,9 +280,13 @@ function vueTdb(t) {
   const codes = new Set(E.articles.flatMap(codesDe));
   const alias = variantes.reduce((s, v) => s + (v.alias?.length || 0), 0);
   const applicables = A.problemes.filter((p) => p.correction && p.confiance >= SEUIL_LOT).length;
-  const histo = [0, 0, 0, 0, 0, 0, 0];
-  for (const a of E.articles) histo[completude(a, { prix: A.prixParArticle.get(a.id) || [], rayons: E.rayons }).ok]++;
-  const completes = histo[6];
+  const histo = [0, 0, 0, 0, 0, 0];
+  let completes = 0;
+  for (const a of E.articles) {
+    const c = completude(a, { prix: A.prixParArticle.get(a.id) || [], rayons: E.rayons, photosPro: E.photosPro });
+    histo[Math.round((c.ok / c.total) * 5)]++;   // ramené sur 5 (les fiches de fruits et légumes en ont 4)
+    if (c.ok === c.total) completes++;
+  }
   const parRegle = Object.entries(REGLES).map(([code, r]) => ({ code, r, n: A.problemes.filter((p) => p.code === code).length }));
   const maxR = Math.max(...parRegle.map((x) => x.n), 1);
   const tuiles = [
@@ -301,9 +305,9 @@ function vueTdb(t) {
           ${parRegle.map(({ code, r, n }) => `<a href="#/boite" data-regle="${code}"><span class="prio p${r.priorite}">P${r.priorite}</span>${r.titre}</a>
             <span class="b"><i style="width:${(n / maxR) * 100}%;background:var(--p${r.priorite})"></i></span><span class="mono num" style="text-align:right">${nf(n)}</span>`).join('')}
         </div></section>
-        <section class="panneau"><h2>Complétude des fiches (6 données de base)</h2>
-          <div class="histo">${histo.map((n, i) => `<div class="col" title="${nf(n)} fiche(s) à ${i}/6"><span>${nf(n)}</span><i style="height:${(n / Math.max(...histo)) * 100}%"></i><span>${i}/6</span></div>`).join('')}</div>
-          <p class="muet" style="margin:10px 0 0">Format lisible, marque, code-barres, photo, vrai prix, rayon autre que Divers — mêmes critères que le catalogue du téléphone.</p>
+        <section class="panneau"><h2>Complétude des fiches (5 données de base)</h2>
+          <div class="histo">${histo.map((n, i) => `<div class="col" title="${nf(n)} fiche(s) à ${i}/5"><span>${nf(n)}</span><i style="height:${(n / Math.max(...histo)) * 100}%"></i><span>${i}/5</span></div>`).join('')}</div>
+          <p class="muet" style="margin:10px 0 0">Format lisible, marque (fiche d'une seule marque), vraie photo du produit, vrai prix, rayon autre que Divers — mêmes critères que le téléphone.</p>
         </section>
         <section class="panneau"><h2>Dernières modifications</h2>
           ${MODE === 'reel' ? (histoBase.length ? `<ul class="chrono">${histoBase.slice(0, 8).map(ligneHistoBase).join('')}</ul>` : '<p class="muet">Aucune modification enregistrée depuis l\'installation de l\'historique (C2).</p>')
@@ -329,7 +333,7 @@ const COLONNES = [
   { cle: 'rayonId', titre: 'Rayon', largeur: 175, tri: true, edit: 'rayon', rendu: (a) => celluleEdit(a, 'rayonId') ?? esc(rayonNom(a.rayonId)) },
   { cle: 'sku', titre: 'SKU', largeur: 56, tri: true, aligne: 'right', rendu: (a) => `<span class="mono">${variantesActives(a).length}</span>` },
   { cle: 'codes', titre: 'Codes', largeur: 60, tri: true, aligne: 'right', rendu: (a) => { const c = codesDe(a); const ko = c.filter((x) => !gtinValide(x)).length; return `<span class="mono" style="${ko ? 'color:var(--erreur)' : ''}">${c.length}${ko ? ' ✕' : ''}</span>`; } },
-  { cle: 'comp', titre: 'Complétude', largeur: 110, tri: true, rendu: (a) => jauge(compDe(a).ok) },
+  { cle: 'comp', titre: 'Complétude', largeur: 110, tri: true, rendu: (a) => jauge(compDe(a).ok, compDe(a).total) },
   { cle: 'prix', titre: 'Meilleur prix (120 j)', largeur: 150, tri: true, rendu: (a) => { const m = meilleurPrix(E, a, A.prixParArticle); return m ? `<span class="mono num">${libelleUnitaire(m.pu, a.uniteRef).split(' · ')[0]}</span> <span class="discret">${BANNIERES[m.banniere]}</span>` : '<span class="discret">—</span>'; } },
   { cle: 'pb', titre: 'Problèmes', largeur: 120, tri: true, rendu: (a) => prios(A.parArticle.get(a.id)) },
   { cle: 'maj', titre: 'Modifié', largeur: 96, tri: true, rendu: (a) => `<span class="muet">${dateCourte(a.maj)}</span>` },
@@ -340,7 +344,7 @@ function compDe(a) {
   const k = a.id + '|' + a.maj + '|' + (A.prixParArticle.get(a.id)?.length || 0) + '|' + a.rayonId + a.format + a.marque + (a.codes || []).join() + a.imageUrl;
   const c = cacheComp.get(a.id);
   if (c?.k === k) return c.v;
-  const v = completude(a, { prix: A.prixParArticle.get(a.id) || [], rayons: E.rayons });
+  const v = completude(a, { prix: A.prixParArticle.get(a.id) || [], rayons: E.rayons, photosPro: E.photosPro });
   cacheComp.set(a.id, { k, v });
   return v;
 }
@@ -638,7 +642,7 @@ function rendreDetail() {
         <div class="fil"><b>${esc(rayonNom(a.rayonId))}</b> › type de produit</div>
         <h1>${esc(a.nom)}</h1>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center">
-          ${jauge(comp.ok)} ${a.local ? '<span class="badge ok">🍁 Québec</span>' : ''} ${a.bio ? '<span class="badge ok">Bio</span>' : ''}
+          ${jauge(comp.ok, comp.total)} ${a.local ? '<span class="badge ok">🍁 Québec</span>' : ''} ${a.bio ? '<span class="badge ok">Bio</span>' : ''}
           <span class="badge mono">${a.id}</span><span class="discret">modifié ${dateCourte(a.maj)} par ${esc(a.majPar || '—')}</span>
         </div>
       </div>
@@ -1057,7 +1061,7 @@ function vueComparer(t) {
     ['Noms sur reçus', (a) => variantesActives(a).flatMap((v) => v.alias || []).map((x) => `<span class="alias">${esc(x.libelle)}</span>`).join('') || '—'],
     ['Meilleur prix', (a) => { const m = meilleurPrix(E, a, A.prixParArticle); return m ? `${libelleUnitaire(m.pu, a.uniteRef).split(' · ')[0]} · ${BANNIERES[m.banniere]}` : '—'; }],
     ['Prix observés', (a) => String(A.prixParArticle.get(a.id)?.length || 0)],
-    ['Complétude', (a) => jauge(compDe(a).ok)],
+    ['Complétude', (a) => jauge(compDe(a).ok, compDe(a).total)],
     ['Problèmes', (a) => prios(A.parArticle.get(a.id))],
   ];
   const cellule = (f, a) => f(a);
@@ -1209,6 +1213,7 @@ async function fusionnerReel(cibleId, sourceIds) {
   try {
     const lignes = await source.chargerObjets();
     E = construireEtat(lignes, source.membres);
+    E.photosPro = await source.chargerPhotosPro().catch(() => new Set());
     histoBase = await source.chargerHistorique();
   } catch (err) { problemes.push(`relecture : ${err.message}`); }
   for (const id of ids) ui.selection.delete(id);
@@ -1501,6 +1506,7 @@ async function chargerTout() {
   if (!foyer) { ecranAttente('Ce compte n\'a pas encore de foyer. Crée-le ou joins-le dans l\'app téléphone (Plus → Mon foyer et partage).', true); etatSynchro('erreur', 'Aucun foyer'); return; }
   const lignes = await source.chargerObjets((n) => ecranAttente(`Lecture de ton foyer… ${n} élément(s)`));
   E = construireEtat(lignes, source.membres);
+  try { E.photosPro = await source.chargerPhotosPro(); } catch (err) { console.warn('Photos pro', err); E.photosPro = new Set(); }   // complétude S17
   try { histoBase = await source.chargerHistorique(); } catch (err) { console.warn('Historique', err); histoBase = []; }
   try { for (const cle of await source.chargerDecisions()) ignores.add(cle); } catch (err) { console.warn('Décisions', err); }
   await chargerVisuels();

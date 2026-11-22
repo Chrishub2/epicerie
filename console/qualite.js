@@ -26,7 +26,8 @@ export const REGLES = {
   rayon_divers: { priorite: 3, titre: 'Rayon « Divers »', explication: 'Le produit n\'est pas classé : il apparaît en fin de liste au magasin.' },
   format_manquant: { priorite: 3, titre: 'Format manquant', explication: 'Sans format, impossible de calculer un prix comparable.' },
   marque_manquante: { priorite: 3, titre: 'Marque manquante', explication: 'La marque aide à relier les reçus et le scan à la bonne variante.' },
-  code_manquant: { priorite: 3, titre: 'Code-barres manquant', explication: 'Le produit ne sera pas reconnu au scan.' },
+  code_manquant: { priorite: 3, titre: 'Code-barres manquant', explication: 'Le produit ne sera pas reconnu au scan.' },   // plus produit depuis S17 (le code n'est plus une donnée de base)
+  photo_manquante: { priorite: 3, titre: 'Photo du produit manquante', explication: 'Aucune vraie photo (marque, épicier, collée ou la tienne) : seule l’image du générique s’affiche.' },
   photo_manquante: { priorite: 3, titre: 'Photo manquante', explication: 'Une photo aide à retrouver le produit en magasin.' },
   prix_manquant: { priorite: 3, titre: 'Aucun vrai prix', explication: 'Aucun prix observé : le produit ne peut pas être comparé.' },
   doublon_possible: { priorite: 4, titre: 'Doublon possible', explication: 'Noms identiques à un pluriel ou des accents près.' },
@@ -148,7 +149,7 @@ export function analyser(e, ignores = new Set()) {
       }
     }
     // --- Données manquantes (les 6 critères de l'app)
-    const comp = completude(a, { prix: prixParArticle.get(a.id) || [], rayons: e.rayons }); // e réduit : évite de parcourir tous les prix pour chaque produit
+    const comp = completude(a, { prix: prixParArticle.get(a.id) || [], rayons: e.rayons, photosPro: e.photosPro }); // e réduit : évite de parcourir tous les prix pour chaque produit
     for (const m of comp.manquants) {
       if (m.cle === 'rayon') {
         const v = votes.get(singulier(mots(a.nom)[0] || ''));
@@ -175,6 +176,7 @@ export function analyser(e, ignores = new Set()) {
           correction: autre ? { articleId: a.id, type: 'champ', champ: 'marque', avant: a.marque, apres: autre.marque, texte: `→ ${autre.marque}` } : null,
         });
       } else if (m.cle === 'code') ajouter('code_manquant', [a.id], { probleme: 'Aucun code-barres', raison: 'Scanner le produit au prochain passage.' });
+      else if (m.cle === 'photo') ajouter('photo_manquante', [a.id], { probleme: 'Aucune vraie photo du produit', raison: 'Dans la fiche complète : colle la photo de la marque ou de l’épicier, ou prends la tienne.' });
       else if (m.cle === 'photo') ajouter('photo_manquante', [a.id], { probleme: 'Aucune photo', raison: 'Photo officielle (Open Food Facts) ou photo en magasin.' });
       else if (m.cle === 'prix') ajouter('prix_manquant', [a.id], { probleme: 'Aucun prix réel observé', raison: 'Lier à épiceries.ca ou attendre un reçu.' });
     }

@@ -12,6 +12,7 @@ import { analyserOffre, analyserFormat } from './normalise.js';
 import { ajouterTache } from './attente.js';
 import * as Sync from './sync.js';
 import * as P from './produits.js';
+import { aPhotoPro } from './visuels.js';
 import { texteRecherche, sansAccents as sansAccentsNom } from './noms.js';
 import { monterCirculaires } from './circulaires.js';
 import { natureLigne, etatLigne, candidatsLignes, choixEvident, ressemblanceMutuelle, lignesIdentiques } from './lignes-recu.js';
@@ -229,7 +230,7 @@ function vueCatalogue(v) {
   const avecCode = e.articles.filter((a) => a.codes?.length).length;
   // Données de base de chaque fiche (ce qui manque pour comparer, scanner et relier les reçus)
   const prixReels = P.articlesAvecPrixReel(e.prix); // une passe sur les prix, pas une par fiche
-  const comp = new Map(e.articles.map((a) => [a.id, P.completude(a, e, { prixReels })]));
+  const comp = new Map(e.articles.map((a) => [a.id, P.completude(a, e, { prixReels, photo: (x) => aPhotoPro(x.id) })]));
   const nbIncomplets = [...comp.values()].filter((c) => c.manquants.length || c.alertes.length).length;
   v.innerHTML = retour() + `<p class="doux">Touche un article pour modifier son nom, son rayon, son unité de comparaison ou son format.</p>
     <div class="carte"><button class="btn" id="invScan" style="width:100%">▥ Scanner mes produits</button>

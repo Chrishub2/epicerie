@@ -115,6 +115,13 @@ export class SourceSupabase {
    * Retourne la nouvelle version. Erreur `conflit` (code 40001) si l'objet a changé ailleurs depuis `version`.
    * Les champs propres à la console (non énumérables) ne sont jamais envoyés.
    */
+  /** Fiches qui ont une vraie photo du produit (photo pro approuvée) : Set d'articleId (complétude S17). */
+  async chargerPhotosPro() {
+    const { data, error } = await this.sb.from('photos_pro').select('article_id').eq('foyer_id', this.foyer.id).eq('statut', 'approuvee').limit(5000);
+    if (error) throw error;
+    return new Set((data || []).map((l) => l.article_id));
+  }
+
   /** Réglages par famille (type « famille ») : niveau Sorte séparé ou dans le nom. Le téléphone ignore ce type. */
   async chargerFamilles() {
     const { data, error } = await this.sb.from('objets').select('id, data, version')

@@ -14,6 +14,7 @@
 // Module pur : dépend seulement de normalise.js (store.js l'importe).
 // =====================================================================
 import { analyserFormat } from './normalise.js';
+import { MARQUES } from './marques.js';
 
 /** Champs copiés de l'article vers sa variante préférée (l'article reste la référence en v31). */
 const CHAMPS_MIROIR = ['marque', 'format', 'imageUrl', 'nutriscore', 'liens', 'local', 'bio', 'allergenes', 'offVerifie', 'majPrix'];
@@ -365,8 +366,30 @@ export function articlesAvecPrixReel(prix) {
   for (const p of prix || []) if (estPrixReel(p)) s.add(p.articleId);
   return s;
 }
+const sansAcc = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 /**
- * Les 6 données de base d'une fiche, et ce qui manque. Une fiche « complète » peut être
+ * Marques vues pour une fiche : celle de la fiche, de ses variantes, des noms corrigés (✎) et celles repérées
+ * dans le nom lu de ses vrais prix. Set de noms sans accents (« Sélection » = « Selection »).
+ */
+export function marquesVues(a, prix = []) {
+  const s = new Set();
+  const ajout = (m) => { const n = sansAcc(m); if (n) s.add(n); };
+  ajout(a.marque);
+  for (const v of a.variantes || []) if (!v.retiree) ajout(v.marque);
+  for (const p of prix) {
+    if (p.articleId !== a.id || !estPrixReel(p)) continue;
+    const corrigee = a.nomsProduits?.[p.id]?.marque || p.nomCorrige?.marque;
+    if (corrigee) { ajout(corrigee); continue; }
+    const t = sansAcc(p.nomProduit);
+    const m = MARQUES.find((x) => t.includes(sansAcc(x)));
+    if (m) ajout(m);
+  }
+  return s;
+}
+/**
+ * S17 : format, marque (fiche d'une seule marque), vraie photo du produit (photo pro approuvée ; l'image héritée
+ * ne compte pas ; opts.photo(a) ou opts.photosPro / e.photosPro), vrai prix, rayon. Plus de code-barres.
+ * Ancien texte : les 6 données de base d'une fiche, et ce qui manque. Une fiche « complète » peut être
  * comparée (format + vrai prix), reconnue au scan et aux reçus (code + marque), et retrouvée (photo, rayon).
  * Retourne { ok, total, manquants:[{cle, icone, texte}], alertes:[texte] }.
  * opts.prixReels (facultatif) : Set d'articleId ayant un vrai prix, de articlesAvecPrixReel(e.prix).
@@ -376,11 +399,14 @@ export function completude(a, e, opts = {}) {
   const prixReel = opts.prixReels ? opts.prixReels.has(a.id) : (e.prix || []).some((p) => p.articleId === a.id && estPrixReel(p));
   const rayon = (e.rayons || []).find((r) => r.id === a.rayonId);
   const f = analyserFormat(a.format);
+  // S17 (Chris, 21 nov.) : marque exigée seulement pour une fiche d'une seule marque ; vraie photo du produit exigée ;
+  // le code-barres ne compte plus (il appartient au produit de marque, pas à la fiche)
+  const plusieursMarques = marquesVues(a, e.prix || []).size > 1;
+  const photo = typeof opts.photo === 'function' ? !!opts.photo(a) : !!(opts.photosPro || e.photosPro)?.has?.(a.id);
   const criteres = [
     { cle: 'format', icone: '⚖️', texte: 'format', ok: !!f },
-    { cle: 'marque', icone: '🏷️', texte: 'marque', ok: !!String(a.marque || '').trim() },
-    // S16 : en vrac (fruits et légumes), le code est facultatif ; la photo est une information, hors de la Santé
-    ...(/fruits|légumes/i.test(rayon?.nom || '') ? [] : [{ cle: 'code', icone: '▥', texte: 'code-barres', ok: codesDe(a).length > 0 || !!a.plu?.length }]),
+    ...(plusieursMarques ? [] : [{ cle: 'marque', icone: '🏷️', texte: 'marque', ok: !!String(a.marque || '').trim() }]),
+    { cle: 'photo', icone: '📷', texte: 'photo du produit', ok: photo },
     { cle: 'prix', icone: '💲', texte: 'vrai prix', ok: prixReel },
     { cle: 'rayon', icone: '🗂️', texte: 'rayon', ok: !!rayon && !/^divers$/i.test(rayon.nom) },
   ];

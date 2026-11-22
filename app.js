@@ -27,7 +27,7 @@ import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
 import { aRelier, appliquerFamilles } from './rattacher.js';
-import { chargerVisuels, sourcesRattachement, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
+import { chargerVisuels, sourcesRattachement, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, aPhotoPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -1652,7 +1652,7 @@ export function ficheArticle(articleId, ligneId) {
     ${a.exclusif ? `<div class="alerte ambre">Vendu seulement chez <b>${esc(nomBanniere(a.exclusif))}</b> : les autres bannières sont ignorées pour ce produit.</div>` : ''}
     <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres</button>
     <p class="doux" style="margin:-4px 0 10px">Remplit la fiche : nom, marque, format, catégorie, photo et prix.</p>
-    ${(() => { const c = P.completude(a, e, { nomBanniere }); const k = htmlAConfirmer(a, e);
+    ${(() => { const c = P.completude(a, e, { nomBanniere, photo: (x) => aPhotoPro(x.id) }); const k = htmlAConfirmer(a, e);
       // S16 : chaque avertissement peut être ignoré pour ce produit ; il va dans l'historique (replié), d'où on le rétablit
       const ign = (cle, texte) => `<a href="#" class="ignorer" data-ignorer="${esc(cle)}" data-texte="${esc(texte)}" title="Ne plus compter ce point pour ce produit">Ignorer</a>`;
       const histo = c.ignorees.length ? `<details class="histo-ign"><summary>Historique · ${c.ignorees.length} ignoré${c.ignorees.length > 1 ? 's' : ''}</summary>
