@@ -1,10 +1,12 @@
 // Outils partagés : échappement, fenêtre modale, calculs de prix.
-import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable } from './normalise.js';
+import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable, formatLisible } from './normalise.js';
 import { get } from './store.js';
 import { BANNIERES } from './demo-data.js';
 import { prixEnVigueur } from './rabais.js';
 import { jourQuebec } from './couverture-circulaires.js';
 import { trouveParNomOuMarque } from './noms.js';
+import { enfantsGenerique } from './arbre-recherche.js';
+import { familleDe } from './visuels.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -212,6 +214,13 @@ function rabaisPersoActifs() {
  */
 export function offresArticle(article) {
   const e = get();
+  // Fiche générique (niveau 1 ou 2, recherche-niveaux-v2) : ses offres sont celles de ses fiches dessous,
+  // comparées au kg / L, rabais inclus ; le produit exact derrière chaque prix est nommé.
+  if (article?.estGenerique) {
+    const lignesGen = enfantsGenerique(article, e.articles, familleDe).flatMap((x) => offresArticle(x).map((l) => ({
+      ...l, articleEnfant: x.id, produitOffre: l.produitOffre || [[x.marque, x.nom].filter(Boolean).join(' '), formatLisible(l.format || x.format)].filter(Boolean).join(' · ') })));
+    return classerLignes(lignesGen);
+  }
   const lignes = [];
   // Toutes les marques/formats du produit sont comparées au kg / L ; une variante retirée ne compte plus
   const variantes = new Map((article.variantes || []).map((v) => [v.id, v]));
@@ -253,6 +262,12 @@ export function offresArticle(article) {
       ...(base.pc !== undefined ? { pc: base.pc == null ? null : base.pc * k } : {}),
       rabaisTexte: `−${r.pct} % perso${r.plafond ? ` (sur ${r.plafond} $)` : ''}` });
   }
+  return classerLignes(lignes);
+}
+
+/** Trie les offres du moins cher au plus cher (prix comparable) et les colore (vert = meilleur, rouge = le plus cher). */
+function classerLignes(lignes) {
+  const cmp = (l) => prixComparable(l) ?? Infinity;
   lignes.sort((a, b) => cmp(a) - cmp(b) || (a.pu ?? Infinity) - (b.pu ?? Infinity));
   const avecPrix = lignes.filter((l) => prixComparable(l) != null);
   const meilleur = avecPrix.length ? prixComparable(avecPrix[0]) : null;

@@ -102,8 +102,15 @@ body:not(.onglet-liste) .barre-liste, body:not(.onglet-liste) .puces-mag { displ
 .champ-ajout .fermer-saisie { display: none; width: 40px; background: transparent; color: inherit; font-size: 20px; font-weight: 600; }
 .champ-ajout.ouvert .fermer-saisie { display: block; }
 /* Pendant la saisie : le reste de l'écran passe sous un voile ; seuls le champ et ses propositions restent nets */
-.voile-saisie { display: none; position: fixed; inset: 0; z-index: 6; background: rgba(0, 0, 0, .55); }
+.voile-saisie { display: none; position: fixed; inset: 0; z-index: 6; background: rgba(0, 0, 0, .78); }
 body.saisie-active .voile-saisie { display: block; }
+/* Flèche du clavier (v117) : collée au-dessus du clavier (--clavier-bas = hauteur du clavier), ou en bas quand il est caché */
+.btn-clavier { display: none; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--clavier-bas, 0px) + env(safe-area-inset-bottom, 0px));
+  z-index: 8; width: 64px; height: 30px; border: 1px solid var(--ligne); border-bottom: 0; border-radius: 12px 12px 0 0;
+  background: var(--carte); color: var(--texte); font-size: 18px; line-height: 1; cursor: pointer; }
+body.saisie-active .btn-clavier { display: block; }
+body.clavier-cache .btn-clavier { bottom: calc(14px + env(safe-area-inset-bottom, 0px)); border-bottom: 1px solid var(--ligne); border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.45); }
 body.saisie-active header :is(.cal-entete, .puces-mag, .mode-magasin) { opacity: .25; }
 body.saisie-active nav.onglets { opacity: .25; pointer-events: none; }
 .champ-ajout.charge button:not(.fermer-saisie) { font-size: 0; }
@@ -348,6 +355,16 @@ button.icone { font-size: 20px; width: 44px; height: 44px; border-radius: 10px; 
 .sugg { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-top: 1px solid var(--ligne);
   background: none; color: var(--texte); font: inherit; text-align: left; cursor: pointer; }
 .sugg:first-child { border-top: 0; }
+/* Arborescence de ta base (v117) : numéro de niveau, niveaux inférieurs légèrement décalés */
+.suggestions { max-height: calc(var(--vue-haut, 100vh) - 150px); overflow-y: auto; }
+.sugg.arbre .niv { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--gris-fond); color: var(--doux); }
+.sugg.arbre .niv.n1 { background: var(--accent); color: #fff; }
+.sugg.arbre .niv.n2 { background: var(--vert-fond); color: var(--vert); }
+.sugg.arbre.d1 { padding-left: 26px; } .sugg.arbre.d2 { padding-left: 42px; }
+.sugg.arbre.tel-quel { border-top-style: dashed; }
+.sugg-px { flex: none; text-align: right; font-size: 13px; white-space: nowrap; }
+.sugg-px small { display: block; font-size: 11px; }
 /* Recherche chez tes bannières (extension Chrome de l'ordinateur) */
 .rb-titre { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px 4px; border-top: 1px solid var(--ligne);
   font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--doux); }
@@ -704,6 +721,8 @@ try { var s = localStorage.getItem('epicerie.skin'); if (s && s !== 'classique')
 </header>
 <!-- Pendant la saisie : voile sur le reste de l'écran (toucher le voile = fermer sans ajouter) -->
 <div class="voile-saisie" id="voileSaisie" aria-hidden="true"></div>
+<!-- Pendant la saisie : flèche ⌄ au-dessus du clavier pour le cacher ; clavier caché, ⌃ en bas pour le ramener -->
+<button type="button" class="btn-clavier" id="btnClavier" aria-label="Cacher le clavier">⌄</button>
 <div class="bandeau-demo cache" id="bandeauDemo"></div>
 <!-- Taille d'affichage : barre semi-cachée à gauche (ne touche pas l'en-tête) -->
 <div class="zoom-vue" id="zoomVue"><button class="zoom-poignee" id="zoomPoignee" aria-label="Taille d'affichage"></button>

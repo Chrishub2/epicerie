@@ -15,7 +15,7 @@ import { calendrierHtml } from './calendrier.js';
 import { REMPLACEMENTS, REMPLACEMENT_DEFAUT, remplacementDe, definirRemplacement, meilleursChoix, DICO_ATTRIBUTS, attributDe, caracteristiques, definirCaracteristique, retirerCaracteristique } from './choix.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
-import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique, rechercherSouple } from './epiceries.js';
+import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 import * as RB from './recherche-bannieres.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
 import * as Sync from './sync.js';
@@ -28,7 +28,8 @@ import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
 import { aRelier, appliquerFamilles } from './rattacher.js';
-import { chargerVisuels, sourcesRattachement, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, aPhotoPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
+import { construireArbre, nouvelleFicheGenerique } from './arbre-recherche.js';
+import { chargerVisuels, sourcesRattachement, familleDe, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, aPhotoPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -975,11 +976,34 @@ function terminerSaisie() {
   }).observe(champ, { attributes: true, attributeFilter: ['class'] });
   window.addEventListener('popstate', () => { if (champ.classList.contains('ouvert')) terminerSaisie(); });
   // Le champ s'élargit par-dessus l'en-tête quand on écrit, puis reprend sa place
-  saisie.addEventListener('focus', () => champ.classList.add('ouvert'));
+  saisie.addEventListener('focus', () => { champ.classList.add('ouvert'); clavierCache(false); });
   saisie.addEventListener('blur', () => setTimeout(() => {
     if (document.activeElement === saisie) return;
+    if (document.body.classList.contains('clavier-cache')) return;   // clavier caché par la flèche : le champ reste ouvert
     abandonner();
   }, 150));
+  // Flèche du clavier (v117) : ⌄ cache le clavier (les propositions restent) ; ⌃, ou toucher le champ, le ramène
+  const btnClavier = $('#btnClavier');
+  function clavierCache(oui) {
+    document.body.classList.toggle('clavier-cache', oui);
+    btnClavier.textContent = oui ? '⌃' : '⌄';
+    btnClavier.setAttribute('aria-label', oui ? 'Ramener le clavier' : 'Cacher le clavier');
+  }
+  btnClavier.addEventListener('pointerdown', (ev) => ev.preventDefault());   // le champ garde le focus jusqu'au clic
+  btnClavier.addEventListener('click', () => {
+    if (document.body.classList.contains('clavier-cache')) saisie.focus();
+    else { clavierCache(true); saisie.blur(); }
+  });
+  new MutationObserver(() => { if (!champ.classList.contains('ouvert')) clavierCache(false); })
+    .observe(champ, { attributes: true, attributeFilter: ['class'] });
+  // Hauteur du clavier (visualViewport) : la flèche se colle au-dessus, les propositions s'arrêtent avant
+  const vv = window.visualViewport;
+  const majClavier = () => {
+    const bas = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+    document.documentElement.style.setProperty('--clavier-bas', `${Math.round(bas)}px`);
+    document.documentElement.style.setProperty('--vue-haut', `${Math.round(vv ? vv.height : window.innerHeight)}px`);
+  };
+  vv?.addEventListener('resize', majClavier); vv?.addEventListener('scroll', majClavier); majClavier();
   // Toucher une suggestion ou ✓ ne fait pas perdre le focus au champ (sinon la liste se fermerait avant le toucher)
   zone.addEventListener('pointerdown', (ev) => ev.preventDefault());
   $('#btnEntree').addEventListener('pointerdown', (ev) => ev.preventDefault());
@@ -1001,7 +1025,7 @@ function terminerSaisie() {
   });
   // Toucher ailleurs que dans l'en-tête : le champ reprend sa place et les propositions se ferment
   document.addEventListener('pointerdown', (ev) => {
-    if (ev.target.closest('header') || !champ.classList.contains('ouvert')) return;
+    if (ev.target.closest('header') || ev.target.closest('#btnClavier') || !champ.classList.contains('ouvert')) return;
     abandonner();
   });
   $('#btnScan').onclick = () => ouvrirScan((a) => { ajouterALaListe(a.id); toast(`${a.nom} ajouté`); montrerAjout(a.id); });
@@ -1046,53 +1070,29 @@ function decouperSaisie(txt) {
 }
 
 /**
- * ✓ : produit connu → ajouté. Un seul produit inconnu → recherche en ligne silencieuse (icône de chargement) :
- * des produits trouvés → proposés ; rien → ajouté tel quel. Plusieurs produits ou hors ligne → ajoutés tels quels.
+ * ✓ (maquette recherche-niveaux-v2) : rien n'est cherché en ligne avant l'ajout.
+ * Produit(s) connu(s) → ajoutés. Un seul nom inconnu → « Mon nom tel quel » : ajouté tout de suite dans Prépa,
+ * et la recherche chez tes bannières part en arrière-plan.
  */
 async function valider() {
-  const saisie = $('#saisie'), champ = $('#champAjout');
+  const saisie = $('#saisie');
   const brut = saisie.value.trim();
-  if (!brut || champ.classList.contains('charge')) return;
+  if (!brut) return;
   const morceaux = decouperSaisie(brut);
-  const seul = morceaux.length === 1 && !trouverArticle(morceaux[0].nom) ? morceaux[0] : null;
-  if (!seul || !navigator.onLine) { terminerSaisie(); ajouterTexte(brut); return; }
-  masquerSuggestions();
-  champ.classList.add('charge');
-  // Demande de recherche chez tes bannières (faite par l'extension Chrome de l'ordinateur), déposée tout de suite
-  const rech = deposerRecherche(seul.nom);
-  let res = [];
-  try { res = await rechercherSouple(seul.nom); } catch { res = []; }
-  champ.classList.remove('charge');
-  if (saisie.value.trim() !== brut) return; // le texte a changé pendant la recherche
-  const vus = new Set();
-  const props = res.filter((r) => {
-    const k = sansAccents(`${r.brand || ''} ${r.name} ${r.size || ''}`);
-    if (vus.has(k)) return false;
-    vus.add(k); return true;
-  }).slice(0, 6);
-  if (!props.length && !rech) { terminerSaisie(); ajouterTexte(brut); return; }
-  const zone = $('#suggestions');
-  zone.innerHTML = (props.length && rech ? '<div class="rb-titre"><span>Dans les épiceries · épiceries.ca</span><span>tout de suite</span></div>' : '')
-    + props.map((r, i) => `<button class="sugg" data-enligne="${i}">${r.image ? `<img class="vignette petite" src="${esc(r.image)}" alt="">` : '<span class="vignette petite"></span>'}
-      <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(r.name)}</span>
-      <span class="doux une-ligne" style="display:block;font-size:12px">${esc([r.brand, r.size ? formatLisible(r.size) : ''].filter(Boolean).join(' · '))}</span></span></button>`).join('')
-    + (rech ? '<div id="rbZone"></div>' : '')
-    + `<button class="sugg" data-telquel="1"><span class="vignette petite" style="display:grid;place-items:center">＋</span><span class="grandir une-ligne">Garder « ${esc(brut)} » tel quel</span></button>`;
-  zone.classList.remove('cache');
-  champ.classList.add('ouvert'); // le clavier a pu se fermer pendant la recherche : le champ reste ouvert avec les propositions
-  $$('[data-enligne]', zone).forEach((b) => b.onclick = () => { terminerSaisie(); ajouterDepuisEnLigne(props[Number(b.dataset.enligne)], seul.quantite); });
-  $('[data-telquel]', zone).onclick = () => { terminerSaisie(); ajouterTexte(brut); };
-  if (rech) suivreRecherche(rech.id, seul.quantite);
+  const seul = morceaux.length === 1 && !trouverArticle(morceaux[0].nom);
+  terminerSaisie();
+  if (seul) ajouterTelQuel(brut); else ajouterTexte(brut);
 }
+
 
 // --- Recherche chez tes bannières (maquette recherche-bannieres-v1) ---
 let rechercheVue = null;   // { id, desabonner } : la demande affichée sous le champ, redessinée quand l'ordinateur répond
 function arreterRechercheVue() { rechercheVue?.desabonner(); rechercheVue = null; }
 
 /** Dépose la demande (synchronisée vers l'ordinateur) ; null si le téléphone n'est pas relié à ton foyer. */
-function deposerRecherche(q) {
+function deposerRecherche(q, articleId = null) {
   if (!Sync.estPret()) return null;
-  const r = RB.nouvelleRecherche(q, S.uid('rch'));
+  const r = { ...RB.nouvelleRecherche(q, S.uid('rch')), ...(articleId ? { articleId } : {}) };   // articleId : la fiche à compléter
   S.maj((e) => {
     const vieilles = new Set(RB.aRetirer(e.recherches));
     e.recherches = (e.recherches || []).filter((x) => !vieilles.has(x.id));
@@ -1181,98 +1181,87 @@ function ajouterDepuisEnLigne(r, quantite = 1) {
 // --- Saisie : d'abord ta base (articles déjà achetés / au catalogue) ---
 function masquerSuggestions() { $('#suggestions')?.classList.add('cache'); }
 
-// Idées Open Food Facts pendant la saisie : produits vendus au Canada, regroupés par nom.
-// Limite d'Open Food Facts ≈ 10 recherches/min : attente de 500 ms après la frappe, cache, et 8 appels/min au plus.
-const cacheOFF = new Map();
-const appelsOFF = [];
-let minuterieOFF = null;
-function suggererOFF(q, txt) {
-  clearTimeout(minuterieOFF);
-  minuterieOFF = setTimeout(async () => {
-    if (!navigator.onLine || sansAccents($('#saisie')?.value || '').indexOf(q) < 0) return;
-    let idees = cacheOFF.get(q);
-    if (!idees) {
-      const maintenant = Date.now();
-      while (appelsOFF.length && maintenant - appelsOFF[0] > 60000) appelsOFF.shift();
-      if (appelsOFF.length >= 8) return;
-      appelsOFF.push(maintenant);
-      try {
-        const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&json=1&page_size=20`
-          + '&tagtype_0=countries&tag_contains_0=contains&tag_0=canada&fields=product_name_fr,product_name,brands,quantity,image_front_small_url');
-        const j = await r.json();
-        // Regroupe par nom générique (« Riz basmati ») avec quelques marques/formats en exemple
-        const groupes = new Map();
-        for (const p of j.products || []) {
-          const nom = String(p.product_name_fr || p.product_name || '').trim();
-          if (!nom || !sansAccents(nom).includes(q)) continue;
-          const k = sansAccents(nom);
-          const g = groupes.get(k) || { nom: nom.replace(/^./, (c) => c.toUpperCase()), exemples: [], image: p.image_front_small_url || '' };
-          const ex = [p.brands?.split(',')[0]?.trim(), p.quantity].filter(Boolean).join(' ');
-          if (ex && g.exemples.length < 3 && !g.exemples.includes(ex)) g.exemples.push(ex);
-          groupes.set(k, g);
-        }
-        // On n'affiche pas ce que ton catalogue a déjà
-        idees = [...groupes.values()].filter((g) => !trouverArticle(g.nom)).slice(0, 4);
-        cacheOFF.set(q, idees);
-      } catch { return; }
-    }
-    const boite = $('#suggOFF');
-    if (!boite || !idees.length) return;
-    $('#suggestions').classList.remove('cache'); // rien dans ton catalogue, mais des idées : on les montre
-    boite.innerHTML = `<div class="doux" style="font-size:12px;padding:6px 8px 2px">💡 Idées (Open Food Facts, Canada)</div>` + idees.map((g, i) =>
-      `<button class="sugg" data-off="${i}">${g.image ? `<img class="vignette petite" src="${esc(g.image)}" alt="">` : '<span class="vignette petite"></span>'}
-        <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(g.nom)}</span>
-        ${g.exemples.length ? `<span class="doux une-ligne" style="display:block;font-size:12px">ex. ${esc(g.exemples.join(' · '))}</span>` : ''}</span></button>`).join('');
-    $$('[data-off]', boite).forEach((b) => b.onclick = () => {
-      const r = txt.match(/^(\d+(?:[.,]\d+)?)\s*(?:x\s*)?/i);
-      const g = idees[Number(b.dataset.off)];
-      terminerSaisie();
-      ajouterTexte(`${r ? r[0] : ''}${g.nom}`, { forcerNouveau: true, image: g.image || null });
-    });
-  }, 500);
-}
 
-/** Suggestions pendant la frappe (ton catalogue, puis idées Open Food Facts). Rien trouvé → rien d'affiché. Retourne les produits trouvés. */
+/**
+ * Suggestions pendant la frappe (maquette recherche-niveaux-v2) : TA BASE seulement, en arborescence
+ * niveau 1 (générique) → niveau 2 (sorte) → niveau 3 (tes fiches), puis « Mon nom tel quel ».
+ * Aucune recherche en ligne ici : la vérification des prix se fait une fois le produit ajouté.
+ * Retourne [{ nom }] (le premier sert à compléter le mot dans le champ).
+ */
 function suggerer(txt) {
   const zone = $('#suggestions');
-  const q = sansAccents(txt.replace(/^\d+(?:[.,]\d+)?\s*(?:x\s*)?/i, ''));
+  const tapeNom = txt.replace(/^\d+(?:[.,]\d+)?\s*(?:x\s*)?/i, '');
+  const q = sansAccents(tapeNom);
   if (!zone || q.length < 2) { masquerSuggestions(); return []; }
   const e = S.get();
+  const src = sourcesRattachement();
   const achats = (id) => e.liste.filter((l) => l.articleId === id).length + (e.achats?.filter((x) => x.articleId === id).length || 0);
-  // Produits d'abord : nom, marque ou n'importe laquelle de leurs marques/formats (taper « tilda » trouve « Riz basmati blanc »)
-  // Nom générique, nom anglais et noms alternatifs ; « pommes » trouve « Pomme » (singulier automatique)
-  const tapeNom = txt.replace(/^\d+(?:[.,]\d+)?\s*(?:x\s*)?/i, '');
-  const pertinence = (a) => {
+  const pertFiche = (a) => {
     const pn = pertinenceNoms(a, tapeNom);
     if (pn) return pn;
-    const parVariante = P.variantesActives(a).find((v) => sansAccents(`${v.marque || ''} ${v.nom || ''}`).includes(q));
-    return parVariante || sansAccents(a.marque || '').includes(q) ? 0.5 : 0;
+    return P.variantesActives(a).some((v) => sansAccents(`${v.marque || ''} ${v.nom || ''}`).includes(q)) || sansAccents(a.marque || '').includes(q) ? 0.5 : 0;
   };
-  const trouves = e.articles.map((a) => ({ a, p: pertinence(a) })).filter((x) => x.p > 0)
-    .sort((x, y) => y.p - x.p || achats(y.a.id) - achats(x.a.id) || x.a.nom.localeCompare(y.a.nom, 'fr')).slice(0, 6).map((x) => x.a);
-  zone.innerHTML = trouves.map((a) => {
-    const m = meilleureOffre(a);
-    const nbV = P.variantesActives(a).length;
-    const detail = m
-      ? `${m.produitOffre ? `Moins cher : ${esc(m.produitOffre)}` : esc(formatLisible(a.format) || '')} · ${esc(nomOffre(m))}`
-      : `${esc(formatLisible(a.format) || '')}${nbV > 1 ? ` · ${nbV} marques/formats` : ''}`;
-    return `<button class="sugg" data-sugg="${a.id}">${photoDe(a) ? `<img class="vignette petite" src="${esc(photoDe(a))}" alt="">` : '<span class="vignette petite"></span>'}
-      <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(a.nom)}</span>
-        ${detail.replace(/^ · /, '') ? `<span class="doux une-ligne" style="display:block;font-size:12px">${detail.replace(/^ · /, '')}</span>` : ''}</span>
-      <span class="doux">${m ? esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0]) : ''}</span></button>`;
-  }).join('') + '<div id="suggOFF"></div>';
-  zone.classList.toggle('cache', !trouves.length); // rien dans ton catalogue → rien d'affiché (sauf idées OFF plus bas)
-  // Peu de résultats dans ton catalogue : idées tirées d'Open Food Facts (produits vendus au Canada)
-  if (trouves.length < 3 && q.length >= 3) suggererOFF(q, txt);
-  $$('[data-sugg]', zone).forEach((b) => b.onclick = () => {
-    const r = txt.match(/^(\d+(?:[.,]\d+)?)/);
-    ajouterALaListe(b.dataset.sugg, r ? Number(r[1].replace(',', '.')) : 1);
+  const rangees = construireArbre(e.articles, tapeNom, { famille: (a) => familleDe(a), referentiel: src?.generiques || {},
+    alternatifs: src?.alternatifs || {}, pertinenceFiche: pertFiche, poids: (a) => achats(a.id), max: 14 });
+  const quantite = () => { const r = txt.match(/^(\d+(?:[.,]\d+)?)/); return r ? Number(r[1].replace(',', '.')) : 1; };
+  // Prix d'une rangée : le moins cher connu (au kg / L, rabais inclus) parmi ses fiches
+  const prixRangee = (r) => {
+    const offres = r.articles.map((a) => meilleureOffre(a)).filter((m) => m?.pu != null);
+    const unite = offres[0]?.uniteRef;
+    return offres.filter((m) => m.uniteRef === unite).sort((x, y) => x.pu - y.pu)[0] || null;
+  };
+  const exact = e.articles.some((a) => sansAccents(a.nom) === q) || rangees.some((r) => sansAccents(r.nom) === q);
+  zone.innerHTML = (rangees.length ? '<div class="rb-titre"><span>Dans ta base</span><span>derniers prix connus</span></div>' : '')
+    + rangees.map((r, i) => {
+      const m = prixRangee(r);
+      const n = r.articles.length;
+      const a = r.article;
+      const photo = a ? photoDe(a) : photoDe({ generique: r.g, sorte: r.s });
+      const detail = r.niveau === 1 ? `n'importe quelle sorte ou marque · ${n} produit${n > 1 ? 's' : ''}`
+        : r.niveau === 2 ? `n'importe quelle marque · ${n} produit${n > 1 ? 's' : ''}`
+        : [a.marque, formatLisible(a.format)].filter(Boolean).join(' · ') || (m ? nomOffre(m) : '');
+      const decale = r.niveau === 3 && r.orpheline ? 0 : r.niveau === 3 ? (r.sousSorte ? 2 : 1) : r.niveau - 1;
+      return `<button class="sugg arbre d${decale}" data-arbre="${i}"><span class="niv n${r.niveau}" title="Niveau ${r.niveau}">${r.niveau}</span>
+        ${photo ? `<img class="vignette petite" src="${esc(photo)}" alt="">` : '<span class="vignette petite"></span>'}
+        <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(r.nom)}</span>
+        ${detail ? `<span class="doux une-ligne" style="display:block;font-size:12px">${esc(detail)}</span>` : ''}</span>
+        <span class="doux sugg-px">${m ? `${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}<small>${esc(nomOffre(m))}</small>` : ''}</span></button>`;
+    }).join('')
+    + (exact ? '' : `<button class="sugg arbre tel-quel" data-telquel="1"><span class="niv">✎</span><span class="vignette petite" style="display:grid;place-items:center">＋</span>
+      <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">Mon nom tel quel : « ${esc(tapeNom.trim())} »</span>
+      <span class="doux une-ligne" style="display:block;font-size:12px">l'ajouter dans Prépa, puis chercher chez les bannières</span></span></button>`);
+  zone.classList.remove('cache');
+  $$('[data-arbre]', zone).forEach((b) => b.onclick = () => {
+    const r = rangees[Number(b.dataset.arbre)];
     terminerSaisie();
-    toast(`${S.get().articles.find((a) => a.id === b.dataset.sugg).nom} ajouté`);
-    montrerAjout(b.dataset.sugg);
+    let id = r.article?.id || r.generiqueId;
+    if (!id) {   // niveau 1 ou 2 choisi pour la première fois : fiche générique (son prix = le moins cher de ses fiches)
+      const g = nouvelleFicheGenerique(r, S.uid('a'));
+      S.maj((x) => x.articles.push(g));
+      id = g.id;
+    }
+    ajouterALaListe(id, quantite());
+    toast(`${S.get().articles.find((a) => a.id === id).nom} ajouté`);
+    montrerAjout(id);
   });
-  return trouves;
+  const tq = $('[data-telquel]', zone);
+  if (tq) tq.onclick = () => { terminerSaisie(); ajouterTelQuel(txt); };
+  return rangees.map((r) => ({ nom: r.nom }));
 }
+
+/** « Mon nom tel quel » : fiche à ce nom (existante au même nom, sinon nouvelle) ajoutée tout de suite ; une nouvelle fiche
+ *  lance la recherche chez tes bannières (l'ordinateur répond en arrière-plan). */
+function ajouterTelQuel(txt) {
+  const { quantite, nom } = decouperSaisie(txt)[0] || {};
+  if (!nom) return;
+  const existant = S.get().articles.find((a) => sansAccents(a.nom) === sansAccents(nom));
+  const a = existant || creerArticle(nom);
+  ajouterALaListe(a.id, quantite);
+  if (!existant) deposerRecherche(nom, a.id);
+  toast(`${a.nom} ajouté`);
+  montrerAjout(a.id);
+}
+
 
 /**
  * « 2 lait, beurre et café » → plusieurs ajouts, sans fenêtre ni étape affichée.
