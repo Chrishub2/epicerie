@@ -7,7 +7,7 @@
 // - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
 // À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
 // =====================================================================
-const CACHE = 'epicerie-v111';
+const CACHE = 'epicerie-v112';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'marques.js', 'couverture.js', 'couverture-circulaires.js', 'demo-data.js',
   'ui.js', 'rabais.js', 'noms.js', 'calendrier.js', 'choix.js', 'comparer.js', 'circulaires.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'lignes-recu.js', 'plu.js', 'plu.json', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
   'retouche.js', 'maj.js', 'secteurs.js', 'bannieres-registre.js', 'scan.js', 'recettes.js', 'plus.js', 'envoi.js', 'manifest.webmanifest', 'icone.svg',
@@ -39,13 +39,31 @@ self.addEventListener('activate', (e) => {
 
 // Fichiers de l'app : depuis le cache de la version installée (rapide, et hors ligne).
 // Ce qui n'y est pas (ex. autres sites, base de données) : réseau normal.
+// Console ordinateur (console/) : TOUT ce qu'elle charge vient du réseau, y compris les fichiers partagés avec l'app
+// (produits.js, normalise.js…). Sinon elle mélangeait sa page à jour avec le calcul de l'ancienne version restée en cache
+// (ex. complétude 3/5 au lieu de 3/4 en v111). Hors ligne seulement : la copie en cache.
+const deLaConsole = async (e, url) => {
+  if (url.pathname.includes('/console/')) return true;
+  const client = e.clientId ? await self.clients.get(e.clientId) : null;
+  return !!client?.url && new URL(client.url).pathname.includes('/console/');
+};
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  e.respondWith(
-    caches.open(CACHE).then((c) => c.match(e.request, { ignoreSearch: true })
-      // Page inconnue → l'app (hors ligne), SAUF la console ordinateur (console/), servie par le réseau.
-      .then((trouve) => trouve || (e.request.mode === 'navigate' && !url.pathname.includes('/console/') ? c.match('./') : null))
-      .then((trouve) => trouve || fetch(e.request)))
-  );
+  e.respondWith((async () => {
+    const c = await caches.open(CACHE);
+    if (await deLaConsole(e, url)) {
+      try {
+        return await fetch(e.request.mode === 'navigate' ? e.request : new Request(e.request, { cache: 'no-cache' }));
+      } catch (err) {
+        const copie = await c.match(e.request, { ignoreSearch: true });
+        if (copie) return copie;
+        throw err;
+      }
+    }
+    // Téléphone : fichiers de la version installée (rapide, et hors ligne) ; page inconnue → l'app
+    const trouve = (await c.match(e.request, { ignoreSearch: true }))
+      || (e.request.mode === 'navigate' ? await c.match('./') : null);
+    return trouve || fetch(e.request);
+  })());
 });
