@@ -5,6 +5,9 @@
 // Lecture seule : rien n'est écrit.
 // =====================================================================
 
+import { definirCaracteristique, definirRemplacement } from '../choix.js';
+import { codeSaisi } from '../produits.js';
+
 const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 const SRC = { circulaire: 'Circulaire', flipp: 'Circulaire', epiceries_ca: 'En ligne', recu: 'Reçu', photo: 'Vu en magasin', manuel: 'Vu en magasin' };
 const LB = 0.45359;
@@ -56,9 +59,11 @@ const capitaliser = (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
  */
 export function construireFiche(art, prix, opts = {}) {
   const aid = art.id;
-  const c = opts.corr?.[aid] || {};
+  // Famille et sorte enregistrées sur le produit (fiche, étape 2) d'abord ; sinon la correspondance des visuels
+  const c0 = opts.corr?.[aid] || {};
+  const c = { g: art.generique || c0.g, s: art.sorte || c0.s };
   const g = c.g || '';
-  const r = (g && opts.ref?.generiques?.[g]) || [opts.nomRayon || '', '', art.nom, 'Sorte', ''];
+  const r = (g && opts.ref?.generiques?.[g]) || [opts.nomRayon || '', '', art.generiqueNom || art.nom, 'Sorte', ''];
   const u = { kg: 'kg', l: 'l', unite: 'u' }[art.uniteRef || 'kg'] || 'kg';
   const depuis = opts.depuis || '0000';
   const marques = [...new Set([art.marque, ...(art.variantes || []).filter((v) => !v.retiree).map((v) => v.marque), ...MARQUES].filter(Boolean))]
@@ -131,11 +136,45 @@ export function construireFiche(art, prix, opts = {}) {
   const favoris = var_.filter((v) => v.src === 'Reçu' || (art.marque && v.sorte === art.marque)).slice(0, 2).map((v) => v.id);
   const catId = g.slice(0, 7), scId = g.slice(0, 13), sorteRef = c.s || null;
   return {
-    cle: aid, nom: art.nom, gen: r[2] || art.nom, cat: r[0], sc: r[1], sorteAttr: r[3] || 'Sorte', valeursTypiques: r[4] || '',
-    sorteRef, unite: u, rayon: opts.nomRayon || '', nomEn: art.nomEn || '', nomsAlt: art.nomsAlt || [],
+    cle: aid, nom: art.nom, genId: g || null, gen: art.generiqueNom && !art.generique ? art.generiqueNom : (r[2] || art.nom), cat: r[0], sc: r[1], sorteAttr: r[3] || 'Sorte', valeursTypiques: r[4] || '',
+    sorteRef, unite: u, rayon: opts.nomRayon || '', nomEn: art.nomEn || '', nomsAlt: art.nomsAlt || [], nomsAltEn: art.nomsAltEn || [],
     format: art.format || '', marqueFiche: art.marque || '', annules,
     img: { cat: img(catId), sc: img(scId), gen: img(g), sorte: sorteRef ? img(`${g}~${sorteRef}`) : '' },
     codesFiche: [...(art.plu || []).map((x) => `PLU ${x}`), ...[...new Set(art.codes || [])].slice(0, 2)],
     var: var_, liens, favoris, sortes: [...new Set(var_.map((v) => v.sorte))].sort(),
   };
+}
+
+
+/**
+ * Étape 2 : ce que tu as changé dans la fiche → nouvelles données du produit (la base n'est pas touchée ici).
+ * base : données actuelles du produit ; f : état de la fiche :
+ *  { sorte, seulChez, annulesVus, ignores, code, caracs: [[clé, valeur]], nomEn, alias: { fr, en },
+ *    genId, genNom, genNouveau, rempl }   personne : nom du membre (règle de remplacement « pour toi »).
+ * Rend { data, erreur } ; erreur (ex. code bio dans une fiche non bio) = rien à enregistrer tant que ce n'est pas corrigé.
+ */
+export function appliquerFiche(base, f, personne) {
+  const d = JSON.parse(JSON.stringify(base));
+  const vide = (v) => v == null || v === '' || v === false || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
+  // Vide : on retire le champ, sauf s'il était déjà vide dans la base (ex. nomsAlt: []) — pas de faux changement
+  const mettre = (k, v) => { if (!vide(v)) d[k] = v; else if (!vide(base[k])) delete d[k]; };
+  if (f.sorte) d.sorte = f.sorte;
+  mettre('seulChez', f.seulChez || null);
+  mettre('annulesVus', !!f.annulesVus);
+  mettre('santeIgnores', f.ignores ? { ...f.ignores } : null);
+  if (f.code) {
+    const r = codeSaisi(String(f.code).replace(/^PLU\s*/i, ''), d);
+    if (r.erreur) return { data: null, erreur: r.erreur };
+    if (r.plu) d.plu = [...new Set([...(d.plu || []), r.plu])];
+    else d.codes = [...new Set([...(d.codes || []), r.code])];
+  }
+  delete d.caracteristiques;
+  for (const [k, v] of f.caracs || []) definirCaracteristique(d, k, v);   // valeurs hors dictionnaire refusées
+  mettre('nomEn', (f.nomEn || '').trim());
+  mettre('nomsAlt', f.alias?.fr || []);
+  mettre('nomsAltEn', f.alias?.en || []);
+  if (f.genNouveau && f.genNom) { delete d.generique; d.generiqueNom = f.genNom; }    // famille créée : en attente du référentiel
+  else if (f.genId && f.genId !== (base.generique || f.genIdDepart)) { d.generique = f.genId; delete d.generiqueNom; }
+  if (f.rempl) definirRemplacement(d, personne, f.rempl);
+  return { data: d, erreur: null };
 }

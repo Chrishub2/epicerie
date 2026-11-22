@@ -834,6 +834,7 @@ button.chev-sorte.ouverte .chevron { rotate: 180deg; }
 .gen-liste .creer { color: var(--etiquette); }
 </style>
 <style>
+[hidden] { display: none !important; }   /* comme le gabarit des artifacts : un élément caché reste caché */
 html[data-etat-fiche] body > *:not(#etatFiche) { visibility: hidden; }
 #etatFiche { display: none; }
 html[data-etat-fiche] #etatFiche { display: grid; place-items: center; position: fixed; inset: 0; padding: 24px; text-align: center; font: 16px/1.5 "IBM Plex Sans", system-ui, sans-serif; }
@@ -846,7 +847,7 @@ html[data-etat-fiche] #etatFiche { display: grid; place-items: center; position:
   <div class="logo"><i></i>Épicerie · Console</div>
   <nav class="fil" aria-label="Classement du produit" id="fil"></nav>
   <a class="maquette" href="./#/catalogue" title="Retour à la Console">← Console</a>
-  <label class="maquette choix-prod" title="Lecture seule : rien de ce que tu changes ici n’est enregistré">Lecture seule · <select id="choixProduit" aria-label="Produit affiché"></select></label>
+  <label class="maquette choix-prod" title="Enregistré avec « Enregistrer » : famille, sorte, code, caractéristiques, noms, Santé, remplacement">Fiche · <select id="choixProduit" aria-label="Produit affiché"></select></label>
   <div class="aujourdhui cal" id="aujourdhui" role="group" aria-label="Calendrier des rabais"></div>
   <div class="recherche">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -1526,6 +1527,7 @@ for (const [id, l] of [['fNom', 'fr'], ['fNomEn', 'en']]) {
 }
 // v112 — Changer de famille (nom générique) : recherche dans le référentiel, « Créer » seulement si elle n'existe pas
 function familles() {
+  if (window.FAMILLES_REF) return window.FAMILLES_REF();   // fiche branchée : référentiel complet
   const m = new Map();
   const aj = (gen, cat, sc, en = '') => { if (gen && !m.has(gen)) m.set(gen, { gen, cat, sc, en }); };
   aj(P.gen, P.cat, P.sc, document.getElementById('fNomEn').value);
@@ -1553,6 +1555,7 @@ function ouvrirFamilles(o) {
 function choisirFamille(f) {
   // Maquette : le produit passe dans cette famille (dans l'app : fiche déplacée, avec l'historique)
   P.gen = f.gen; if (f.cat) { P.cat = f.cat; P.sc = f.sc; }
+  P.genId = f.id || null; P.genNouveau = !f.id;   // fiche branchée : identifiant du référentiel, ou famille créée
   document.getElementById('fNom').value = f.gen;
   document.getElementById('fNomEn').value = f.en || '';   // le nom anglais suit la famille (vide pour une nouvelle)
   ouvrirFamilles(false); tout();
