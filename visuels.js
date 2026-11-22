@@ -25,13 +25,15 @@ export function definirPhotosPro(lignes) {
   if (!Array.isArray(lignes)) return;
   const ok = (l) => l?.article_id && l?.source_url && (!l.statut || l.statut === 'approuvee');
   pro = new Map(lignes.filter(ok).map((l) => [l.article_id, l.source_url]));
-  etatsPro = new Map(lignes.filter((l) => l?.article_id).map((l) => [l.article_id, { statut: l.statut || 'approuvee', page: l.page_url || '' }]));
+  etatsPro = new Map(lignes.filter((l) => l?.article_id).map((l) => [l.article_id, { statut: l.statut || 'approuvee', page: l.page_url || '', source: l.source_type || '' }]));
   try { localStorage.setItem(CLE_PRO, JSON.stringify([...pro])); } catch { /* stockage indisponible */ }
 }
-/** { statut, page } de la photo pro d'une fiche, ou null. Statut : approuvee · a_traiter · a_detourer. */
+/** { statut, page, source } de la photo d'une fiche, ou null. Statut : approuvee · a_traiter · a_detourer ; source : marque · epicier · chris · maison. */
 export function etatPhotoPro(articleId) { return etatsPro.get(articleId) || null; }
 /** Après un envoi : la fiche passe « en préparation » tout de suite, sans attendre la prochaine lecture. */
-export function marquerPhotoEnvoyee(articleId, page) { etatsPro.set(articleId, { statut: 'a_traiter', page: page || '' }); }
+export function marquerPhotoEnvoyee(articleId, page, source = 'chris') { etatsPro.set(articleId, { statut: 'a_traiter', page: page || '', source }); }
+/** Option B (21 nov.) : ta photo ne remplace jamais une photo de la marque, de l'épicier ou collée par Chris (en place ou en préparation). */
+export function photoMaisonPermise(articleId) { const et = etatsPro.get(articleId); return !et || et.source === 'maison'; }
 
 let presentes = null;   // Set des clés d'images disponibles
 let correspondance = {}; // articleId → { g: 'CAT-001-SC-01-P-001', s: 'gala' | null }

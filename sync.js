@@ -358,7 +358,7 @@ export async function chercherCode(code) {
 export async function photosPro() {
   if (!estPret() || !navigator.onLine) return null;
   try {
-    const { data, error } = await sb.from('photos_pro').select('article_id, source_url, statut, page_url, image_chemin').eq('foyer_id', foyer.id)
+    const { data, error } = await sb.from('photos_pro').select('article_id, source_url, statut, page_url, image_chemin, source_type').eq('foyer_id', foyer.id)
       .in('statut', ['approuvee', 'a_traiter', 'a_detourer']);
     if (error) return null;
     const chemins = data.filter((l) => l.statut === 'approuvee' && l.image_chemin).map((l) => l.image_chemin);
@@ -376,7 +376,7 @@ export async function photosPro() {
  * passe « a_traiter ». L'agent du PC (agents/photos_a_traiter.py) retire le fond, la met à nos standards et la range.
  * Rend { ok } ou { erreur }.
  */
-export async function envoyerPhotoCollee(articleId, blob, pageUrl) {
+export async function envoyerPhotoCollee(articleId, blob, pageUrl, source = 'chris') {   // source : 'chris' (photo pro collée) ou 'maison' (ta photo, dernier recours)
   if (!estPret()) return { erreur: 'Connecte-toi pour envoyer la photo' };
   if (!navigator.onLine) return { erreur: 'Hors ligne : réessaie au retour du réseau' };
   const ext = ({ 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' })[blob.type] || 'jpg';
@@ -384,7 +384,7 @@ export async function envoyerPhotoCollee(articleId, blob, pageUrl) {
   try {
     const { error: e1 } = await sb.storage.from('photos').upload(chemin, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
     if (e1) return { erreur: e1.message };
-    const { error: e2 } = await sb.from('photos_pro').upsert({ foyer_id: foyer.id, article_id: articleId, statut: 'a_traiter', source_type: 'chris',
+    const { error: e2 } = await sb.from('photos_pro').upsert({ foyer_id: foyer.id, article_id: articleId, statut: 'a_traiter', source_type: source === 'maison' ? 'maison' : 'chris',
       page_url: pageUrl || null, brut_chemin: chemin, note: null, verifier: null, cherche_le: new Date().toISOString(), decide_le: null });
     return e2 ? { erreur: e2.message } : { ok: true };
   } catch (e) { return { erreur: String(e?.message || e) }; }

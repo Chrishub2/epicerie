@@ -90,6 +90,7 @@ import * as P from './produits.js';
 import { DICO_ATTRIBUTS, attributDe, definirCaracteristique, caracteristiquesDuCode, REMPLACEMENTS, REMPLACEMENT_DEFAUT, definirRemplacement } from './choix.js';
 import { ajouterNomsAlt } from './noms.js';
 import { BANNIERES } from './demo-data.js';
+import { photoMaisonPermise, marquerPhotoEnvoyee } from './visuels.js';
 
 // Maquette lecteur v1 : chaque champ dit d'où vient sa valeur
 const SOURCE = { code: 'du code', auto: 'auto', toi: 'à toi' };
@@ -305,6 +306,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   // Lecteur principal : « Sauvegarder » (fiche seulement) et « Sauvegarder + ajouter à la liste »
   const deuxBoutons = !cibleId && libelleOk === 'Ajouter à la liste';
   let maPhotoId = null; // photo prise dans le formulaire, sans le fermer
+  let maPhotoBlob = null; // option B : aussi envoyée au PC comme « ta photo » (mise à nos standards)
   zone.innerHTML = `
     ${ecp ? `<div class="alerte vert">💲 Prix réels trouvés sur épiceries.ca (${esc(argent(ecp.price))} chez ${esc(MAGASINS_EC[ecp.store] ? nomBanniere(MAGASINS_EC[ecp.store]) : ecp.store)}) — ils seront ajoutés.</div>` : ''}
     ${p || ecp ? `<div class="alerte vert">Trouvé sur ${esc(trouve?.source || 'épiceries.ca')}${p?.nutriscore_grade && p.nutriscore_grade.length === 1 ? ` · Nutri-Score ${esc(p.nutriscore_grade.toUpperCase())}` : ''}</div>
@@ -395,6 +397,9 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
   const joindrePhoto = (articleId) => {
     if (!maPhotoId) return;
     S.maj((x) => { x.photos.push({ id: maPhotoId, type: 'produit', articleId, date: new Date().toISOString(), prise_par: x.utilisateur, note: '' }); });
+    // Option B : ta photo, en dernier recours (jamais à la place d'une photo de la marque) ; ignorée si pas connecté
+    if (maPhotoBlob && photoMaisonPermise(articleId)) import('./sync.js').then((Sync) => Sync.envoyerPhotoCollee(articleId, maPhotoBlob, '', 'maison'))
+      .then((r) => { if (r?.ok) marquerPhotoEnvoyee(articleId, '', 'maison'); }).catch(() => {});
   };
   const sauver = (ajouter) => {
     const nom = zone.querySelector('#sNom').value.trim();
@@ -478,6 +483,7 @@ async function rechercher(code, zone, surArticle, enRafale, cibleId, libelleOk =
       zone.querySelector('#sPhoto').textContent = '📷 Enregistrement de la photo…';
       const blob = await S.compresser(fichier);
       maPhotoId = await S.enregistrerPhoto(blob);
+      maPhotoBlob = blob;
       boutons.forEach((b) => { b.disabled = false; });
       zone.querySelector('#sMaPhotoImg').src = URL.createObjectURL(blob);
       zone.querySelector('#sMaPhoto').hidden = false;

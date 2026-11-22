@@ -379,8 +379,8 @@ export function completude(a, e, opts = {}) {
   const criteres = [
     { cle: 'format', icone: '⚖️', texte: 'format', ok: !!f },
     { cle: 'marque', icone: '🏷️', texte: 'marque', ok: !!String(a.marque || '').trim() },
-    { cle: 'code', icone: '▥', texte: 'code-barres', ok: codesDe(a).length > 0 || !!a.plu?.length },
-    { cle: 'photo', icone: '📷', texte: 'photo', ok: !!a.imageUrl },
+    // S16 : en vrac (fruits et légumes), le code est facultatif ; la photo est une information, hors de la Santé
+    ...(/fruits|légumes/i.test(rayon?.nom || '') ? [] : [{ cle: 'code', icone: '▥', texte: 'code-barres', ok: codesDe(a).length > 0 || !!a.plu?.length }]),
     { cle: 'prix', icone: '💲', texte: 'vrai prix', ok: prixReel },
     { cle: 'rayon', icone: '🗂️', texte: 'rayon', ok: !!rayon && !/^divers$/i.test(rayon.nom) },
   ];
@@ -393,8 +393,18 @@ export function completude(a, e, opts = {}) {
   }
   // Format en kg mais comparé à l'unité (ou l'inverse) : les prix au kg seraient faux
   if (f && f.base !== a.uniteRef) alertes.push(`format en ${f.base === 'unite' ? 'unités' : f.base === 'kg' ? 'poids' : 'volume'}, comparé ${a.uniteRef === 'unite' ? 'à l\'unité' : a.uniteRef === 'kg' ? 'au kg' : 'au litre'}`);
-  return { ok: criteres.length - manquants.length, total: criteres.length, manquants, alertes };
+  // S16 : un avertissement ignoré pour ce produit compte comme réglé ; il est rendu à part (historique, « Rétablir »)
+  const ign = a.santeIgnores || {};
+  const ignorees = [
+    ...manquants.filter((m) => ign[m.cle]).map((m) => ({ cle: m.cle, texte: `${m.icone} ${m.texte} manquant`, ...ign[m.cle] })),
+    ...alertes.filter((t) => ign[cleAvert(t)]).map((t) => ({ cle: cleAvert(t), texte: t, ...ign[cleAvert(t)] })),
+  ];
+  const restants = manquants.filter((m) => !ign[m.cle]);
+  return { ok: criteres.length - restants.length, total: criteres.length, manquants: restants, alertes: alertes.filter((t) => !ign[cleAvert(t)]), ignorees };
 }
+
+/** Clé stable d'un avertissement : ses 3 premiers mots, sans chiffres ni parenthèses (« 3 prix… » = « 4 prix… »). */
+export const cleAvert = (t) => String(t).replace(/[\d(),:]/g, ' ').trim().split(/\s+/).slice(0, 3).join(' ').toLowerCase();
 
 /**
  * Maquette fiche v104 : ce que l'utilisateur peut confirmer lui-même dans « À compléter ».

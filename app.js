@@ -26,7 +26,7 @@ import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
-import { chargerVisuels, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, etatPhotoPro, marquerPhotoEnvoyee } from './visuels.js';
+import { chargerVisuels, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
 let onglet = 'liste';
 let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répartition »
@@ -1523,6 +1523,7 @@ function brancherCaracteristiques(c, articleId) {
 // L'agent du PC retire le fond, met au carré 512 sur blanc pur, retouche doucement, puis la range.
 const ETATS_PHOTO = { a_traiter: 'En préparation : l’ordinateur retire le fond et la met à nos standards.',
   a_detourer: 'En préparation : le fond n’est pas uni, le détourage se fait à part.', approuvee: 'Photo pro en place.' };
+const ETAT_MAISON = 'Ta photo, mise à nos standards. Colle une photo de la marque ou de l’épicier pour la remplacer.';
 function htmlPhotoProduit(a) {
   const et = etatPhotoPro(a.id);
   const lien = a.lienPhoto || et?.page || '';
@@ -1532,19 +1533,31 @@ function htmlPhotoProduit(a) {
       <a class="btn sec" id="fOuvrirLien" href="${esc(lien || '#')}" target="_blank" rel="noopener" style="padding:6px 10px">Ouvrir ↗</a></div></div>
     <div class="coller" id="fColler" tabindex="0" role="button" aria-label="Coller une image ou choisir une photo">Colle l’image ici (Ctrl+V)<br>ou touche pour choisir une photo</div>
     <input type="file" id="fCollerFichier" accept="image/*" hidden>
-    <div class="doux" id="fEtatPhoto" style="margin-top:4px">${et ? esc(ETATS_PHOTO[et.statut] || '') : ''}</div>`;
+    <button type="button" class="btn sec" id="fMaPhoto" style="width:100%;margin-top:6px">📷 Pas de photo de la marque ? Prends la tienne</button>
+    <input type="file" id="fMaPhotoFichier" accept="image/*" capture="environment" hidden>
+    <div class="doux" id="fEtatPhoto" style="margin-top:4px">${et ? esc(et.statut === 'approuvee' && et.source === 'maison' ? ETAT_MAISON : ETATS_PHOTO[et.statut] || '') : ''}</div>`;
 }
-/** Branche la zone de collage ; rend une fonction qui donne l'image en attente (Blob) ou null. */
-function brancherPhotoProduit(c) {
-  let image = null;
+/** Branche la zone de collage ; rend une fonction qui donne l'image en attente (Blob) ou null, et .maison() : vrai si c'est ta photo. */
+function brancherPhotoProduit(c, articleId) {
+  let image = null, maison = false;
   const zone = $('#fColler', c), etat = $('#fEtatPhoto', c);
   if (!zone) return () => null;
   const prendre = (f) => {
     if (!f || !f.type?.startsWith('image/')) return;
-    image = f;
+    image = f; maison = false;
     const url = URL.createObjectURL(f);
     zone.innerHTML = `<img src="${url}" alt="Image collée">`;
     etat.textContent = 'Image prête : touche Enregistrer pour l’envoyer.';
+  };
+  // Option B : ta photo, en dernier recours ; mise à nos standards (fond retiré, carré blanc) avant d'être affichée
+  $('#fMaPhoto', c).onclick = () => {
+    if (!photoMaisonPermise(articleId)) { etat.textContent = 'Ce produit a déjà une photo de la marque ou de l’épicier : ta photo ne la remplace pas.'; return; }
+    $('#fMaPhotoFichier', c).click();
+  };
+  $('#fMaPhotoFichier', c).onchange = (ev) => {
+    const f = ev.target.files[0]; if (!f) return;
+    prendre(f); maison = true;
+    etat.textContent = 'Ta photo est prête : touche Enregistrer. Conseil : de face, sur un comptoir uni, sans reflet.';
   };
   zone.onclick = () => $('#fCollerFichier', c).click();
   zone.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); $('#fCollerFichier', c).click(); } };
@@ -1558,7 +1571,9 @@ function brancherPhotoProduit(c) {
   });
   $('#fLienPhoto', c).oninput = (ev) => { $('#fOuvrirLien', c).href = ev.target.value.trim() || '#'; };
   $('#fOuvrirLien', c).onclick = (ev) => { if (!$('#fLienPhoto', c).value.trim()) ev.preventDefault(); };
-  return () => image;
+  const lire = () => image;
+  lire.maison = () => maison;
+  return lire;
 }
 
 // --- Maquette fiche v104 : confirmer soi-même ce qui ne l'est pas -------------------
@@ -1576,6 +1591,12 @@ function htmlAConfirmer(a, e) {
 }
 function brancherAConfirmer(c, articleId, rouvrir) {
   const changer = (fn, msg) => { S.maj((x) => { const ar = x.articles.find((i) => i.id === articleId); if (ar) fn(ar); }); if (msg) toast(msg); rouvrir(); };
+  // S16 : ignorer un avertissement pour ce produit (historique + Rétablir)
+  $$('[data-ignorer]', c).forEach((l) => { l.onclick = (ev) => { ev.preventDefault();
+    const quand = new Date().toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }), par = S.get().utilisateur || '';
+    changer((ar) => { ar.santeIgnores = { ...(ar.santeIgnores || {}), [l.dataset.ignorer]: { le: quand, par } }; }, 'Ignoré pour ce produit : voir l’historique pour le rétablir'); }; });
+  $$('[data-retablir]', c).forEach((l) => { l.onclick = (ev) => { ev.preventDefault();
+    changer((ar) => { const g = { ...(ar.santeIgnores || {}) }; delete g[l.dataset.retablir]; if (Object.keys(g).length) ar.santeIgnores = g; else delete ar.santeIgnores; }, 'Rétabli'); }; });
   $$('[data-conf-seul]', c).forEach((i) => { i.onchange = () => changer((ar) => { ar.seulChez = i.dataset.confSeul; }, 'Noté : un seul magasin pour ce produit'); });
   $$('[data-conf-exclure]', c).forEach((i) => { i.onchange = () => changer((ar) => { ar.pasVenduChez = [...new Set([...(ar.pasVenduChez || []), i.dataset.confExclure])]; }); });
   $('[data-conf-exclure-annuler]', c)?.addEventListener('click', (ev) => { ev.preventDefault(); changer((ar) => { delete ar.pasVenduChez; }); });
@@ -1603,8 +1624,14 @@ export function ficheArticle(articleId, ligneId) {
     ${a.exclusif ? `<div class="alerte ambre">Vendu seulement chez <b>${esc(nomBanniere(a.exclusif))}</b> : les autres bannières sont ignorées pour ce produit.</div>` : ''}
     <button class="btn ${a.codes?.length ? 'sec' : ''}" id="fScan" style="width:100%;margin-bottom:10px">▥ Scanner le code-barres</button>
     <p class="doux" style="margin:-4px 0 10px">Remplit la fiche : nom, marque, format, catégorie, photo et prix.</p>
-    ${(() => { const c = P.completude(a, e, { nomBanniere }); const k = htmlAConfirmer(a, e); return c.manquants.length || c.alertes.length || k
-      ? `<div class="alerte ambre" style="margin-bottom:10px">${c.manquants.length || c.alertes.length ? `À compléter (${c.ok}/${c.total}) : ${c.manquants.map((m) => `${m.icone} ${esc(m.texte)}`).join(' · ')}${c.alertes.map((t) => `<br>⚠️ ${esc(t)}`).join('')}` : ''}${k}</div>` : ''; })()}
+    ${(() => { const c = P.completude(a, e, { nomBanniere }); const k = htmlAConfirmer(a, e);
+      // S16 : chaque avertissement peut être ignoré pour ce produit ; il va dans l'historique (replié), d'où on le rétablit
+      const ign = (cle, texte) => `<a href="#" class="ignorer" data-ignorer="${esc(cle)}" data-texte="${esc(texte)}" title="Ne plus compter ce point pour ce produit">Ignorer</a>`;
+      const histo = c.ignorees.length ? `<details class="histo-ign"><summary>Historique · ${c.ignorees.length} ignoré${c.ignorees.length > 1 ? 's' : ''}</summary>
+        ${c.ignorees.map((x) => `<div class="ign-ligne"><s>${esc(x.texte)}</s> <span class="doux">· ignoré le ${esc(x.le || '')}${x.par ? ` par ${esc(x.par)}` : ''}</span> <a href="#" data-retablir="${esc(x.cle)}">Rétablir</a></div>`).join('')}</details>` : '';
+      return c.manquants.length || c.alertes.length || k
+      ? `<div class="alerte ambre" style="margin-bottom:10px">${c.manquants.length || c.alertes.length ? `À compléter (${c.ok}/${c.total}) : ${c.manquants.map((m) => `${m.icone} ${esc(m.texte)} ${ign(m.cle, `${m.icone} ${m.texte} manquant`)}`).join(' · ')}${c.alertes.map((t) => `<br>⚠️ ${esc(t)} ${ign(P.cleAvert(t), t)}`).join('')}` : ''}${k}${histo}</div>`
+      : histo ? `<div class="doux" style="margin-bottom:10px">${histo}</div>` : ''; })()}
     ${htmlDernierAchat(l?.recu?.absent ? null : (l?.recu || a.dernierAchat), a.id)}
     ${l?.recu?.absent ? `<div class="alerte" style="margin-bottom:10px">🧾 Ce produit n'est pas sur la facture du ${esc(l.recu.date || '')}${l.recu.banniere ? ` (${esc(nomBanniere(l.recu.banniere))})` : ''}.</div>` : ''}
     ${htmlAchats(a.id)}
@@ -1731,13 +1758,14 @@ export function ficheArticle(articleId, ligneId) {
       if (plusTard) ajouterTache({ type: 'prix', prixId: pid, photoId: photoPrixId });
       toast(plusTard ? 'Photo gardée : le prix sera lu au retour du réseau' : 'Prix ajouté'); ficheArticle(articleId, ligneId);
     };
-    const imageCollee = brancherPhotoProduit(c);
+    const imageCollee = brancherPhotoProduit(c, a.id);
     $('#fSauver', c).onclick = () => {
       const lienPhoto = $('#fLienPhoto', c)?.value.trim() || '';
       const image = imageCollee();
       if (image) {
-        Sync.envoyerPhotoCollee(a.id, image, lienPhoto).then((r) => {
-          if (r.ok) { marquerPhotoEnvoyee(a.id, lienPhoto); toast('Photo envoyée : l’ordinateur la prépare'); }
+        const source = imageCollee.maison() ? 'maison' : 'chris';
+        Sync.envoyerPhotoCollee(a.id, image, lienPhoto, source).then((r) => {
+          if (r.ok) { marquerPhotoEnvoyee(a.id, lienPhoto, source); toast('Photo envoyée : l’ordinateur la prépare'); }
           else toast(`Photo non envoyée : ${r.erreur}`);
         });
       }
