@@ -605,6 +605,10 @@ th.tri-case { text-align: left; }
 .src b { font-weight: 600; }
 .src .d { color: var(--texte-2); }
 .src a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }   /* v114 — source cliquable */
+/* v116 — Retirer / ajouter le niveau Sorte dans le Classement */
+.niv-bouton { margin-left: 10px; font: inherit; font-size: 11.5px; padding: 1px 8px; border-radius: 5px; cursor: pointer; background: transparent;
+  color: var(--texte-3); border: 1px solid var(--trait); white-space: nowrap; }
+.niv-bouton:hover, .niv-bouton:focus-visible { color: var(--texte); border-color: var(--trait-fort, var(--texte-3)); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
 .src a:hover b { text-decoration: none; }
 .src-circ svg, .src-circ b { color: var(--src-circ); }
 .src-web svg, .src-web b { color: var(--src-web); }
@@ -1045,11 +1049,31 @@ function moinsCherAutre(ban, r) {
   return `<div class="fav"><span>Moins cher ici : <b>${m.v.sorte}</b> · ${$(pu(m.v))}${U.lib} (−${$((parKg(r.v) - parKg(m.v)) * U.f)}${U.lib})</span></div>`;
 }
 
+// v116 — Règle de Chris (21 nov.) : la sorte a son propre niveau quand les sortes sont interchangeables
+// (Pomme → Gala → marques) ; sinon c'est un autre produit et la sorte va dans le nom du niveau 3 (Beurre salé → marques).
+// Réglé par famille, pour tous les produits de cette famille ; Chris peut retirer ou ajouter le niveau dans l'arbre.
+const SORTE_SEPAREE = { 'Café moulu': true, 'Riz basmati': true };   // choix de Chris ; les autres suivent la valeur par défaut
+const sorteSeparee = () => { const k = [P.genId, P.gen].find((x) => x && x in SORTE_SEPAREE); return !P.reel || (k ? SORTE_SEPAREE[k] : /fruits|légumes/i.test(P.cat || '')); };
+const fusion = () => P.reel && !sorteSeparee();
+const sorteConnue = () => fusion() && P.sorteRef && P.sorteRef !== 'a-preciser';
+const sorteTexte = () => (P.sorteRef && P.sorteRef !== 'a-preciser' ? P.sorteRef.charAt(0).toUpperCase() + P.sorteRef.slice(1) : '');
+const boutonNiveau = (quoi) => `<button type="button" class="niv-bouton" data-niveau-sorte="${quoi}" title="Pour toute la famille « ${P.gen} » : ${quoi === 'retirer'
+  ? `la ${(P.sorteAttr || 'sorte').toLowerCase()} va dans le nom du niveau 3 (autre produit, on ne compare pas)` : `la ${(P.sorteAttr || 'sorte').toLowerCase()} devient son propre niveau (sortes interchangeables)`}">${quoi === 'retirer' ? '− Retirer ce niveau' : `+ Niveau ${(P.sorteAttr || 'sorte').toLowerCase()}`}</button>`;
+const nomNiv3 = () => (sorteConnue() ? `${P.gen} ${P.sorteRef}` : P.gen);
+// v116 — Retirer / ajouter le niveau Sorte (vaut pour toute la famille)
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-niveau-sorte]'); if (!b) return;
+  e.stopPropagation(); e.preventDefault();
+  const cle = P.genId || P.gen, val = b.dataset.niveauSorte === 'ajouter';
+  SORTE_SEPAREE[cle] = val;
+  tout();
+  window.quandNiveauSorte?.(cle, val);   // fiche branchée : enregistre le réglage de la famille
+}, true);
 function rendFil() {
   const s = etat.choix ? `<span class="sep">›</span><b>${etat.choix}</b>` : '';
-  document.getElementById('fil').innerHTML = `<span>${P.cat}</span><span class="sep">›</span><span>${P.sc}</span><span class="sep">›</span><b>${P.gen}</b>${s}`;
+  document.getElementById('fil').innerHTML = `<span>${P.cat}</span><span class="sep">›</span><span>${P.sc}</span><span class="sep">›</span><b>${nomNiv3()}</b>${s}`;
   // Le nom générique ne bouge jamais ; la sorte choisie s'écrit dessous, dans une ligne toujours réservée
-  document.getElementById('titre').innerHTML = '<span class="num-niv" id="numGen" aria-hidden="true">3</span>' + P.gen;
+  document.getElementById('titre').innerHTML = '<span class="num-niv" id="numGen" aria-hidden="true">3</span>' + nomNiv3();
   document.getElementById('sousTitre').innerHTML = etat.choix ? `<span class="num-niv">4</span>${etat.choix}` : '';
   document.getElementById('numGen').classList.toggle('courant', !etat.choix); // v96 : ③ toujours affiché ; jaune quand Pomme est le niveau affiché, gris quand une sorte ④ l'est
 }
@@ -1059,9 +1083,10 @@ function rendArbre() {
   const n = (niv, txt, cls = '', attrs = '') => `<li class="${cls}" style="--niv:${rang}" ${attrs}><span class="niv"><span class="etage-c"><span class="num-niv">${++rang}</span>${niv}</span></span><span>${txt}</span></li>`;
   document.getElementById('arbre').innerHTML =
     n('Catégorie', P.cat) + n('Sous-catégorie', P.sc) +
-    n('Générique', `<b>${P.gen}</b>`, (etat.choix ? '' : 'courant') + ' cliquable', `data-sorte="" role="button" tabindex="0" title="${etat.choix ? `Revenir à ${P.gen} (toutes)` : `${P.gen} (toutes)`}"`) +
+    n('Générique', `<b>${nomNiv3()}</b>${fusion() && !sorteConnue() ? ' <span class="ex">· sorte à préciser</span>' : ''}${fusion() ? boutonNiveau('ajouter') : ''}`, (etat.choix ? '' : 'courant') + ' cliquable', `data-sorte="" role="button" tabindex="0" title="${etat.choix ? `Revenir à ${P.gen} (toutes)` : `${P.gen} (toutes)`}"`) +
     // v113 — Vrai produit : niveau 4 = la sorte (ex. Salé), niveau 5 = les marques (Beurre → Salé → Lactantia…)
-    (P.reel ? n(P.sorteAttr || 'Sorte', P.sorteRef && P.sorteRef !== 'a-preciser' ? `<b>${P.sorteRef.charAt(0).toUpperCase() + P.sorteRef.slice(1)}</b>` : '<span class="ex">à préciser</span>') : '') +
+    // v116 — niveau Sorte seulement si les sortes de cette famille sont interchangeables
+    (P.reel && sorteSeparee() ? n(P.sorteAttr || 'Sorte', (sorteTexte() ? `<b>${sorteTexte()}</b>` : '<span class="ex">à préciser</span>') + boutonNiveau('retirer')) : '') +
     n(P.sorteNom, etat.choix ? `<b>${etat.choix}</b>` : '<span class="ex">toutes (au moins cher)</span>', etat.choix ? 'courant' : '');
   // Sortes : une par ligne, de la moins chère à la plus chère (meilleur prix au kg et sa bannière)
   const meilleur = (liste) => [...liste].sort((a, b) => parKg(a) - parKg(b))[0];
@@ -1138,12 +1163,12 @@ function rendPhotos() {
   document.getElementById('echelle').innerHTML =
     l('cat', 'Catégorie', P.cat, IMG.cat, '') +
     l('sc', 'Sous-catégorie', P.sc, IMG.sc, '') +
-    l('gen', 'Générique', P.gen, IMG.gen, '') +
-    (P.reel ? l('sorte', P.sorteAttr, P.sorteRef && P.sorteRef !== 'a-preciser' ? P.sorteRef : 'à préciser', IMG.sorte || '', '')
+    l('gen', 'Générique', nomNiv3() + (fusion() && !sorteConnue() ? ' (sorte à préciser)' : ''), (fusion() && IMG.sorte) || IMG.gen, '') +
+    (P.reel ? (sorteSeparee() ? l('sorte', P.sorteAttr, sorteTexte() || 'à préciser', IMG.sorte || '', '') : '')
       : l('sorte', P.sorteNom, s || P.exSortes, s ? (imgSorte || '') : (IMG.gala || IMG.sorte || ''), s ? '' : '')) +
     (() => { const p = PHOTO_PROD[document.getElementById('ppVar')?.value]; const v = VAR.find((x) => x.id === document.getElementById('ppVar')?.value);
       return `<li><span class="mini ${p ? '' : 'vide'}">${p ? `<img class="img-niv" src="${p.img}" alt="">` : '<span style="position:relative;z-index:1">?</span>'}</span>
-      <span class="niv-txt"><span class="etage"><span class="num-niv">5</span>Marque</span><span class="t">${v ? `${v.sorte}${v.marque !== '—' ? ' · ' + v.marque : ''}` : 'Emballage de la marque'}</span><span class="d">${v ? v.fmt : ''}</span></span>${p ? '<span class="puce prep" title="L’ordinateur retire le fond, met au carré 512 sur blanc pur, puis l’enregistre">en préparation</span>' : '<span></span>'}</li>`; })();
+      <span class="niv-txt"><span class="etage"><span class="num-niv">${fusion() ? 4 : 5}</span>Marque</span><span class="t">${v ? `${v.sorte}${v.marque !== '—' ? ' · ' + v.marque : ''}` : 'Emballage de la marque'}</span><span class="d">${v ? v.fmt : ''}</span></span>${p ? '<span class="puce prep" title="L’ordinateur retire le fond, met au carré 512 sur blanc pur, puis l’enregistre">en préparation</span>' : '<span></span>'}</li>`; })();
   [...document.querySelectorAll('#echelle li')].forEach((li, i) => li.style.setProperty('--niv', i));
 }
 
@@ -1819,4 +1844,4 @@ window.addEventListener('resize', ajusterEchelle);
 })(); // style retenu par Chris (v11)
 </script>
 <script type="module" src="fiche-charger.js?v=epicerie-v103"></script>
-<!-- Construit depuis journal/maquettes/fiche-produit-v114.html par console/construire_fiche.py -->
+<!-- Construit depuis journal/maquettes/fiche-produit-v116.html par console/construire_fiche.py -->

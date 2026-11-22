@@ -182,6 +182,7 @@ async function demarrer() {
     opts = { ref, corr: corr || {}, dispo: new Set(index || []), base: '../visuels/', depuis: depuis(),
       // Circulaire en ligne de chaque bannière (lien de la source « Circulaire » pendant le rabais)
       circulaires: Object.fromEntries(Object.entries(BANNIERES).filter(([, b]) => b.circulaire).map(([k, b]) => [k, b.circulaire])) };
+    lireFamilles(await src.chargerFamilles());
     for (const a of E.articles) { try { construire(a); } catch (err) { console.warn('Fiche non construite :', a.id, err); } }
     for (const [k, b] of Object.entries(BANNIERES)) if (!BAN[k]) BAN[k] = { nom: b.nom, c: '#8d99ae' };
     for (const r of Object.values(REELS)) for (const v of [...r.var, ...r.liens]) if (v.ban && !BAN[v.ban]) BAN[v.ban] = { nom: v.ban, c: '#8d99ae' };
@@ -197,7 +198,30 @@ async function demarrer() {
   }
 }
 
+// ---------- Niveau Sorte par famille (v104) : séparé (Pomme → Gala → marques) ou dans le nom (Beurre salé → marques)
+// Enregistré tout de suite dans un objet « famille » (id = identifiant du référentiel, ou « nom:… » pour une famille créée).
+const versionsFamille = {};
+const idFamille = (cle) => (/^CAT-\d/.test(cle) || cle.startsWith('nom:') ? cle : 'nom:' + cle);
+function lireFamilles(lignes) {
+  for (const l of lignes) {
+    versionsFamille[l.id] = { version: l.version, data: l.data || {} };
+    if (typeof l.data?.sorteSeparee === 'boolean') SORTE_SEPAREE[l.id.startsWith('nom:') ? l.id.slice(4) : l.id] = l.data.sorteSeparee;
+  }
+}
+window.quandNiveauSorte = async (cle, val) => {
+  const id = idFamille(cle), avant = versionsFamille[id];
+  const data = { ...(avant?.data || {}), nom: P.gen, sorteSeparee: val, le: new Date().toISOString().slice(0, 10), par: personne };
+  try {
+    const v = await src.ecrire('famille', id, data, avant?.version ?? null, 'console');
+    versionsFamille[id] = { version: v, data };
+    majBarre(`Enregistré pour toute la famille « ${P.gen} » : ${val ? 'la sorte a son propre niveau' : 'la sorte est dans le nom du niveau 3'}.`, 'ok');
+  } catch (err) {
+    SORTE_SEPAREE[cle] = !val; tout();
+    majBarre(err.conflit ? 'Ce réglage a été changé ailleurs : recharge la page, puis recommence.' : `Réglage non enregistré : ${err.message}`, 'erreur');
+  }
+};
+
 // Accès pour les essais (aperçu sans connexion) : on injecte des données sans toucher à la base
-window.__fiche = { initialiserAvec(e, o, nom = 'Chris') { E = e; opts = o; personne = nom; for (const a of E.articles) construire(a); }, changements, lireFiche,
+window.__fiche = { initialiserAvec(e, o, nom = 'Chris', familles = []) { E = e; opts = o; personne = nom; lireFamilles(familles); for (const a of E.articles) construire(a); }, changements, lireFiche,
   ecrireAvec(fn) { src.ecrire = fn; } };
 if (!new URLSearchParams(location.search).has('essai')) demarrer();

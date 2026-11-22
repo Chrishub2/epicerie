@@ -115,6 +115,14 @@ export class SourceSupabase {
    * Retourne la nouvelle version. Erreur `conflit` (code 40001) si l'objet a changé ailleurs depuis `version`.
    * Les champs propres à la console (non énumérables) ne sont jamais envoyés.
    */
+  /** Réglages par famille (type « famille ») : niveau Sorte séparé ou dans le nom. Le téléphone ignore ce type. */
+  async chargerFamilles() {
+    const { data, error } = await this.sb.from('objets').select('id, data, version')
+      .eq('foyer_id', this.foyer.id).eq('type', 'famille').eq('supprime', false).limit(5000);
+    if (error) throw error;
+    return data || [];
+  }
+
   async ecrire(type, id, data, version, source = 'console', supprime = false) {
     const propre = JSON.parse(JSON.stringify(data));
     const { data: v, error } = await this.sb.rpc('ecrire_objet', {
