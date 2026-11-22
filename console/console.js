@@ -281,41 +281,126 @@ function vueTdb(t) {
   const codes = new Set(E.articles.flatMap(codesDe));
   const alias = variantes.reduce((s, v) => s + (v.alias?.length || 0), 0);
   const applicables = A.problemes.filter((p) => p.correction && p.confiance >= SEUIL_LOT).length;
-  const histo = [0, 0, 0, 0, 0, 0];
+  // Maquette sante-donnees-v1 (22 nov.) : progression, prochain pas, victoires rapides, répartition, chantiers
+  const DONNEES = {
+    photo: { ic: '📷', nom: 'Photo du produit', regle: 'photo_manquante', seul: 'Il ne manque que la photo' },
+    format: { ic: '⚖️', nom: 'Format', regle: 'format_manquant', seul: 'Il ne manque que le format' },
+    marque: { ic: '🏷️', nom: 'Marque', regle: 'marque_manquante', seul: 'Il ne manque que la marque' },
+    prix: { ic: '💲', nom: 'Vrai prix', regle: 'prix_manquant', seul: 'Il ne manque qu’un vrai prix' },
+    rayon: { ic: '🗂️', nom: 'Rayon', regle: 'rayon_divers', seul: 'Il ne manque que le rayon' },
+  };
+  const N = E.articles.length || 1;
   let completes = 0;
+  const parManques = [0, 0, 0, 0];   // complètes, 1 manque, 2 manques, 3 et plus
+  const unSeul = {};                  // donnée manquante → fiches à ce seul manque
+  const manque = {}, applicable = {};
   for (const a of E.articles) {
-    const c = completude(a, { prix: A.prixParArticle.get(a.id) || [], rayons: E.rayons, photosPro: E.photosPro });
-    histo[Math.round((c.ok / c.total) * 5)]++;   // ramené sur 5 (les fiches de fruits et légumes en ont 4)
-    if (c.ok === c.total) completes++;
+    const c = compDe(a), m = c.total - c.ok;
+    parManques[Math.min(m, 3)]++;
+    if (!m) completes++;
+    if (m === 1) (unSeul[c.manquants[0].cle] ||= []).push(a);
+    for (const k of Object.keys(DONNEES)) applicable[k] = (applicable[k] || 0) + (k === 'marque' && c.total < 5 ? 0 : 1);
+    for (const x of c.manquants) manque[x.cle] = (manque[x.cle] || 0) + 1;
   }
-  const parRegle = Object.entries(REGLES).map(([code, r]) => ({ code, r, n: A.problemes.filter((p) => p.code === code).length }));
-  const maxR = Math.max(...parRegle.map((x) => x.n), 1);
+  const victoires = Object.entries(unSeul).sort((x, y) => y[1].length - x[1].length);
+  ui.tdbVises ||= new Set(victoires.length ? [victoires[0][0]] : []);
+  const pctDe = (n) => Math.round((n / N) * 100);
+  const PALIERS = [25, 50, 75, 100];
+  const critiques = Object.entries(REGLES).filter(([, r]) => r.priorite <= 2)
+    .map(([code, r]) => ({ code, r, n: A.problemes.filter((p) => p.code === code).length })).filter((x) => x.n);
   const tuiles = [
     ['Types de produits', E.articles.length, 'catalogue'], ['Produits commerciaux', commerciaux.size, null, 'Calculés : type + marque (seulement les variantes qui ont une marque)'],
     ['SKU (variantes)', variantes.length], ['Marques', marques.size], ['Codes-barres', codes.size], ['Rayons', E.rayons.length],
-    ['Images', E.articles.filter((a) => a.imageUrl).length], ['Références marchand', alias, null, 'Noms imprimés sur les reçus'],
+    ['Références marchand', alias, null, 'Noms imprimés sur les reçus'],
     ['Prix observés', A.prixUniques ?? E.prix.length, null, A.prixDoublons ? `${A.prixUniques} observations distinctes · ${A.prixDoublons} copie(s) identique(s) gardée(s) dans la base (non comptées)` : ''], ['Problèmes ouverts', A.problemes.length, 'boite'], ['Corrections prêtes', applicables, 'boite', `Confiance ≥ ${pct(SEUIL_LOT)}`],
-    ['Fiches complètes', pct(completes / E.articles.length), 'catalogue'],
   ];
+  const nomsCourts = (liste) => liste.slice(0, 6).map((a) => `<li>${esc(a.nom)}</li>`).join('') + (liste.length > 6 ? `<li>+${liste.length - 6} autres</li>` : '');
+  const premier = victoires[0];
   t.innerHTML = `
     <div class="entete-vue"><h1>Santé des données</h1><span class="muet">${MODE === 'reel' ? `Foyer « ${esc(source?.foyer?.nom || '')} » · ${nf(E.articles.length)} produits` : `${nf(E.articles.length)} produits fictifs`} · analyse en ${A.duree} ms</span></div>
-    <div class="defile">
-      <div class="tuiles">${tuiles.map(([l, v, vue, aide]) => `<div class="tuile ${vue ? 'cliquable' : ''}" ${vue ? `data-aller="${vue}"` : ''} title="${aide || ''}"><div class="v">${typeof v === 'number' ? nf(v) : v}</div><div class="l">${l}</div></div>`).join('')}</div>
-      <div class="colonnes-tdb">
-        <section class="panneau"><h2>Problèmes par règle</h2><div class="barres-h">
-          ${parRegle.map(({ code, r, n }) => `<a href="#/boite" data-regle="${code}"><span class="prio p${r.priorite}">P${r.priorite}</span>${r.titre}</a>
-            <span class="b"><i style="width:${(n / maxR) * 100}%;background:var(--p${r.priorite})"></i></span><span class="mono num" style="text-align:right">${nf(n)}</span>`).join('')}
-        </div></section>
-        <section class="panneau"><h2>Complétude des fiches (5 données de base)</h2>
-          <div class="histo">${histo.map((n, i) => `<div class="col" title="${nf(n)} fiche(s) à ${i}/5"><span>${nf(n)}</span><i style="height:${(n / Math.max(...histo)) * 100}%"></i><span>${i}/5</span></div>`).join('')}</div>
-          <p class="muet" style="margin:10px 0 0">Format lisible, marque (fiche d'une seule marque), vraie photo du produit, vrai prix, rayon autre que Divers — mêmes critères que le téléphone.</p>
+    <div class="defile tdb">
+      <section class="panneau tdb-progression" aria-label="Progression">
+        <div class="tdb-anneau">
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--surface-3)" stroke-width="12"></circle>
+            <circle id="tdbArcVise" cx="60" cy="60" r="50" fill="none" stroke="var(--ok)" stroke-opacity=".35" stroke-width="12" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 60 60)"></circle>
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ok)" stroke-width="12" pathLength="100" stroke-dasharray="${pctDe(completes)} 100" transform="rotate(-90 60 60)"></circle>
+          </svg>
+          <div class="centre"><div class="pct mono">${pctDe(completes)} %</div>
+            <div class="sous"><span class="mono">${nf(completes)}</span> fiche${completes > 1 ? 's' : ''} complète${completes > 1 ? 's' : ''} sur <span class="mono">${nf(E.articles.length)}</span></div>
+            <div class="vise" id="tdbVise"></div></div>
+        </div>
+        <div class="tdb-pas">
+          <h2>Ton prochain pas</h2>
+          <p class="accroche" id="tdbAccroche"></p>
+          <div class="tdb-paliers" id="tdbPaliers" aria-label="Paliers"></div>
+          <p class="muet" id="tdbPalier"></p>
+          <div class="tdb-actions">
+            ${premier ? `<button class="btn principal" type="button" data-regle-aller="${DONNEES[premier[0]].regle}">${DONNEES[premier[0]].ic} Commencer par les ${nf(premier[1].length)} fiche${premier[1].length > 1 ? 's' : ''} : ${DONNEES[premier[0]].nom.toLowerCase()}</button>` : ''}
+            ${parManques[1] ? `<button class="btn" type="button" data-un-manque>Voir les ${nf(parManques[1])} fiches à un manque</button>` : ''}
+          </div>
+        </div>
+      </section>
+      ${victoires.length ? `<section class="panneau" aria-label="Victoires rapides">
+        <div class="tdb-titre"><h2>Victoires rapides</h2><span class="discret">Fiches à un seul manque · touche une carte pour voir l'effet sur l'anneau</span></div>
+        <div class="tdb-victoires">${victoires.map(([k, liste]) => `<button class="tdb-victoire" type="button" data-victoire="${k}" aria-pressed="${ui.tdbVises.has(k)}">
+          <span class="haut"><span class="titre">${DONNEES[k]?.ic || ''} ${DONNEES[k]?.seul || k}</span><span class="gain mono">+${nf(liste.length)} fiche${liste.length > 1 ? 's' : ''} · +${pctDe(completes + liste.length) - pctDe(completes)} pts</span></span>
+          <ul>${nomsCourts(liste)}</ul><span class="coche">${ui.tdbVises.has(k) ? '✓ compté dans l’anneau' : 'Touche pour l’ajouter à l’anneau'}</span></button>`).join('')}</div>
+      </section>` : ''}
+      <div class="tdb-colonnes">
+        <section class="panneau tdb-repartition" aria-label="Répartition des fiches">
+          <h2>Où en est chaque fiche</h2>
+          <div class="tdb-pile">${[['c0', 'complètes', 'acompleter'], ['c1', 'à un manque', 'unmanque'], ['c2', 'à deux manques', 'acompleter'], ['c3', 'à trois manques et plus', 'acompleter']]
+            .map(([cl, lib, etat], i) => parManques[i] ? `<button class="${cl}" style="flex:${parManques[i]}" type="button" data-pile="${i ? etat : 'tous'}" title="${nf(parManques[i])} fiche(s) ${lib}">${nf(parManques[i])}</button>` : '').join('')}</div>
+          <div class="tdb-legende"><span style="--c:var(--ok)">Complètes · ${nf(parManques[0])}</span><span style="--c:var(--etiquette)">1 manque · ${nf(parManques[1])}</span><span style="--c:var(--erreur)">2 manques · ${nf(parManques[2])}</span><span style="--c:var(--erreur)">3 manques et plus · ${nf(parManques[3])}</span></div>
+          <p class="discret" style="margin:0">Données de base : format, marque (fiche d'une seule marque), vraie photo du produit, vrai prix, rayon autre que Divers — mêmes critères que le téléphone.</p>
         </section>
+        <section class="panneau" aria-label="Chantiers">
+          <h2>Chantiers</h2>
+          <div class="tdb-chantiers">
+            ${critiques.map(({ code, r, n }) => `<a class="tdb-chantier alerte" href="#/boite" data-regle="${code}"><span class="ic">⚠️</span><span class="nom">${esc(r.titre)}<span class="puce-alerte">à vérifier d'abord</span></span><span class="reste mono">${nf(n)}</span>
+              <span class="detail discret">${esc(r.explication)}</span></a>`).join('')}
+            ${Object.entries(DONNEES).sort((x, y) => (manque[y[0]] || 0) - (manque[x[0]] || 0)).map(([k, d]) => { const m = manque[k] || 0, ap = applicable[k] || 0;
+              return `<a class="tdb-chantier" href="#/boite" data-regle="${d.regle}"><span class="ic">${d.ic}</span><span class="nom">${d.nom}</span><span class="reste mono">${m ? `${nf(m)} à faire` : '✓ fait'}</span>
+                <span class="detail">${k === 'marque' ? `<span class="discret">Seulement les fiches d'une seule marque (${nf(ap)})</span>` : `<span class="jauge-ch"><i style="width:${ap ? ((ap - m) / ap) * 100 : 0}%"></i></span><span class="discret mono">${nf(ap - m)} / ${nf(ap)}</span>`}</span></a>`; }).join('')}
+          </div>
+        </section>
+      </div>
+      <div class="tdb-colonnes">
+        <section aria-label="Le catalogue en chiffres"><h2 style="margin-bottom:8px">Le catalogue en chiffres</h2>
+          <div class="tuiles">${tuiles.map(([l, v, vue, aide]) => `<div class="tuile ${vue ? 'cliquable' : ''}" ${vue ? `data-aller="${vue}"` : ''} title="${aide || ''}"><div class="v">${typeof v === 'number' ? nf(v) : v}</div><div class="l">${l}</div></div>`).join('')}</div></section>
         <section class="panneau"><h2>Dernières modifications</h2>
           ${MODE === 'reel' ? (histoBase.length ? `<ul class="chrono">${histoBase.slice(0, 8).map(ligneHistoBase).join('')}</ul>` : '<p class="muet">Aucune modification enregistrée depuis l\'installation de l\'historique (C2).</p>')
             : historique.length ? `<ul class="chrono">${historique.slice(0, 8).map(ligneHistorique).join('')}</ul>` : '<p class="muet">Aucune modification pour l\'instant. Ouvre la boîte de résolution pour commencer.</p>'}
         </section>
       </div>
     </div>`;
+  // Anneau : plein = fait ; pâle = ce que donnent les victoires cochées. Rien ne bouge (pas d'animation).
+  const majProgression = () => {
+    const gain = victoires.filter(([k]) => ui.tdbVises.has(k)).reduce((s, [, l]) => s + l.length, 0);
+    const p0 = pctDe(completes), p1 = pctDe(completes + gain);
+    t.querySelector('#tdbArcVise').setAttribute('stroke-dasharray', `${p1} 100`);
+    t.querySelector('#tdbVise').textContent = gain ? `→ ${p1} % avec ${nf(gain)} de plus` : '';
+    t.querySelector('#tdbAccroche').innerHTML = completes === E.articles.length ? 'Toutes tes fiches sont complètes. Bravo !'
+      : gain ? `${nf(gain)} fiche${gain > 1 ? 's' : ''} à un seul manque. En les réglant, tu passes de ${p0} % à <b>${p1} %</b>.`
+      : victoires.length ? 'Touche une victoire rapide pour voir jusqu’où elle t’amène.' : 'Règle les chantiers ci-dessous : chaque donnée complétée rapproche une fiche du vert.';
+    const prochain = PALIERS.find((x) => x > p0);
+    const reste = prochain ? Math.ceil((prochain / 100) * E.articles.length) - completes : 0;
+    t.querySelector('#tdbPalier').textContent = prochain ? `Prochain palier : ${prochain} % — encore ${nf(reste)} fiche${reste > 1 ? 's' : ''} complète${reste > 1 ? 's' : ''}.` : '';
+    t.querySelector('#tdbPaliers').innerHTML = `<div class="rail"><i class="vise" style="width:${p1}%"></i><i class="fait" style="width:${p0}%"></i></div>`
+      + PALIERS.map((x) => `<div class="marque-p ${p0 >= x ? 'atteint' : ''}" style="left:${x === 100 ? 'calc(100% - 14px)' : x + '%'}"><span>${x} %</span></div>`).join('');
+  };
+  majProgression();
+  t.querySelectorAll('[data-victoire]').forEach((b) => b.onclick = () => {
+    const k = b.dataset.victoire, on = !ui.tdbVises.has(k);
+    on ? ui.tdbVises.add(k) : ui.tdbVises.delete(k);
+    b.setAttribute('aria-pressed', String(on));
+    b.querySelector('.coche').textContent = on ? '✓ compté dans l’anneau' : 'Touche pour l’ajouter à l’anneau';
+    majProgression();
+  });
+  t.querySelectorAll('[data-regle-aller]').forEach((b) => b.onclick = () => { ui.boite.regle = b.dataset.regleAller; ui.boite.selection.clear(); aller('boite'); });
+  t.querySelectorAll('[data-un-manque]').forEach((b) => b.onclick = () => { ui.filtre.etat = 'unmanque'; ui.filtre.texte = ''; aller('catalogue'); });
+  t.querySelectorAll('[data-pile]').forEach((b) => b.onclick = () => { ui.filtre.etat = b.dataset.pile; ui.filtre.texte = ''; aller('catalogue'); });
   t.querySelectorAll('[data-aller]').forEach((x) => x.onclick = () => aller(x.dataset.aller));
   t.querySelectorAll('[data-regle]').forEach((x) => x.onclick = () => { ui.boite.regle = x.dataset.regle; ui.boite.selection.clear(); });
   brancherHistorique(t);
@@ -361,7 +446,8 @@ function articlesFiltres() {
   const q = sansAccents(f.texte).trim();
   let liste = E.articles.filter((a) => {
     if (f.rayon && a.rayonId !== f.rayon) return false;
-    if (f.etat === 'acompleter' && compDe(a).ok === 6) return false;
+    if (f.etat === 'acompleter' && compDe(a).ok >= compDe(a).total) return false;
+    if (f.etat === 'unmanque' && compDe(a).total - compDe(a).ok !== 1) return false;   // tableau de bord : « victoires rapides »
     if (f.etat === 'probleme' && !A.parArticle.get(a.id)?.length) return false;
     if (f.etat === 'p1' && !A.parArticle.get(a.id)?.some((p) => p.priorite === 1)) return false;
     if (f.etat === 'selection' && !ui.selection.has(a.id)) return false;
@@ -390,7 +476,7 @@ function articlesFiltres() {
 
 function vueCatalogue(t) {
   const f = ui.filtre;
-  const etats = [['tous', 'Tous'], ['acompleter', 'À compléter'], ['probleme', 'Avec problème'], ['p1', 'Critiques'], ['selection', 'Sélection']];
+  const etats = [['tous', 'Tous'], ['acompleter', 'À compléter'], ['unmanque', 'À 1 manque'], ['probleme', 'Avec problème'], ['p1', 'Critiques'], ['selection', 'Sélection']];
   t.innerHTML = `
     <div class="entete-vue"><h1>Catalogue</h1><span class="muet" id="compteCat"></span><span style="flex:1"></span>
       <button class="btn principal" id="btnFusion" title="Coche 2 produits ou plus dans la première colonne, puis clique ici">🔗 Fusionner</button></div>

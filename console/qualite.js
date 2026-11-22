@@ -27,7 +27,6 @@ export const REGLES = {
   format_manquant: { priorite: 3, titre: 'Format manquant', explication: 'Sans format, impossible de calculer un prix comparable.' },
   marque_manquante: { priorite: 3, titre: 'Marque manquante', explication: 'La marque aide à relier les reçus et le scan à la bonne variante.' },
   code_manquant: { priorite: 3, titre: 'Code-barres manquant', explication: 'Le produit ne sera pas reconnu au scan.' },   // plus produit depuis S17 (le code n'est plus une donnée de base)
-  photo_manquante: { priorite: 3, titre: 'Photo du produit manquante', explication: 'Aucune vraie photo (marque, épicier, collée ou la tienne) : seule l’image du générique s’affiche.' },
   photo_manquante: { priorite: 3, titre: 'Photo manquante', explication: 'Une photo aide à retrouver le produit en magasin.' },
   prix_manquant: { priorite: 3, titre: 'Aucun vrai prix', explication: 'Aucun prix observé : le produit ne peut pas être comparé.' },
   doublon_possible: { priorite: 4, titre: 'Doublon possible', explication: 'Noms identiques à un pluriel ou des accents près.' },
