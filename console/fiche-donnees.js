@@ -248,5 +248,7 @@ export function appliquerFiche(base, f, personne) {
     for (const l of f.liens) if (l.statut === 'ok' || l.statut === 'non') apres[l.id] = avant[l.id]?.d === l.statut ? avant[l.id] : { d: l.statut, le: quand, par: personne };
     mettre('liensDecides', apres);
   }
+  // Noms corrigés des produits vendus (✎ Nom, v106) : { idPrix: { marque, lu } } ; le prix lu, lui, ne change jamais
+  if (f.nomsProduits) mettre('nomsProduits', Object.keys(f.nomsProduits).length ? f.nomsProduits : null);
   return { data: d, erreur: null };
 }

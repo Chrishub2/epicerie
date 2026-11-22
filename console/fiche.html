@@ -617,6 +617,17 @@ th.tri-case { text-align: left; }
 .copie-panneau p { margin: 0; flex: 1 1 320px; min-width: 0; }
 .copie-panneau select { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px; }
 .copie-panneau .btn.ok { background: var(--etiquette); color: var(--etiquette-texte); font-weight: 600; }
+/* v118 — Copie : noms modifiables des deux côtés ; ✎ pour corriger le nom d'un produit vendu */
+.copie-panneau { align-items: flex-start; }
+.copie-col { display: grid; gap: 6px; flex: 1 1 260px; min-width: 0; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--trait); }
+.copie-col h4 { margin: 0 0 2px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-3); font-weight: 600; }
+.copie-col label { display: grid; gap: 2px; font-size: 12px; color: var(--texte-3); }
+.copie-col input, .copie-col select { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px; min-width: 0; width: 100%; box-sizing: border-box; }
+.copie-fixe { font-size: 12px; color: var(--texte-3); }
+.copie-actions { display: flex; gap: 8px; align-self: flex-end; }
+.ligne-actions { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.ligne-actions .copier-btn { display: inline-block; margin-top: 0; }
+.nom-corrige { font-size: 11.5px; color: var(--texte-3); display: block; }
 /* v116 — Retirer / ajouter le niveau Sorte dans le Classement */
 .niv-bouton { margin-left: 10px; font: inherit; font-size: 11.5px; padding: 1px 8px; border-radius: 5px; cursor: pointer; background: transparent;
   color: var(--texte-3); border: 1px solid var(--trait); white-space: nowrap; }
@@ -1120,14 +1131,17 @@ function rendArbre() {
     (etat.choix && !SORTES.includes(etat.choix) ? ligne(etat.choix, etat.choix, null) + '<span></span>' : '') + `</div>`;
 }
 
-// v117 — Offre double (« Beurre salé ou non salé ») : le même prix vaut pour l'autre sorte ; on le copie dans la fiche de cette sorte
-// (fiche existante de la même famille, ou nouvelle fiche créée avec ce prix). Le prix reste aussi dans la fiche actuelle.
-const COPIES = {};   // id du produit vendu → nom de la fiche où son prix a été copié
+// v117-v118 — Copier un produit vendu : le prix est copié (jamais modifié) ; seuls les NOMS changent (marque, description).
+// Offre double (« Beurre salé ou non salé ») : la copie est proposée vers l'autre sorte. Destination au choix : toute fiche,
+// une nouvelle fiche, ou aucune pour l'instant (à classer). ✎ corrige le nom affiché d'un produit vendu (le prix lu reste tel quel).
+const COPIES = {};   // id du produit vendu → « Copié dans … » / « Vient de … » / « Copie à classer »
+const NOMS = {};     // id du produit vendu → { marque, lu } corrigés (ta version, affichée à la place du nom lu)
 const normT = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s*%/g, '%').replace(/\s+/g, ' ').trim();
+const nomDe = (v) => ({ marque: NOMS[v.id]?.marque ?? v.sorte, lu: NOMS[v.id]?.lu ?? v.marque });   // vrai produit : sorte = marque, marque = produit lu
 function autresSortes(v) {
   if (!P.reel || !P.sorteRef || P.sorteRef === 'a-preciser') return [];
   const valeurs = String(P.valeursTypiques || '').split(/,\s+/).map((x) => x.trim().replace(/…$/, '').trim()).filter((x) => x && !/^selon/i.test(x));
-  let t = normT(`${v.sorte} ${v.marque} ${v.lu || ''}`);
+  let t = normT(`${nomDe(v).marque} ${nomDe(v).lu}`);
   return valeurs.filter((x) => normT(x) !== normT(P.sorteRef)).sort((a, b) => b.length - a.length).filter((x) => {
     const n = normT(x); if (!t.includes(n)) return false;
     t = t.split(n).join(' | ');   // « non salé » retiré avant de chercher « salé »
@@ -1135,24 +1149,48 @@ function autresSortes(v) {
   });
 }
 const nomSorte = (autre) => `${P.gen} ${autre}`;
-const fichesDe = (autre) => Object.values(REELS).filter((r) => r.genId && r.genId === P.genId && normT(r.sorteRef) === normT(autre));
-function panneauCopie(v) {
-  const autres = autresSortes(v);
-  const opts = autres.map((a) => fichesDe(a).map((r) => `<option value="${r.cle}">${r.nom}</option>`).join('') + `<option value="nouvelle:${a}">+ Nouvelle fiche « ${nomSorte(a)} »</option>`).join('');
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const ficheActuelle = () => Object.values(REELS).find((r) => r.nom === document.getElementById('choixProduit')?.selectedOptions?.[0]?.text) || null;
+function panneauCopie(v, mode) {
+  const n = nomDe(v), autres = autresSortes(v), ici = ficheActuelle();
+  const fixe = `<div class="copie-fixe">Prix : ${$(v.prix)} · ${BAN[v.ban]?.nom || v.ban} · ${v.fmt} · ${v.date || ''}</div>`;
+  const champs = (id, titre, marque, lu) => `<div class="copie-col"><h4>${titre}</h4>
+      <label>Marque <input id="${id}Marque" value="${esc(marque)}"></label>
+      <label>Description <input id="${id}Lu" value="${esc(lu)}"></label>`;
+  if (mode === 'nom') return `<tr class="copie-ligne"><td colspan="12"><div class="copie-panneau">
+    ${champs('cpIci', 'Nom affiché dans cette fiche', n.marque, n.lu)}${fixe}<span class="copie-fixe">Lu : « ${esc(v.marque)} »</span></div>
+    <div class="copie-actions"><button type="button" class="btn ok" data-nom-ok="${v.id}">Enregistrer le nom</button><button type="button" class="btn" data-copier-annuler>Annuler</button></div></div></td></tr>`;
+  // Destinations : même famille (autre sorte) d'abord, nouvelle fiche, toutes les autres fiches, aucune (à classer)
+  const memes = Object.values(REELS).filter((r) => r.genId && r.genId === P.genId && r !== ici);
+  const autresFiches = Object.values(REELS).filter((r) => r !== ici && !memes.includes(r)).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  const nouvelles = (autres.length ? autres.map(nomSorte) : [`${P.gen}`]).map((nm) => `<option value="nouvelle:${esc(nm)}">+ Nouvelle fiche « ${esc(nm)} »</option>`).join('');
+  const opts = (memes.length ? `<optgroup label="Même famille">${memes.map((r) => `<option value="${r.cle}">${esc(r.nom)}</option>`).join('')}</optgroup>` : '')
+    + nouvelles + `<option value="aucune">Aucune fiche pour l'instant (à classer)</option>`
+    + `<optgroup label="Autres fiches">${autresFiches.map((r) => `<option value="${r.cle}">${esc(r.nom)}</option>`).join('')}</optgroup>`;
+  const luCopie = autres.length ? `${P.gen} ${autres[0]}` : n.lu, luIci = autres.length ? `${P.gen} ${P.sorteRef}` : n.lu;
   return `<tr class="copie-ligne"><td colspan="12"><div class="copie-panneau">
-    <p>Ce prix dit « ${v.marque} » : il vaut aussi pour <b>${autres.map(nomSorte).join(', ')}</b>. Il est copié dans cette fiche et reste aussi ici.</p>
-    <label>Copier dans <select id="copieCible">${opts}</select></label>
-    <button type="button" class="btn ok" data-copier-ok="${v.id}">Copier le prix</button><button type="button" class="btn" data-copier-annuler>Annuler</button></div></td></tr>`;
+    ${champs('cpIci', `Ici · ${esc(ici?.nom || P.gen)}`, n.marque, luIci)}</div>
+    ${champs('cpCopie', 'Copie', n.marque, luCopie)}<label>Va dans <select id="copieCible">${opts}</select></label></div>
+    ${fixe}
+    <div class="copie-actions"><button type="button" class="btn ok" data-copier-ok="${v.id}">Copier</button><button type="button" class="btn" data-copier-annuler>Annuler</button></div></div></td></tr>`;
 }
+const lireNom = (id) => ({ marque: document.getElementById(id + 'Marque').value.trim(), lu: document.getElementById(id + 'Lu').value.trim() });
 document.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-copier], [data-copier-ok], [data-copier-annuler]'); if (!b) return;
-  if (b.dataset.copier) etat.copieOuverte = etat.copieOuverte === b.dataset.copier ? null : b.dataset.copier;
+  const b = e.target.closest('[data-copier], [data-nom], [data-copier-ok], [data-nom-ok], [data-copier-annuler]'); if (!b) return;
+  if (b.dataset.copier) etat.copieOuverte = etat.copieOuverte === 'c' + b.dataset.copier ? null : 'c' + b.dataset.copier;
+  else if (b.dataset.nom) etat.copieOuverte = etat.copieOuverte === 'n' + b.dataset.nom ? null : 'n' + b.dataset.nom;
   else if ('copierAnnuler' in b.dataset) etat.copieOuverte = null;
-  else {
+  else if (b.dataset.nomOk) {
+    const v = VAR.find((x) => x.id === b.dataset.nomOk), ici = lireNom('cpIci');
+    NOMS[v.id] = ici; etat.copieOuverte = null;
+    window.quandNomProduit?.(v, ici);
+  } else {
     const v = VAR.find((x) => x.id === b.dataset.copierOk), cible = document.getElementById('copieCible').value;
-    const nom = cible.startsWith('nouvelle:') ? nomSorte(cible.slice(9)) : REELS[cible]?.nom;
-    COPIES[v.id] = nom; etat.copieOuverte = null;
-    window.quandCopiePrix?.(v, cible);   // fiche branchée : crée la fiche au besoin et y ajoute le prix
+    const ici = lireNom('cpIci'), cp = lireNom('cpCopie');
+    NOMS[v.id] = ici;
+    COPIES[v.id] = cible === 'aucune' ? 'Copie à classer' : `Copié dans ${cible.startsWith('nouvelle:') ? cible.slice(9) : REELS[cible]?.nom}`;
+    etat.copieOuverte = null;
+    window.quandCopiePrix?.(v, cible, { ici, copie: cp });   // fiche branchée : noms enregistrés, fiche créée au besoin, nouveau prix ajouté
   }
   rendVariantes();
 });
@@ -1181,16 +1219,17 @@ function rendVariantes() {
     return `<tr class="${hors ? 'filtre' : ''} ${force ? 'force' : ''} ${etat.refusees.has(v.sorte) ? 'refusee' : ''}">
       <td class="num c-no">${i + 1}</td>
       <td class="c-coeur"><button class="coeur ${fav ? 'on' : ''}" type="button" data-fav="${v.id}" aria-pressed="${fav}" aria-label="${fav ? 'Retirer des favoris' : 'Ajouter aux favoris'}">${fav ? '♥' : '♡'}</button></td>
-      <td class="c-photo">${photo}</td><td class="c-sorte"><b>${v.sorte}</b></td><td class="c-marque" data-l="Marque">${v.marque}${(() => { const a = autresSortes(v); if (!a.length) return '';
-        return COPIES[v.id] ? `<span class="copie-faite">✓ ${/^Vient de /.test(COPIES[v.id]) ? COPIES[v.id] : 'Copié dans ' + COPIES[v.id]}</span>`
-          : `<button type="button" class="copier-btn" data-copier="${v.id}" aria-expanded="${etat.copieOuverte === v.id}">⧉ Copier vers ${a.map((x) => `« ${nomSorte(x)} »`).join(', ')}</button>`; })()}</td><td class="c-fmt">${v.fmt}</td>
+      <td class="c-photo">${photo}</td><td class="c-sorte"><b>${esc(nomDe(v).marque)}</b></td><td class="c-marque" data-l="Marque">${esc(nomDe(v).lu)}${NOMS[v.id] && NOMS[v.id].lu !== v.marque ? `<span class="nom-corrige" title="Nom lu dans la source">lu : « ${esc(v.marque)} »</span>` : ''}${(() => { if (!P.reel) return '';
+        const a = autresSortes(v), fait = COPIES[v.id] ? `<span class="copie-faite">✓ ${COPIES[v.id]}</span>` : '';
+        const copier = /^Vient de /.test(COPIES[v.id] || '') ? '' : `<button type="button" class="copier-btn" data-copier="${v.id}" aria-expanded="${etat.copieOuverte === 'c' + v.id}" title="Copier ce produit vendu (même prix) ; tu choisis les noms et la fiche">⧉ ${a.length && !COPIES[v.id] ? `Copier vers ${a.map((x) => `« ${nomSorte(x)} »`).join(', ')}` : 'Copier'}</button>`;
+        return `${fait}<span class="ligne-actions">${copier}<button type="button" class="copier-btn" data-nom="${v.id}" aria-expanded="${etat.copieOuverte === 'n' + v.id}" title="Corriger le nom affiché (le prix lu ne change pas)">✎ Nom</button></span>`; })()}</td><td class="c-fmt">${v.fmt}</td>
       <td class="c-ban"><span class="ban">${LOGO(v.ban)}</span></td>
       <td class="num c-aff${regKg(v) ? ' promo' : ''}" data-l="Affiché">${$(v.prix)}${v.unite === 'lb' ? '/lb' : ''}</td>
       <td class="num c-kg${regKg(v) ? ' promo' : ''}"><b>${$(pu(v))}</b><span class="suffixe">${U.lib}</span></td>
       <td class="c-rabais">${r ? `<span class="puce ok">−${Math.round((1 - parKg(v) / r) * 100)} %</span>` : (v.rabaisFini ? `<span class="ex fini">rabais fini le ${v.rabaisFini}</span>` : '<span class="ex">—</span>')}</td>
       <td class="c-local">${v.local ? QC : '<span class="ex">—</span>'}</td>
       <td class="c-src">${SRC(v)}</td>
-    </tr>${etat.copieOuverte === v.id ? panneauCopie(v) : ''}`;
+    </tr>${etat.copieOuverte === 'c' + v.id ? panneauCopie(v, 'copie') : etat.copieOuverte === 'n' + v.id ? panneauCopie(v, 'nom') : ''}`;
   }).join('');
 }
 
@@ -1894,5 +1933,5 @@ window.addEventListener('resize', ajusterEchelle);
   }, true);
 })(); // style retenu par Chris (v11)
 </script>
-<script type="module" src="fiche-charger.js?v=epicerie-v104"></script>
-<!-- Construit depuis journal/maquettes/fiche-produit-v117.html par console/construire_fiche.py -->
+<script type="module" src="fiche-charger.js?v=epicerie-v105"></script>
+<!-- Construit depuis journal/maquettes/fiche-produit-v118.html par console/construire_fiche.py -->

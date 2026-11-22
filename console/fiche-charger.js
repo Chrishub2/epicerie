@@ -23,7 +23,7 @@ const json = (f) => fetch(`../visuels/${f}`).then((r) => (r.ok ? r.json() : null
 // Fenêtre des prix montrés : 45 jours (le plus récent par bannière et par produit lu)
 const depuis = () => new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
 const NOMS_CHAMPS = { sorte: 'sorte', seulChez: 'seulement chez', annulesVus: 'prix annulés vus', santeIgnores: 'avertissements ignorés', plu: 'PLU', codes: 'code-barres',
-  caracteristiques: 'caractéristiques', nomEn: 'nom anglais', nomsAlt: 'noms alternatifs', nomsAltEn: 'noms anglais', liensDecides: 'liens confirmés ou refusés', generique: 'famille', generiqueNom: 'famille (nouvelle)', remplacement: 'remplacement' };
+  caracteristiques: 'caractéristiques', nomEn: 'nom anglais', nomsAlt: 'noms alternatifs', nomsAltEn: 'noms anglais', liensDecides: 'liens confirmés ou refusés', nomsProduits: 'noms des produits vendus', generique: 'famille', generiqueNom: 'famille (nouvelle)', remplacement: 'remplacement' };
 
 const src = new SourceSupabase();
 let E = null, opts = null, personne = '', courant = null;   // courant = { id, version, base, genIdDepart }
@@ -74,6 +74,7 @@ function lireFiche() {
     caracs: [...carac], nomEn: $('fNomEn').value, alias: etat.alias,
     genId: P.genId, genIdDepart: courant.genIdDepart, genNouveau: P.genNouveau, genNom: P.gen, rempl: $('fRempl').value,
     liens: LIENS.map((l) => ({ id: l.id, statut: l.statut })),
+    nomsProduits: nomsAEnregistrer(),
   }, personne);
 }
 
@@ -162,15 +163,19 @@ window.chargerProduit = (cle) => {
     // Tes ✓ / ✗ déjà enregistrés : dans l'historique des liens, avec « Annuler »
     for (const l of LIENS.filter((x) => x.statut)) HIST.push({ type: l.statut, txt: `${BAN[l.ban]?.nom || l.ban} « ${l.lu} » → ${P.gen} · ${l.sorte}`,
       d: `${l.decide?.le || ''} · ${l.decide?.par || ''}`, lienId: l.id, varId: l.statut === 'ok' ? 'l-' + l.id : null });
-    // Offres doubles déjà copiées vers l'autre sorte : « ✓ Copié dans … » au lieu du bouton
+    // Copies déjà faites (« ✓ Copié dans … », « ✓ Copie à classer », « ✓ Vient de … ») et noms corrigés (✎)
     for (const k of Object.keys(COPIES)) delete COPIES[k];
+    for (const k of Object.keys(NOMS)) delete NOMS[k];
     for (const v of VAR) {
-      const c = E.prix.find((p) => p.copieDe && p.copieDe === idPrix(v.id));
-      if (c) COPIES[v.id] = E.articles.find((x) => x.id === c.articleId)?.nom || 'une autre fiche';
-      // Prix lui-même copié d'une autre fiche : pas de bouton (on ne le recopie pas vers sa fiche d'origine)
       const p = E.prix.find((x) => x.id === idPrix(v.id));
-      const orig = p?.copieDe && E.prix.find((x) => x.id === p.copieDe);
-      if (p?.copieDe) COPIES[v.id] = `Vient de ${E.articles.find((x) => x.id === orig?.articleId)?.nom || 'une autre fiche'}`;
+      const c = E.prix.find((x) => x.copieDe && x.copieDe === idPrix(v.id));
+      if (c) COPIES[v.id] = c.articleId ? `Copié dans ${E.articles.find((x) => x.id === c.articleId)?.nom || 'une autre fiche'}` : 'Copie à classer';
+      if (p?.copieDe) {   // prix lui-même copié d'une autre fiche : pas de bouton vers sa fiche d'origine
+        const orig = E.prix.find((x) => x.id === p.copieDe);
+        COPIES[v.id] = `Vient de ${E.articles.find((x) => x.id === orig?.articleId)?.nom || 'une autre fiche'}`;
+      }
+      const n = a.nomsProduits?.[idPrix(v.id)] || p?.nomCorrige;
+      if (n) NOMS[v.id] = { marque: n.marque ?? v.sorte, lu: n.lu ?? v.marque };
     }
     rendLiens(); tout();
     initialiser(a);
@@ -194,6 +199,7 @@ async function demarrer() {
       circulaires: Object.fromEntries(Object.entries(BANNIERES).filter(([, b]) => b.circulaire).map(([k, b]) => [k, b.circulaire])) };
     lireFamilles(await src.chargerFamilles());
     for (const a of E.articles) { try { construire(a); } catch (err) { console.warn('Fiche non construite :', a.id, err); } }
+    majAClasser();
     for (const [k, b] of Object.entries(BANNIERES)) if (!BAN[k]) BAN[k] = { nom: b.nom, c: '#8d99ae' };
     for (const r of Object.values(REELS)) for (const v of [...r.var, ...r.liens]) if (v.ban && !BAN[v.ban]) BAN[v.ban] = { nom: v.ban, c: '#8d99ae' };
     const tri = Object.values(REELS).sort((x, y) => x.nom.localeCompare(y.nom, 'fr'));
@@ -231,50 +237,134 @@ window.quandNiveauSorte = async (cle, val) => {
   }
 };
 
-// ---------- Offre double (v105) : « Beurre salé ou non salé » → le prix est copié dans la fiche de l'autre sorte
-// Fiche existante de la même famille, ou nouvelle fiche (même famille, rayon, unité et format). La copie est un NOUVEAU prix
-// (les prix sont en ajout seulement) qui garde « copieDe » ; il compte tout de suite dans la fiche cible (lien confirmé ✓).
+// ---------- Copier un produit vendu (v105-v106) : le prix est copié (jamais modifié), seuls les noms changent.
+// La copie est un NOUVEAU prix (copieDe = l'original, nomCorrige = ses noms) : dans une fiche existante ou nouvelle (lien confirmé ✓),
+// ou « à classer » (sans fiche, en attente : la base permet de la rattacher plus tard). Les noms corrigés ICI partent avec « Enregistrer ».
 const idPrix = (varId) => String(varId).replace(/^l-l/, '');
 const uid = (pre) => pre + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const slugSorte = (t) => String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-window.quandCopiePrix = async (v, cible) => {
+const slugSorte = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const memeNom = (a, b) => (a?.marque || '') === (b?.marque || '') && (a?.lu || '') === (b?.lu || '');
+// Noms à garder dans la fiche : ceux de la base (prix plus anciens compris), puis ceux de la page s'ils diffèrent du nom de départ
+function nomsAEnregistrer() {
+  const r = copie(courant?.base?.nomsProduits || {});
+  for (const v of VAR) {
+    const pid = idPrix(v.id), p = E?.prix.find((x) => x.id === pid);
+    const depart = p?.nomCorrige ? { marque: p.nomCorrige.marque ?? v.sorte, lu: p.nomCorrige.lu ?? v.marque } : { marque: v.sorte, lu: v.marque };
+    if (NOMS[v.id] && !memeNom(NOMS[v.id], depart)) r[pid] = { marque: NOMS[v.id].marque, lu: NOMS[v.id].lu };
+    else delete r[pid];
+  }
+  return r;
+}
+window.quandNomProduit = () => majBarre();
+function lienOk(art, prixId, quand) { art.liensDecides = { ...(art.liensDecides || {}), ['l' + prixId]: { d: 'ok', le: quand, par: personne } }; }
+window.quandCopiePrix = async (v, cible, noms = {}) => {
   const p = E.prix.find((x) => x.id === idPrix(v.id));
   const echec = (msg) => { delete COPIES[v.id]; rendVariantes(); majBarre(msg, 'erreur'); };
   if (!p) return echec('Prix introuvable : recharge la page, puis recommence.');
   const quand = new Date().toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' });
+  const nouveau = { ...copie(p), id: uid('p'), copieDe: p.id, nomCorrige: noms.copie || null };
+  for (const k of ['annule', 'annuleRaison', 'aVerifier']) delete nouveau[k];
   try {
-    let art, version;
-    if (cible.startsWith('nouvelle:')) {
-      const autre = cible.slice(9), base = courant.base, vid = uid('v');
-      art = { id: uid('a'), nom: `${P.gen} ${autre}`, codes: [], local: !!base.local, format: base.format || '', rayonId: base.rayonId, uniteRef: base.uniteRef,
-        generique: P.genId || undefined, generiqueNom: P.genId ? undefined : P.gen, sorte: slugSorte(autre),
-        variantes: [{ id: vid, nom: '', alias: [], codes: [], local: !!base.local, format: base.format || '' }], variantePreferee: vid };
-      art = copie(art);
-      version = null;
+    let art = null, version = null, texte;
+    if (cible === 'aucune') {
+      Object.assign(nouveau, { articleId: null, varianteId: null, enAttente: true, aClasser: true });
+      texte = 'Copie gardée « à classer » (bouton 📥 en haut pour la rattacher)';
     } else {
-      art = copie(E.articles.find((x) => x.id === cible));
-      version = E.articles.find((x) => x.id === cible)?._version ?? null;
+      if (cible.startsWith('nouvelle:')) {
+        const nom = cible.slice(9).trim() || P.gen, base = courant.base, vid = uid('v');
+        const reste = normT(nom).startsWith(normT(P.gen) + ' ') ? nom.slice(P.gen.length).trim() : '';
+        art = copie({ id: uid('a'), nom, codes: [], local: !!base.local, format: base.format || '', rayonId: base.rayonId, uniteRef: base.uniteRef,
+          generique: P.genId || undefined, generiqueNom: P.genId ? undefined : P.gen, sorte: reste ? slugSorte(reste) : undefined,
+          variantes: [{ id: vid, nom: '', alias: [], codes: [], local: !!base.local, format: base.format || '' }], variantePreferee: vid });
+      } else {
+        const ex = E.articles.find((x) => x.id === cible);
+        art = copie(ex); version = ex?._version ?? null;
+      }
+      Object.assign(nouveau, { articleId: art.id, varianteId: art.variantePreferee || art.variantes?.[0]?.id || null });
+      lienOk(art, nouveau.id, quand);   // la copie compte tout de suite dans la fiche cible
+      const va = await src.ecrire('article', art.id, art, version, 'console');
+      Object.defineProperty(art, '_version', { value: va ?? (version ?? 0) + 1, enumerable: false, writable: true });
+      const i = E.articles.findIndex((x) => x.id === art.id);
+      if (i >= 0) E.articles[i] = art; else E.articles.push(art);
+      texte = `Copié dans « ${art.nom} »${version == null ? ' (nouvelle fiche)' : ''}`;
     }
-    const nouveau = { ...copie(p), id: uid('p'), articleId: art.id, varianteId: art.variantePreferee || art.variantes?.[0]?.id || null, copieDe: p.id };
-    // Le prix copié compte tout de suite dans la fiche cible (ta décision, avec date et auteur)
-    art.liensDecides = { ...(art.liensDecides || {}), ['l' + nouveau.id]: { d: 'ok', le: quand, par: personne } };
-    const va = await src.ecrire('article', art.id, art, version, 'console');
     await src.ecrire('prix', nouveau.id, nouveau, null, 'console');
-    Object.defineProperty(art, '_version', { value: va ?? (version ?? 0) + 1, enumerable: false, writable: true });
-    const i = E.articles.findIndex((x) => x.id === art.id);
-    if (i >= 0) E.articles[i] = art; else E.articles.push(art);
     E.prix.push(nouveau);
-    construire(art);
-    if (![...$('choixProduit').options].some((o) => o.value === art.id)) $('choixProduit').add(new Option(art.nom, art.id));
-    COPIES[v.id] = art.nom; rendVariantes();
-    majBarre(`Prix copié dans « ${art.nom} »${version == null ? ' (nouvelle fiche)' : ''}. Il reste aussi ici.`, 'ok');
-    setTimeout(() => majBarre(), 3500);   // puis la barre revient aux changements non enregistrés de cette fiche, s'il y en a
+    if (art) {
+      construire(art);
+      if (![...$('choixProduit').options].some((o) => o.value === art.id)) $('choixProduit').add(new Option(art.nom, art.id));
+    }
+    majAClasser();
+    rendVariantes();
+    majBarre(`${texte}. L'original reste ici${changements().liste.length ? ' — pense à enregistrer le nom corrigé ici' : ''}.`, 'ok');
+    setTimeout(() => majBarre(), 4000);
   } catch (err) {
     echec(err.conflit ? 'Cette fiche a été modifiée ailleurs : recharge la page, puis recommence.' : `Copie non faite : ${String(err.message || err)}`);
   }
 };
 
+// ---------- 📥 À classer : les copies sans fiche ; on choisit leur fiche (rattachement permis par la base tant qu'elles sont en attente)
+const boutonAClasser = document.createElement('button');
+boutonAClasser.type = 'button'; boutonAClasser.id = 'bsAClasser'; boutonAClasser.hidden = true;
+boutonEntete.after(boutonAClasser);
+const boiteAClasser = document.createElement('div');
+boiteAClasser.id = 'boiteAClasser'; boiteAClasser.hidden = true;
+boiteAClasser.setAttribute('role', 'dialog'); boiteAClasser.setAttribute('aria-label', 'Copies à classer');
+document.body.appendChild(boiteAClasser);
+style.textContent += `
+#bsAClasser { font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 6px; cursor: pointer; margin-left: 6px; white-space: nowrap;
+  background: transparent; color: var(--texte, #e8e8e8); border: 1px solid var(--etiquette, #e9c46a); }
+#boiteAClasser { position: fixed; top: 64px; right: max(16px, env(safe-area-inset-right, 0px)); z-index: 60; width: min(560px, calc(100vw - 32px)); max-height: 70vh; overflow: auto;
+  padding: 12px 14px; border-radius: 10px; background: var(--surface, #1e252b); border: 1px solid var(--trait-fort, #445); box-shadow: 0 10px 30px rgba(0,0,0,.4); font-size: 13px; display: grid; gap: 10px; }
+#boiteAClasser .ac-ligne { display: grid; gap: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--trait, #333c44); }
+#boiteAClasser .ac-act { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#boiteAClasser select { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px; flex: 1 1 220px; min-width: 0; }
+#boiteAClasser .ac-titre { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }`;
+const aClasser = () => (E?.prix || []).filter((p) => p.aClasser && p.enAttente && !p.articleId);
+function majAClasser() {
+  const n = aClasser().length;
+  boutonAClasser.hidden = !n;
+  boutonAClasser.textContent = `📥 À classer (${n})`;
+  if (!n) boiteAClasser.hidden = true;
+  if (!boiteAClasser.hidden) rendAClasser();
+}
+function rendAClasser() {
+  const fiches = [...E.articles].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  const opt = fiches.map((a) => `<option value="${a.id}">${esc(a.nom)}</option>`).join('');
+  boiteAClasser.innerHTML = `<div class="ac-titre"><span>Copies à classer</span><button type="button" class="btn" data-ac-fermer>Fermer</button></div>` +
+    aClasser().map((p) => { const n = p.nomCorrige || {}; return `<div class="ac-ligne">
+      <div><b>${esc(n.marque || '')}</b> ${esc(n.lu || p.nomProduit || '')}</div>
+      <div class="ex">${esc(p.offre || '')} · ${esc(BAN[p.banniere]?.nom || p.banniere || '')} · ${esc(p.format || '')} · lu : « ${esc(p.nomProduit || '')} »</div>
+      <div class="ac-act"><select data-ac-cible="${p.id}" aria-label="Fiche où classer">${opt}</select><button type="button" class="btn bs-ok" data-ac-ok="${p.id}">Classer</button></div></div>`; }).join('');
+}
+boutonAClasser.onclick = () => { boiteAClasser.hidden = !boiteAClasser.hidden; if (!boiteAClasser.hidden) rendAClasser(); };
+boiteAClasser.addEventListener('click', async (e) => {
+  if (e.target.closest('[data-ac-fermer]')) { boiteAClasser.hidden = true; return; }
+  const b = e.target.closest('[data-ac-ok]'); if (!b) return;
+  const p = E.prix.find((x) => x.id === b.dataset.acOk), cible = boiteAClasser.querySelector(`[data-ac-cible="${p.id}"]`).value;
+  const ex = E.articles.find((x) => x.id === cible); if (!p || !ex) return;
+  b.disabled = true;
+  try {
+    const art = copie(ex), version = ex._version ?? null;
+    lienOk(art, p.id, new Date().toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }));
+    const va = await src.ecrire('article', art.id, art, version, 'console');
+    Object.defineProperty(art, '_version', { value: va ?? (version ?? 0) + 1, enumerable: false, writable: true });
+    E.articles[E.articles.indexOf(ex)] = art;
+    // Rattachement : la copie en attente reçoit sa fiche (seul changement permis à un prix, tant qu'il est en attente)
+    const vp = E.prix.indexOf(p), nv = { ...copie(p), articleId: art.id, varianteId: art.variantePreferee || art.variantes?.[0]?.id || null, enAttente: false, aClasser: false };
+    await src.ecrire('prix', p.id, nv, p._version ?? 1, 'console');
+    E.prix[vp] = nv;
+    construire(art);
+    majAClasser();
+    if (courant?.id === art.id) chargerProduit(art.id);
+    majBarre(`Classé dans « ${art.nom} ».`, 'ok'); setTimeout(() => majBarre(), 3500);
+  } catch (err) {
+    b.disabled = false;
+    majBarre(err.conflit ? 'Cette fiche a été modifiée ailleurs : recharge la page, puis recommence.' : `Pas classé : ${String(err.message || err)}`, 'erreur');
+  }
+});
+
 // Accès pour les essais (aperçu sans connexion) : on injecte des données sans toucher à la base
-window.__fiche = { initialiserAvec(e, o, nom = 'Chris', familles = []) { E = e; opts = o; personne = nom; lireFamilles(familles); for (const a of E.articles) construire(a); }, changements, lireFiche,
+window.__fiche = { initialiserAvec(e, o, nom = 'Chris', familles = []) { E = e; opts = o; personne = nom; lireFamilles(familles); for (const a of E.articles) construire(a); majAClasser(); }, changements, lireFiche,
   ecrireAvec(fn) { src.ecrire = fn; } };
 if (!new URLSearchParams(location.search).has('essai')) demarrer();
