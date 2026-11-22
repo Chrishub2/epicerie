@@ -11,6 +11,15 @@ import { gtinVariantes, chiffreControle, analyserFormat, formatLisible, normalis
 import * as P from './produits.js';
 import { BANNIERES } from './demo-data.js';
 import { analyserPlu, infosPlu } from './plu.js';
+import { enfantsGenerique } from './arbre-recherche.js';
+import { familleDe } from './visuels.js';
+
+/** Une ligne de liste couvre-t-elle cette fiche ? La sienne, ou une ligne générique (niveau 1 ou 2, v117) dont elle est une fiche dessous. */
+function ligneCouvre(etat, ligne, articleId) {
+  if (ligne.articleId === articleId) return true;
+  const g = etat.articles.find((a) => a.id === ligne.articleId);
+  return !!g?.estGenerique && enfantsGenerique(g, etat.articles, familleDe).some((a) => a.id === articleId);
+}
 import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes, reporterAssociations, etatLigne,
   texteFiche, indexBase, chercherDansBase, achatsDuProduit, resumeAchats } from './lignes-recu.js';
 
@@ -442,7 +451,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       // Cocher l'article acheté : seulement sans lien choisi (panier : déjà coché ; autre achat : liste intacte)
       const li = !lien && x.liste.find((y) => y.articleId === ar.id && !y.coche);
       if (li) { li.coche = true; li.cocheLe = new Date().toISOString(); coche = true; }
-      x.liste.filter((y) => y.articleId === ar.id && lignesListe.has(y.id)).forEach((y) => { y.recu = verdict; });
+      x.liste.filter((y) => lignesListe.has(y.id) && ligneCouvre(x, y, ar.id)).forEach((y) => { y.recu = verdict; });
       ar.dernierAchat = verdict;
       const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
       if (ln) {
@@ -456,7 +465,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   }
   // Articles de la liste absents de cette facture (sans effacer un achat confirmé par une autre facture)
   S.maj((x) => {
-    x.liste.filter((y) => lignesListe.has(y.id) && !relies.has(y.articleId) && (!y.recu || y.recu.absent))
+    x.liste.filter((y) => lignesListe.has(y.id) && ![...relies].some((id) => ligneCouvre(x, y, id)) && (!y.recu || y.recu.absent))
       .forEach((y) => { y.recu = { recuId, date, banniere: r.banniere, absent: true }; if (lien?.mode === 'panier') bilan.absents++; });
   });
   // Anciens prix de ce reçu qui ne correspondent plus (rabais ou pesée recalculés, ligne changée)
@@ -510,7 +519,7 @@ const dateCourte = (d) => (d ? new Date(`${d}T12:00`).toLocaleDateString('fr-CA'
 export function htmlVerdictListe(v) {
   if (!v) return '';
   const ou = `${v.banniere ? nomBanniere(v.banniere) + ', ' : ''}${dateCourte(v.date)}`;
-  if (v.absent) return `<div class="item-recu doux">🧾 Pas sur la facture (${esc(ou)})</div>`;
+  if (v.absent) return `<div class="item-recu ecart">🧾 ! Pas trouvé sur la facture (${esc(ou)})</div>`;
   const p = (x) => `${argent(x)}${v.unite || ''}`;
   if (v.statut === 'ok') return `<div class="item-recu ok">🧾 ✓ Bon prix selon la facture : ${p(v.paye)} (${esc(ou)})</div>`;
   if (v.statut === 'moins') return `<div class="item-recu ok">🧾 ✓ Payé moins cher : ${p(v.paye)} au lieu de ${p(v.attendu)} (${esc(ou)})</div>`;

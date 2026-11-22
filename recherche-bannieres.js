@@ -243,3 +243,35 @@ export function aAppliquer(recherches, maintenant = Date.now()) {
   return (recherches || []).filter((r) => r.but === 'verif' && r.articleId && !r.appliqueLe
     && (r.etat === 'fait' || maintenant - Date.parse(r.le) >= 24 * 3600000));
 }
+
+// =====================================================================
+// v120 — Nom inconnu (« Mon nom tel quel ») : quand les bannières ont répondu
+//  - rien trouvé → la fiche reste à ton nom, sans prix proposé (limite du système) ;
+//  - UN produit dont le nom est exactement le tien (mêmes mots) → rattaché sans rien demander ;
+//  - sinon → fenêtre « choisis dans la liste, ou garde ton nom sans référence ».
+// =====================================================================
+
+/** Demandes « nom » terminées dont le choix n'est pas encore fait. */
+export const choixEnAttente = (recherches) => (recherches || []).filter((r) => r.but === 'nom' && r.articleId && r.etat === 'fait' && !r.choixLe);
+
+/** Décision automatique : { choix: 'aucun' } | { choix: 'auto', groupe } | { choix: 'fenetre', groupes }. */
+export function decisionNom(r, nomFiche) {
+  const groupes = regrouper(r).slice(0, 8);
+  if (!groupes.length) return { choix: 'aucun' };
+  const voulus = [...mots(nomFiche)].sort().join(' ');
+  const exacts = groupes.filter((g) => {
+    const f = ficheDuGroupe(g);
+    return [...mots(`${f.marque} ${f.nom}`)].sort().join(' ') === voulus || [...mots(f.nom)].sort().join(' ') === voulus;
+  });
+  if (exacts.length === 1) return { choix: 'auto', groupe: exacts[0] };
+  return { choix: 'fenetre', groupes };
+}
+
+/** Ce qui change dans ta fiche quand tu choisis un produit : nom, marque, format, photo… (le code-barres seulement s'il est sûr). */
+export function completerFiche(fiche, g) {
+  const f = ficheDuGroupe(g);
+  return { nom: f.nom || fiche.nom, marque: f.marque || fiche.marque || '', format: f.format || fiche.format || '',
+    uniteRef: f.uniteRef || fiche.uniteRef || 'unite', local: f.local || !!fiche.local,
+    ...(f.imageUrl && !fiche.imageUrl ? { imageUrl: f.imageUrl } : {}),
+    codes: [...new Set([...(fiche.codes || []), ...f.codes])] };
+}

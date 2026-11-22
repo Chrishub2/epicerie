@@ -4,7 +4,7 @@
 // =====================================================================
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin, brancherSelecteurProduit } from './ui.js';
-import { PROGRAMMES } from './demo-data.js';
+import { PROGRAMMES, BANNIERES } from './demo-data.js';
 import { SKINS, skinActuel, htmlChoixSkin, brancherChoixSkin } from './skins/skins.js';
 import { photographierRecu } from './camera.js';
 import { prendrePhoto } from './ocr.js';
@@ -541,16 +541,17 @@ function vueReleve(v) {
  *  - sans réseau / sans IA : gardé et lu plus tard (file d'attente).
  * Exporté pour le bouton de la liste.
  */
-export async function nouveauRecu() {
+export async function nouveauRecu(opts = {}) {
   fermerModale(); // la caméra doit passer devant (une fenêtre ouverte la cacherait)
   const blobs = await photographierRecu(); // cadre jaune, 1 ou plusieurs sections
   if (!blobs.length) return;
   const { iaDisponible, lireRecu } = await import('./ocr.js');
   if (!iaDisponible()) {
-    const q = await questionsPanier();
+    const q = await questionsPanier(opts);
     const id = await enregistrerRecu(blobs, null, q.lienListe);
     fermerModale();
-    const nRetires = q.retirer ? retirerCoches() : 0;
+    // Reçu d'une bannière (v120) : on ne sait pas encore ce qui est sur la facture → rien n'est retiré avant sa lecture
+    const nRetires = q.retirer && !q.parBanniere ? retirerCoches() : 0;
     toast(`${navigator.onLine ? `Reçu enregistré (${blobs.length} photo(s)) — lecture en cours…` : 'Reçu gardé — il sera lu et vérifié au retour du réseau'}${nRetires ? ` · ${nRetires} article(s) retiré(s) de la liste` : ''}`);
     await ajouterTache({ type: 'recu', recuId: id, photoIds: S.get().recus.find((r) => r.id === id).photoIds });
     return;
@@ -568,15 +569,22 @@ export async function nouveauRecu() {
     $('#rvActions', c).innerHTML = v.ok
       ? '<button class="btn" id="rvOk">✓ Enregistrer et remplir ma liste</button><button class="btn sec" id="rvRefaire">📷 Reprendre</button>'
       : '<button class="btn" id="rvRefaire">📷 Reprendre les photos</button><button class="btn sec" id="rvOk">Garder quand même</button>';
-    $('#rvRefaire', c).onclick = () => nouveauRecu();
+    $('#rvRefaire', c).onclick = () => nouveauRecu(opts);
     $('#rvOk', c).onclick = async () => {
-      const q = await questionsPanier(); // ce reçu correspond-il au panier ? retirer les cochés ensuite ?
+      const q = await questionsPanier(opts); // ce reçu correspond-il au panier ? retirer les cochés ensuite ?
       const id = await enregistrerRecu(blobs, lu, q.lienListe);
       ouvrirModale('Enregistrement du reçu', '<div id="rvEtat" class="alerte">⏳ J\'enregistre ton reçu…</div>');
       const etat = (m) => { const z = $('#rvEtat'); if (z) z.textContent = `⏳ Je compare les prix et je complète les fiches… ${m}`; };
       const bilan = await R.appliquerRecu(id, etat);
-      const nRetires = q.retirer ? retirerCoches() : 0;
-      toast(`Reçu enregistré ✓ ${R.texteBilan(bilan)}${nRetires ? ` · ${nRetires} article(s) retiré(s) de la liste` : ''}`);
+      if (q.parBanniere && q.retirer) {
+        // v120 : les cochés TROUVÉS sur la facture quittent la liste (et Prépa) ; les autres restent avec « ! »
+        const nRetires = retirerTrouves(q.lienListe.ids);
+        toast(`Reçu enregistré ✓ ${R.texteBilan(bilan)}${nRetires ? ` · ${nRetires} article(s) retiré(s) de la liste` : ''}`);
+        await traiterAbsents(id, q.lienListe.ids, R);
+      } else {
+        const nRetires = q.retirer ? retirerCoches() : 0;
+        toast(`Reçu enregistré ✓ ${R.texteBilan(bilan)}${nRetires ? ` · ${nRetires} article(s) retiré(s) de la liste` : ''}`);
+      }
       apresApplication(id);
     };
   });
@@ -601,8 +609,22 @@ function demander(titre, html, boutons, parDefaut = null, opts = {}) {
  *  2) peut-on retirer les articles cochés de la liste (pour préparer la prochaine) ?
  * Panier vide ou fenêtre fermée : comme avant (toute la liste), rien n'est retiré.
  */
-async function questionsPanier() {
+async function questionsPanier(opts = {}) {
   const e = S.get();
+  if (opts.ids) {
+    // v120 — reçu photographié en bas de la liste d'UNE bannière : une seule question, sur ses produits cochés
+    const panier = e.liste.filter((l) => opts.ids.includes(l.id) && l.coche);
+    const nomB = esc(BANNIERES[opts.banniere]?.nom || opts.banniere || '');
+    if (!panier.length) return { lienListe: { mode: 'aucun' }, retirer: false, parBanniere: true };
+    const noms = panier.map((l) => e.articles.find((a) => a.id === l.articleId)?.nom).filter(Boolean);
+    const rep = await demander(`🧾 Ce reçu ${nomB} correspond-il à tes achats ?`, `<p>${panier.length} produit(s) coché(s) chez ${nomB} :</p>
+      <ul class="doux" style="margin:6px 0;padding-left:18px;max-height:30vh;overflow:auto">${noms.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
+      <p class="doux"><b>Oui</b> : je relie ces produits au reçu (historique), je confirme les prix réguliers et à rabais, et je retire de ta liste et de Prépa les cochés trouvés sur le reçu. Ceux que je ne trouve pas restent, marqués « ! ».</p>
+      <p class="doux"><b>Non</b> : j'enregistre seulement le reçu, avec tout ce qu'il contient, comme d'habitude.</p>`,
+    [['oui', '✓ Oui, c’est cet achat'], ['non', 'Non, autre achat']]);
+    if (rep === 'oui') return { lienListe: { mode: 'panier', ids: panier.map((l) => l.id) }, retirer: true, parBanniere: true };
+    return { lienListe: { mode: 'aucun' }, retirer: false, parBanniere: true };
+  }
   const panier = e.liste.filter((l) => l.coche);
   if (!panier.length) return { lienListe: null, retirer: false };
   const noms = panier.map((l) => e.articles.find((a) => a.id === l.articleId)?.nom).filter(Boolean);
@@ -616,6 +638,39 @@ async function questionsPanier() {
     <p class="doux">Ta prochaine liste partira de ce qui reste. Les prix payés restent dans les fiches des produits.</p>`,
   [['oui', '🧹 Oui, retire-les'], ['non', 'Non, garde-les']], 'non');
   return { lienListe, retirer: ret === 'oui' };
+}
+
+/** v120 : retire de la liste les lignes `ids` trouvées sur la facture (pas celles marquées « absent »). Retourne leur nombre. */
+function retirerTrouves(ids) {
+  let n = 0;
+  const viser = new Set(ids);
+  S.maj((x) => { const avant = x.liste.length; x.liste = x.liste.filter((l) => !viser.has(l.id) || l.recu?.absent); n = avant - x.liste.length; });
+  return n;
+}
+
+/**
+ * v120 — les « ! » : chaque coché de cette bannière pas trouvé sur la facture.
+ * « Est-il sur le reçu ? » → tu touches sa ligne (le prix payé y est relié) ou « Pas sur le reçu » ; puis « Je le retire ? ».
+ * Fermer la fenêtre arrête les questions ; le « ! » reste sur la ligne.
+ */
+async function traiterAbsents(recuId, ids, R) {
+  for (const lid of ids) {
+    const e = S.get();
+    const l = e.liste.find((y) => y.id === lid);
+    if (!l?.recu?.absent || l.recu.recuId !== recuId) continue;
+    const a = e.articles.find((x) => x.id === l.articleId);
+    const rc = (e.recus || []).find((r) => r.id === recuId);
+    const libres = (rc?.lignes || []).map((ln, i) => ({ ln, i })).filter(({ ln }) => !ln.articleId && natureLigne(ln) === 'produit');
+    const rep = await demander(`! ${esc(a?.nom || 'Produit')} : est-il sur le reçu ?`,
+      `<p class="doux">Coché chez toi, mais je ne l’ai pas trouvé sur la facture.${libres.length ? ' Touche sa ligne :' : ' Toutes les lignes du reçu sont déjà reliées.'}</p>`,
+      [...libres.map(({ ln, i }) => [`l${i}`, esc(ln.libelle || ln.nomClair || `Ligne ${i + 1}`)]), ['non', 'Pas sur le reçu']], null, { pile: true });
+    if (!rep) return;   // fenêtre fermée : on arrête, le « ! » reste
+    if (rep.startsWith('l')) await R.associerManuellement(recuId, { [rep.slice(1)]: l.articleId }, () => {});
+    const ret = await demander(`${esc(a?.nom || 'Produit')} : je le retire de la liste ?`,
+      '<p class="doux">Il quitte aussi Prépa. Son prix payé, s’il est sur le reçu, reste dans sa fiche.</p>',
+      [['oui', 'Oui, retire-le'], ['non', 'Non, garde-le']], 'non');
+    if (ret === 'oui') S.maj((x) => { x.liste = x.liste.filter((y) => y.id !== lid); });
+  }
 }
 
 /** Retire de la liste les articles cochés (même action que « Retirer les articles achetés »). Retourne leur nombre. */

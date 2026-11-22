@@ -217,13 +217,83 @@ function appliquerVerifications() {
   if (changements.length) toast(`Prix régulier changé : ${changements.slice(0, 3).map((c) => `${c.nom} chez ${nomBanniere(c.banniere)} ${argent(c.avant)} → ${argent(c.apres)}`).join(' · ')} (noté dans l'historique)`);
   else if (nPrix) toast(`Prix vérifiés chez les bannières · ${nPrix} relevé${nPrix > 1 ? 's' : ''} ajouté${nPrix > 1 ? 's' : ''}`);
 }
-S.abonner(() => { if (!applicationPrevue) { applicationPrevue = true; setTimeout(() => { applicationPrevue = false; appliquerVerifications(); }, 0); } });
+S.abonner(() => { if (!applicationPrevue) { applicationPrevue = true; setTimeout(() => { applicationPrevue = false; appliquerVerifications(); deciderNomsInconnus(); }, 0); } });
+
+// --- v120 : nom inconnu (« Mon nom tel quel ») — choisir dans la liste ou garder ton nom ---
+/** Bannières répondues pour un nom inconnu : rien → sans prix ; nom exact unique → rattaché ; sinon fenêtre (ouverte une fois, puis au toucher). */
+function deciderNomsInconnus() {
+  const e = S.get();
+  for (const r of RB.choixEnAttente(e.recherches)) {
+    const fiche = e.articles.find((a) => a.id === r.articleId);
+    if (!fiche) { S.maj((x) => { const y = x.recherches.find((z) => z.id === r.id); if (y) { y.choix = 'aucun'; y.choixLe = new Date().toISOString(); } }); continue; }
+    if (r.choixAttendu) continue;   // fenêtre déjà proposée : on attend ton choix
+    const d = RB.decisionNom(r, fiche.nom);
+    if (d.choix === 'aucun') {
+      S.maj((x) => { const y = x.recherches.find((z) => z.id === r.id); y.choix = 'aucun'; y.choixLe = new Date().toISOString(); });
+      toast(`Rien trouvé chez les bannières pour « ${fiche.nom} » : il reste dans Prépa, sans prix proposé.`);
+    } else if (d.choix === 'auto') {
+      choisirProduitNom(r.id, d.groupe, true);
+    } else {
+      S.maj((x) => { const y = x.recherches.find((z) => z.id === r.id); y.choixAttendu = true; });
+      if (!document.hidden && !document.documentElement.classList.contains('modale-ouverte')) ouvrirChoixNom(r.id);
+    }
+  }
+}
+
+/** Le produit choisi complète ta fiche (nom, marque, format, photo, code sûr) et ajoute un prix par bannière qui le vend. */
+function choisirProduitNom(rechId, g, auto = false) {
+  const e = S.get();
+  const r = e.recherches.find((x) => x.id === rechId);
+  const fiche = r && e.articles.find((a) => a.id === r.articleId);
+  if (!fiche) return;
+  const maj = RB.completerFiche(fiche, g);
+  // Un code-barres déjà sur une AUTRE fiche n'est pas copié (dans le doute, on ne rattache pas)
+  const ailleurs = new Set(e.articles.filter((a) => a.id !== fiche.id).flatMap((a) => P.codesDe(a)));
+  maj.codes = maj.codes.filter((c) => !ailleurs.has(c));
+  const prix = RB.prixDuGroupe(g, fiche.id, jourQuebec(), (b) => `px-${rechId}-${b}`);
+  S.maj((x) => {
+    const ar = x.articles.find((a) => a.id === fiche.id);
+    Object.assign(ar, maj, { prixVerifieLe: jourQuebec() });
+    const ids = new Set(x.prix.map((p) => p.id));
+    prix.forEach((p) => { if (!ids.has(p.id)) x.prix.push(p); });
+    const y = x.recherches.find((z) => z.id === rechId);
+    y.choix = auto ? 'auto' : 'produit'; y.choixLe = new Date().toISOString();
+  });
+  toast(`${auto ? 'Trouvé tel quel' : 'Choisi'} : ${maj.nom} · prix de ${prix.length} bannière${prix.length > 1 ? 's' : ''}`);
+}
+
+/** Fenêtre « Ton nom ne correspond pas tout à fait » (maquette recherche-niveaux-v2, moment 6). */
+function ouvrirChoixNom(rechId) {
+  const e = S.get();
+  const r = e.recherches.find((x) => x.id === rechId);
+  const fiche = r && e.articles.find((a) => a.id === r.articleId);
+  if (!fiche) return;
+  const groupes = RB.regrouper(r).slice(0, 8);
+  ouvrirModale('Ton nom ne correspond pas tout à fait', `<p class="doux">J'ai trouvé ceci chez les bannières pour « ${esc(fiche.nom)} ». Choisis le bon, ou garde ton nom.</p>
+    ${groupes.map((g, i) => `<button class="sugg" data-choix="${i}" style="border:1px solid var(--ligne);border-radius:10px;margin-top:6px">${g.image ? `<img class="vignette petite" src="${esc(g.image)}" alt="">` : '<span class="vignette petite"></span>'}
+      <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(g.nom)}</span>
+      <span class="doux une-ligne" style="display:block;font-size:12px">${esc([g.format ? formatLisible(g.format) : '', g.offres.map((o) => nomBanniere(o.banniere)).join(', ')].filter(Boolean).join(' · '))}</span></span>
+      <span class="sugg-px">${esc(argent(g.meilleur.prix))}<small>${esc(nomBanniere(g.meilleur.banniere))}</small></span></button>`).join('')}
+    <button class="btn sec" id="choixGarder" style="width:100%;margin-top:10px">Garder « ${esc(fiche.nom)} » sans référence</button>
+    <p class="doux" style="font-size:12px;margin-top:6px">Sans référence : ton produit reste dans Prépa, sans prix proposé. C'est la limite du système.</p>`, (c) => {
+    $$('[data-choix]', c).forEach((b) => b.onclick = () => { fermerModale(); choisirProduitNom(rechId, groupes[Number(b.dataset.choix)]); });
+    $('#choixGarder', c).onclick = () => {
+      S.maj((x) => { const y = x.recherches.find((z) => z.id === rechId); y.choix = 'garde'; y.choixLe = new Date().toISOString(); });
+      fermerModale(); toast(`« ${fiche.nom} » gardé tel quel, sans prix proposé`);
+    };
+  });
+  // Fermer sans choisir : le point ambre reste sur la photo, la fenêtre revient au toucher
+}
+
+/** Choix encore à faire pour cette fiche (point ambre sur la photo ; toucher le produit ouvre la fenêtre). */
+const choixNomDe = (articleId) => (S.get().recherches || []).find((r) => r.but === 'nom' && r.articleId === articleId && r.choixAttendu && !r.choixLe) || null;
 
 /** Panier qui tourne sur la photo : une vérification ou une recherche de cette fiche (ou de ses fiches dessous) est en cours. */
 const SVG_PANIER = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 13 L13 5 M23 13 L19 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/><path d="M4 13 H28 L25 26 a2 2 0 0 1 -2 1.6 H9 a2 2 0 0 1 -2 -1.6 Z" fill="currentColor"/><path d="M11 17 V23 M16 17 V23 M21 17 V23" stroke="var(--carte, #1b211e)" stroke-width="2" stroke-linecap="round"/></svg>';
 function panierQuiTourne(a) {
   const e = S.get();
   if (!(e.recherches || []).length) return '';
+  if (choixNomDe(a.id)) return '<span class="point-choix" title="Les bannières ont répondu : touche pour choisir"></span>';
   const ids = a.estGenerique ? fichesAVerifier(a).map((x) => x.id) : [a.id];
   const encours = ids.some((id) => RB.verificationOuverte(e.recherches, id) && (e.recherches || []).some((r) => r.articleId === id && !r.appliqueLe && r.etat !== 'fait'));
   return encours ? `<span class="panier-tourne" title="Je vérifie les prix chez les bannières">${SVG_PANIER}</span>` : '';
@@ -817,7 +887,8 @@ function vueEpicerie(v, b, toutes) {
 
   const ids = new Set(panier.map((r) => r.l.id));
   $('#btnVider', v)?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !ids.has(l.id)); }));
-  $('#btnRecu', v).onclick = () => nouveauRecu();
+  // v120 : le reçu photographié ici ne parle que des produits cochés chez CETTE bannière
+  $('#btnRecu', v).onclick = () => nouveauRecu({ banniere: b, ids: panier.map((r) => r.l.id) });
   $$('.item-liste', v).forEach((el) => brancherAppuiLong(el, () => optionsArticleListe(el.dataset.id)));
   $$('.item-liste', v).forEach((el) => {
     const id = el.dataset.id;
@@ -1786,6 +1857,8 @@ function brancherAConfirmer(c, articleId, rouvrir) {
 
 // --- Fiche article ----------------------------------------------------
 export function ficheArticle(articleId, ligneId) {
+  const choix = choixNomDe(articleId);   // v120 : les bannières ont répondu pour ton nom → d'abord le choix
+  if (choix) { ouvrirChoixNom(choix.id); return; }
   const e = S.get();
   const a = e.articles.find((x) => x.id === articleId);
   if (!a) return;
