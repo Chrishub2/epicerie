@@ -619,12 +619,19 @@ export async function nouveauRecu(opts = {}) {
     try { lu = await lireRecu(blobs, undefined, R.nomsListe(), R.attendusListe()); } finally { prog.fin(lu?.source === 'ia'); }
     if (!$('#rvVerdict', c)) return; // fenêtre fermée ou remplacée entre-temps
     const v = R.verifierRecu(lu);
+    // Trois cas : tout concorde ; photos bonnes mais une ligne mal lue (ne PAS reprendre les photos) ; photos à reprendre
     $('#rvVerdict', c).innerHTML = v.ok
       ? `<div class="alerte vert">✅ <b>Reçu complet et bien lu.</b> ${esc(v.resume)}<br>Je peux prendre l'information.</div>`
-      : `<div class="alerte">⚠️ <b>${v.incertain ? 'Je ne peux pas confirmer ce reçu.' : 'Reçu incomplet ou mal lu — reprends les photos.'}</b><ul>${v.problemes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${v.resume ? `<span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
+      : v.photosOk
+        ? `<div class="alerte ambre">📋 <b>Tes photos sont bonnes</b>, mais ma lecture a un écart de ${esc(argent(Math.abs(v.ecart.montant)))} avec le ${lu.sousTotal != null ? 'sous-total' : 'total'} imprimé (${esc(argent(v.ecart.lu))} lu, ${esc(argent(v.ecart.cible))} imprimé).
+            ${v.ecart.suspects.length ? `<ul>${v.ecart.suspects.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+            Reprendre les photos n'aide pas pour une ligne mal lue. Enregistre le reçu ; vérifie seulement ${v.ecart.suspects.length ? 'les lignes ci-dessus' : 'les lignes du reçu'} dans « Mes reçus ».<br><span class="doux">${esc(v.resume)}</span></div>`
+        : `<div class="alerte">⚠️ <b>${v.incertain ? 'Je ne peux pas confirmer ce reçu.' : 'Reçu incomplet ou mal lu — reprends les photos.'}</b><ul>${v.problemes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${v.resume ? `<span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
     $('#rvActions', c).innerHTML = v.ok
       ? '<button class="btn" id="rvOk">✓ Enregistrer et remplir ma liste</button><button class="btn sec" id="rvRefaire">📷 Reprendre</button>'
-      : '<button class="btn" id="rvRefaire">📷 Reprendre les photos</button><button class="btn sec" id="rvOk">Garder quand même</button>';
+      : v.photosOk
+        ? '<button class="btn" id="rvOk">✓ Enregistrer le reçu</button><button class="btn sec" id="rvRefaire">📷 Reprendre</button>'
+        : '<button class="btn" id="rvRefaire">📷 Reprendre les photos</button><button class="btn sec" id="rvOk">Garder quand même</button>';
     $('#rvRefaire', c).onclick = () => nouveauRecu(opts);
     $('#rvOk', c).onclick = async () => {
       const q = await questionsPanier(opts); // ce reçu correspond-il au panier ? retirer les cochés ensuite ?

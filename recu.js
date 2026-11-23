@@ -132,16 +132,48 @@ export function verifierRecu(r) {
   const cible = cibleLignes(r); // sous-total imprimé, sinon total − taxes
   const mode = modeRabais(r);
   const sommeMixte = lignes.reduce((s, l) => s + (Number(l.prix) || 0) - soustrait(l), 0);
+  // Lecture v11+ : chaque ligne porte rabaisSoustrait → le montant payé est toujours prix − rabaisSoustrait
+  const lectureRecente = lignes.some((l) => l.rabaisSoustrait != null);
+  // Photos bonnes = haut et bas visibles, lisibles, total lu. Les remarques écrites de l'IA n'entrent pas ici :
+  // depuis son contrôle de la somme, elle y décrit aussi un écart de LECTURE (que de nouvelles photos ne règlent pas).
+  const photosOk = v.complet !== false && v.lisible !== false && r.total != null && lignes.length > 0;
+  let ecart = null;
   if (cible != null && lignes.length) {
     concorde = Math.abs(somme - cible) <= ECART_MAX || Math.abs(somme - rabais - cible) <= ECART_MAX || Math.abs(sommeMixte - cible) <= ECART_MAX;
-    if (!concorde) problemes.push(`La somme des produits lus (${argent(mode === 'net' ? somme : mode === 'mixte' ? sommeMixte : somme - rabais)}) ne correspond pas au ${r.sousTotal != null ? 'sous-total imprimé' : 'total moins les taxes'} (${argent(cible)}) : une section manque ou une ligne est mal lue.`);
+    if (!concorde) {
+      const lu = mode === 'net' ? somme : mode === 'mixte' || (!mode && lectureRecente) ? sommeMixte : somme - rabais;
+      ecart = { lu: Math.round(lu * 100) / 100, cible, montant: Math.round((lu - cible) * 100) / 100, suspects: suspectsEcart(lignes, lu - cible) };
+      problemes.push(`La somme des produits lus (${argent(lu)}) ne correspond pas au ${r.sousTotal != null ? 'sous-total imprimé' : 'total moins les taxes'} (${argent(cible)}) : écart de ${argent(Math.abs(lu - cible))}.`);
+    }
   }
   const nbQte = lignes.reduce((s, l) => s + nbArticles(l), 0);
   const ok = !problemes.length && v.complet !== false && v.lisible !== false;
   const resume = `${lignes.length} produit(s) lu(s)${r.nombreArticles != null ? ` (le reçu en annonce ${r.nombreArticles}${Math.round(nbQte) !== r.nombreArticles ? ` ; j'en compte ${Math.round(nbQte)} avec les quantités` : ''})` : ''}`
     + `${r.total != null ? ` · total ${argent(r.total)}` : ''}${concorde ? ` · la somme des lignes concorde avec le ${r.sousTotal != null ? 'sous-total' : 'total moins les taxes'}` : ''}`
     + `${rabais > 0 ? (mode === 'net' ? ' · rabais déjà déduits des prix imprimés' : mode === 'brut' ? ' · rabais soustraits des prix' : mode === 'mixte' ? ' · rabais déjà déduits, sauf les rabais instantanés soustraits à la caisse' : ' · impossible de confirmer si les rabais sont déjà déduits') : ''}.`;
-  return { ok, problemes: [...new Set(problemes)], resume };
+  // photosOk + ecart : les photos sont bonnes, c'est la LECTURE d'une ou deux lignes qui cloche → reprendre les photos n'aide pas
+  return { ok, problemes: [...new Set(problemes)], resume, photosOk: photosOk && !!ecart, ecart };
+}
+
+/**
+ * Lignes qui expliqueraient l'écart (somme lue − sous-total) : une ligne lue en trop ou oubliée de ce montant,
+ * une même ligne recopiée deux fois (zone de chevauchement des photos), un rabais compté à l'envers.
+ * Ce sont des pistes à vérifier, pas des corrections.
+ */
+export function suspectsEcart(lignes, diff) {
+  const d = Math.abs(diff), pres = (x) => Math.abs(Math.abs(x) - d) <= 0.02;
+  const net = (l) => (Number(l.prix) || 0) - soustrait(l);
+  const out = [];
+  lignes.forEach((l, i) => {
+    const jumelles = lignes.filter((x) => x.libelle === l.libelle && Number(x.prix) === Number(l.prix)).length;
+    const deja = lignes.slice(0, i).some((x) => x.libelle === l.libelle && Number(x.prix) === Number(l.prix));
+    if (diff > 0 && jumelles > 1 && pres(net(l))) { if (deja) out.push(`« ${l.libelle} » (${argent(net(l))}) est lu ${jumelles} fois : peut-être recopié dans la zone où les photos se chevauchent.`); }
+    else if (diff > 0 && pres(net(l))) out.push(`« ${l.libelle} » (${argent(net(l))}) : ligne peut-être lue en trop ou mal lue.`);
+    else if (pres(Number(l.rabais) || 0)) out.push(`« ${l.libelle} » : son rabais de ${argent(Number(l.rabais))} est peut-être compté du mauvais côté.`);
+    else if (pres(2 * (Number(l.rabais) || 0))) out.push(`« ${l.libelle} » : son rabais de ${argent(Number(l.rabais))} est peut-être compté deux fois.`);
+  });
+  if (diff < 0 && !out.length) out.push(`Il manque ${argent(d)} : une ligne a peut-être été oubliée ou un montant lu trop bas.`);
+  return [...new Set(out)].slice(0, 4);
 }
 
 /** Affiche les sections l'une sous l'autre (le reçu entier) dans conteneur. */
