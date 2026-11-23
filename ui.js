@@ -251,7 +251,7 @@ export function offresArticle(article) {
     }
     const economie = p.prixRegulier && p.prixNum && p.prixRegulier > p.prixNum + 0.004 ? p.prixRegulier - p.prixNum : null;
     lignes.push({ ...p, pu: n.prixUnitaire ?? null, prixArticle: n.prixArticle ?? null, uniteRef: n.uniteRef || article.uniteRef, erreur: n.erreur, economie,
-      contenu, produitOffre: produitDeLOffre(article, p, v) });
+      contenu, produitOffre: produitDeLOffre(article, p, v), formatVendu: fmt || '' });
   }
   // Contenants de poids différents : on compare au kg (ou au L), l'affichage reste à l'unité
   comparerParPoids(lignes);

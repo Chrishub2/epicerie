@@ -716,15 +716,50 @@ function rangeeListe(l, a, cols) {
 }
 
 /** Contenu d'une case de prix : prix unitaire (rabais en couleur), régulier barré ou rabais perso dessous. */
-function htmlPrixCase(o, u, { avecMax = true } = {}) {
+function htmlPrixCase(o, u, { avecMax = true, vendu = false } = {}) {
   const promo = estRabais(o);
   const max = avecMax ? maxParClient(o) : null;
+  // v139 (maquette prepa-colonnes-v1) : 3e ligne = le prix et le format vraiment vendus
+  const fv = vendu ? prixFormatVendu(o) : '';
   const dessous = o.perso
     ? `<span class="prg perso">${esc((o.rabaisTexte || '').match(/−\s*\d+\s*%/)?.[0] || 'perso')}</span>`
     : o.economie && o.prixNum ? `<span class="prg">${argent(o.pu * o.prixRegulier / o.prixNum)}</span>`
     : `<span class="prg${o.pc != null ? ' pkg' : ''}">${o.pc != null ? puCourt(o.pc, o.pcUnite) : ''}</span>`;   // contenants de poids différents : prix au kg dessous (c'est lui qui compare)
-  return `${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}`;
+  return `${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}${
+    fv ? `<span class="pfv">${esc(fv)}</span>` : ''}`;
 }
+
+/** « 6,49 $ · 585 g » ; un prix déjà au poids (« 0,69 $/lb ») reste seul : le format de la fiche n'y ajouterait que de la confusion. */
+function prixFormatVendu(o) {
+  if (!o?.offre) return '';
+  if (/\/\s*(?:lb|kg|100\s*g|g|l|ml)\b/i.test(o.offre)) return o.offre;
+  return [o.offre, o.formatVendu ? formatLisible(o.formatVendu) : ''].filter(Boolean).join(' · ');
+}
+
+// v139 — Fenêtre photo : toucher une case de bannière la choisit et montre le produit vendu ; toucher à côté la ferme
+let bulleProduit = null;
+function fermerBulleProduit() { bulleProduit?.remove(); bulleProduit = null; }
+function ouvrirBulleProduit(btn, a, o) {
+  fermerBulleProduit();
+  const img = o.image || photoListe(a) || '';
+  const nom = o.nomProduit || o.produitOffre || [a.marque, a.nom].filter(Boolean).join(' ');
+  const b = document.createElement('div');
+  b.className = 'bulle-produit';
+  b.setAttribute('role', 'dialog');
+  b.setAttribute('aria-label', 'Produit vendu');
+  b.innerHTML = `${img ? `<img src="${esc(img)}" alt="">` : ''}<b>${esc(nom)}</b>
+    <small>${esc([prixFormatVendu(o), estRabais(o) ? 'en rabais' : ''].filter(Boolean).join(' · '))}</small>
+    <span class="bp-ban">${esc(nomBanniere(o.banniere))}</span>`;
+  document.body.appendChild(b);
+  bulleProduit = b;
+  // Posée sous la case (au-dessus s'il manque de place), jamais hors de l'écran ; elle ne bouge pas ensuite
+  const r = btn.getBoundingClientRect(), L = b.offsetWidth, H = b.offsetHeight, m = 8;
+  const gauche = Math.min(Math.max(m, r.left + r.width / 2 - L / 2), innerWidth - L - m);
+  const haut = r.bottom + 6 + H < innerHeight - m ? r.bottom + 6 : Math.max(m, r.top - 6 - H);
+  b.style.left = `${gauche}px`; b.style.top = `${haut}px`;
+}
+document.addEventListener('pointerdown', (ev) => { if (bulleProduit && !ev.target.closest('.bulle-produit, .pcel')) fermerBulleProduit(); }, true);
+addEventListener('scroll', () => fermerBulleProduit(), true);
 
 const SVG_ETIQ = '<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8.6V2.2a.7.7 0 0 1 .7-.7h6.4l6 6a1 1 0 0 1 0 1.4l-5.2 5.2a1 1 0 0 1-1.4 0z" fill="currentColor"/><circle cx="5" cy="5" r="1.4" fill="#d7f7e4"/></svg>';
 const SVG_RAPPEL = '<svg class="p-rappel" viewBox="0 0 18 16" role="img" aria-label="Rappel ou avis sur ce produit"><path d="M9 1 17 15H1z" fill="#ffd54f" stroke="#8a5a00" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 6v4" stroke="#412402" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="12.4" r=".9" fill="#412402"/></svg>';
@@ -742,7 +777,7 @@ function htmlRangee(r, cols, seule) {
   h += `<td class="p-dealc">${r.offre ? htmlPrixCase(r.offre, u, { avecMax: false }) : ''}</td>`;
   h += cols.map((b) => {
     const o = r.parBan[b];
-    return `<td>${o ? `<button class="pcel ${b === r.ban ? 'sel' : ''}" data-cle="${esc(cleOffre(o))}" aria-label="Acheter chez ${esc(nomBanniere(b))}">${htmlPrixCase(o, u)}</button>` : ''}</td>`;
+    return `<td>${o ? `<button class="pcel ${b === r.ban ? 'sel' : ''}" data-cle="${esc(cleOffre(o))}" aria-label="Acheter chez ${esc(nomBanniere(b))}">${htmlPrixCase(o, u, { vendu: true })}</button>` : ''}</td>`;
   }).join('');
   return `${h}<td></td></tr>`;
 }
@@ -1080,10 +1115,20 @@ function vueListe(v) {
     });
     brancherAppuiLong(tr.querySelector('.p-photo'), () => optionsArticleListe(id));
     tr.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => changerQuantite(id, Number(b.dataset.q)));
-    tr.querySelectorAll('.pcel[data-cle]').forEach((b) => b.onclick = () => S.maj((x) => {
-      const l = x.liste.find((i) => i.id === id);
-      if (l) l.magasinCible = b.dataset.cle;
-    }));
+    tr.querySelectorAll('.pcel[data-cle]').forEach((b) => b.onclick = () => {
+      const cle = b.dataset.cle;
+      S.maj((x) => {
+        const l = x.liste.find((i) => i.id === id);
+        if (l) l.magasinCible = cle;
+      });
+      // La liste est redessinée : la fenêtre s'accroche à la case une fois en place
+      setTimeout(() => {
+        const l = S.get().liste.find((i) => i.id === id), a = l && S.get().articles.find((x) => x.id === l.articleId);
+        const o = a && offresArticle(a).find((x) => cleOffre(x) === cle);
+        const btn = [...document.querySelectorAll(`tr.pl[data-l="${CSS.escape(id)}"] .pcel[data-cle]`)].find((x) => x.dataset.cle === cle);
+        if (o && btn) ouvrirBulleProduit(btn, a, o);
+      }, 30);
+    });
   });
 }
 

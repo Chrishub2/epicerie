@@ -215,7 +215,7 @@ export function prixDuGroupe(g, articleId, jour = new Date().toISOString().slice
     prixRegulier: o.regulier && o.regulier > o.prix ? o.regulier : null,
     format: g.format ? formatLisible(g.format) : null,
     type: o.regulier && o.regulier > o.prix ? 'circulaire' : 'regulier', fin: null,
-    source: SOURCE, observeLe: jour, nomProduit: o.nom, url: o.url,
+    source: SOURCE, observeLe: jour, nomProduit: o.nom, url: o.url, image: g.image || null,
   }));
 }
 
@@ -346,7 +346,7 @@ export function prixVerification(r, fiche, prixExistants = [], codes = []) {
       id: `px-${r.id}-${b}`, articleId: fiche.id, banniere: b, offre: prixTexte(p.prix), prixNum: p.prix,
       prixRegulier: rabais ? p.regulier : null, format: p.format ? formatLisible(p.format) : (fiche.format || null),
       type: rabais ? 'circulaire' : 'regulier', fin: null, source: SOURCE,
-      observeLe: String(res.le || r.finiLe || r.le).slice(0, 10), nomProduit: p.nom, url: p.url || null,
+      observeLe: String(res.le || r.finiLe || r.le).slice(0, 10), nomProduit: p.nom, url: p.url || null, image: p.image || null,
       ...(change ? { regulierAvant: avant } : {}),
     });
   }
@@ -399,7 +399,7 @@ export function prixGenerique(offres, articleId, jour = new Date().toISOString()
     prixRegulier: o.regulier && o.regulier > o.prix ? o.regulier : null,
     format: o.produit?.format ? formatLisible(o.produit.format) : null,
     type: o.regulier && o.regulier > o.prix ? 'circulaire' : 'regulier', fin: null,
-    source: SOURCE, observeLe: jour, nomProduit: o.produit?.nom || '', url: o.produit?.url || null,
+    source: SOURCE, observeLe: jour, nomProduit: o.produit?.nom || '', url: o.produit?.url || null, image: o.produit?.image || null,
   }));
 }
 
