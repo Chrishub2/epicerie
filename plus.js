@@ -154,32 +154,66 @@ function vueRabais(v) {
 }
 
 // --- Fusion des doublons (v33) -----------------------------------------
-/** Détails d'une fiche pour décider d'une fusion : photo, marque, format, code-barres, libellés de reçu, prix par magasin (v143). */
-function detailFusion(e, a) {
+/** Faits d'une fiche utiles pour juger un doublon (v144). */
+function faitsFiche(e, a) {
   const vs = P.variantesActives(a);
   const img = photoDe(a) || vs.map((v) => v.imageUrl).find(Boolean) || '';
   const codes = [...new Set(vs.flatMap((v) => v.codes || []).map((c) => String(c).replace(/^0+/, '')))];
-  const libs = [...new Set(vs.flatMap((v) => (v.alias || []).map((x) => `${x.libelle} (${nomBanniere(x.banniere)})`)))];
+  const libs = vs.flatMap((v) => (v.alias || []).map((x) => ({ ...x })));
   const formats = [...new Set([a.format, ...vs.map((v) => v.format)].filter(Boolean))];
   const marques = [...new Set([a.marque, ...vs.map((v) => v.marque)].filter(Boolean))];
+  // Prix : le plus récent par bannière, avec le nom du produit chez ce magasin
   const parB = new Map();
   for (const p of e.prix || []) if (p.articleId === a.id && !p.annule && p.source !== 'demo') {
     const l = parB.get(p.banniere) || []; l.push(p); parB.set(p.banniere, l);
   }
-  const prix = [...parB].map(([b, l]) => { const d = l.sort((x, y) => String(y.observeLe || '').localeCompare(String(x.observeLe || '')))[0];
-    return `${esc(nomBanniere(b))} ${l.length}× <span class="doux">(${esc(String(d.offre ?? '').slice(0, 18))})</span>`; });
-  const surListe = e.liste.some((l) => l.articleId === a.id);
-  const ligne = (t, v) => `<div><span class="doux">${t} :</span> ${v}</div>`;
-  return `<div class="fu-fiche" style="display:flex;gap:8px;align-items:flex-start;margin-top:6px">
-    ${img ? `<img class="vignette" src="${esc(img)}" alt="">` : '<span class="vignette" style="display:flex;align-items:center;justify-content:center">?</span>'}
-    <div style="font-size:.85em;min-width:0">
-      <div><b>${esc(a.nom)}</b>${surListe ? ' <span class="doux">· sur ta liste</span>' : ''}</div>
-      ${ligne('Marque', esc(marques.join(', ') || '—'))}
-      ${ligne('Format', esc(formats.join(', ') || '—'))}${vs.length > 1 ? ` <span class="doux">(${vs.length} variantes)</span>` : ''}
-      ${ligne('Code-barres', esc(codes.slice(0, 2).join(', ') || '—'))}
-      ${ligne('Sur tes reçus', esc(libs.slice(0, 3).join(' · ') || '—'))}
-      ${ligne('Prix', prix.length ? prix.join(' · ') : 'aucun')}
+  const recent = (x, y) => String(y.observeLe || '').localeCompare(String(x.observeLe || ''));
+  const prix = [...parB].map(([b, l]) => ({ b, n: l.length, d: l.sort(recent)[0] }));
+  const nomsMagasin = [...new Set([...(e.prix || []).filter((p) => p.articleId === a.id && p.nomProduit && !p.annule).map((p) => p.nomProduit),
+    ...vs.flatMap((v) => (v.liens || []).map((x) => x.nom))].filter(Boolean))];
+  // Achats : lignes de reçu reliées à cette fiche
+  const achats = (e.recus || []).flatMap((r) => (r.lignes || []).filter((l) => l.articleId === a.id)
+    .map((l) => ({ date: r.date || String(r.cree || '').slice(0, 10), b: r.banniere, lib: l.libelle, prix: l.prix }))).sort((x, y) => String(y.date).localeCompare(String(x.date)));
+  const recettes = (e.recettes || []).filter((r) => (r.ingredients || []).some((i) => i.articleId === a.id)).map((r) => r.nom);
+  return { a, vs, img, codes, libs, formats, marques, prix, nomsMagasin, achats, recettes, surListe: e.liste.some((l) => l.articleId === a.id) };
+}
+
+/** Fiche détaillée d'un produit dans l'écran de fusion (photo agrandissable, tout ce qu'on sait). */
+function detailFusion(e, a) {
+  const f = faitsFiche(e, a);
+  const ligne = (t, v) => `<div style="margin-top:2px"><span class="doux">${t} :</span> ${v}</div>`;
+  const liste = (arr, vide = '—') => (arr.length ? arr.join('<br>') : vide);
+  return `<div class="fu-fiche" style="display:flex;gap:10px;align-items:flex-start;margin-top:8px;padding-top:8px;border-top:1px solid var(--ligne, #ddd)">
+    ${f.img ? `<a href="${esc(f.img)}" target="_blank" rel="noopener" title="Agrandir la photo"><img class="vignette" src="${esc(f.img)}" alt="" style="width:76px;height:76px"></a>`
+      : '<span class="vignette" style="width:76px;height:76px;display:flex;align-items:center;justify-content:center">?</span>'}
+    <div style="font-size:.85em;min-width:0;overflow-wrap:anywhere">
+      <div><b>${esc(f.a.nom)}</b>${f.surListe ? ' <span class="doux">· sur ta liste</span>' : ''}</div>
+      ${ligne('Marque', esc(f.marques.join(', ') || '—'))}
+      ${ligne('Format', esc(f.formats.map(formatLisible).join(', ') || '—') + (f.vs.length > 1 ? ` <span class="doux">(${f.vs.length} variantes)</span>` : ''))}
+      ${ligne('Code-barres', esc(f.codes.join(', ') || '—'))}
+      ${ligne('Nom chez les magasins', liste(f.nomsMagasin.slice(0, 4).map(esc)))}
+      ${ligne(`Acheté (${f.achats.length})`, liste(f.achats.slice(0, 4).map((x) => `${esc(x.date)} · ${esc(nomBanniere(x.b))} · « ${esc(x.lib)} » ${x.prix != null ? esc(argent(Number(x.prix))) : ''}`), 'jamais sur un reçu'))}
+      ${ligne('Prix connus', liste(f.prix.map((x) => `${esc(nomBanniere(x.b))} : ${esc(String(x.d.offre ?? ''))}${x.d.format ? ` · ${esc(formatLisible(x.d.format))}` : ''} <span class="doux">(${x.n} prix${x.d.observeLe ? `, dernier ${esc(String(x.d.observeLe).slice(0, 10))}` : ''})</span>`), 'aucun'))}
+      ${f.recettes.length ? ligne('Recettes', esc(f.recettes.join(', '))) : ''}
     </div></div>`;
+}
+
+/** Ce qui rapproche ou distingue deux fiches, en clair (v144). */
+function comparaisonFusion(e, a, b) {
+  const x = faitsFiche(e, a), y = faitsFiche(e, b);
+  const pour = [], contre = [];
+  const commun = (p, q) => p.some((v) => q.includes(v));
+  const bas = (l) => l.map((v) => sansAccentsNom(String(v)).toLowerCase());
+  if (x.codes.length && y.codes.length) (commun(x.codes, y.codes) ? pour.push('même code-barres') : contre.push('codes-barres différents'));
+  if (x.marques.length && y.marques.length) (commun(bas(x.marques), bas(y.marques)) ? pour.push('même marque') : contre.push(`marques différentes (${x.marques[0]} / ${y.marques[0]})`));
+  if (x.formats.length && y.formats.length) (commun(bas(x.formats), bas(y.formats)) ? pour.push('même format') : contre.push(`formats différents (${x.formats[0]} / ${y.formats[0]})`));
+  const libsX = x.libs.map((l) => l.libelle), libsY = y.libs.map((l) => l.libelle);
+  if (libsX.length && libsY.length && libsX.some((l) => libsY.some((m) => ressemblanceMutuelle(l, m) >= 0.5))) pour.push('libellés de reçu semblables');
+  if (!x.prix.length && !x.achats.length) pour.push(`« ${a.nom} » n'a ni prix ni achat`);
+  if (!y.prix.length && !y.achats.length) pour.push(`« ${b.nom} » n'a ni prix ni achat`);
+  const puce = (t, c) => `<div style="color:${c}">${esc(t)}</div>`;
+  return `<div style="font-size:.85em;margin-top:6px">${pour.map((t) => puce('✔ ' + t, 'var(--vert, #2e7d32)')).join('')}${contre.map((t) => puce('✗ ' + t, 'var(--rouge, #c62828)')).join('')}
+    ${contre.length && !pour.length ? '<div class="doux">Probablement deux produits différents.</div>' : contre.length ? '<div class="doux">Fusionner en fera deux variantes du même produit (chacune garde sa marque, son format et ses prix).</div>' : ''}</div>`;
 }
 
 /** Écran de fusion : doublons probables, choix libre, puis confirmation avec aperçu. */
@@ -191,7 +225,8 @@ function ouvrirFusion(apres) {
     <p class="doux" style="margin-top:0">Fusionner = un seul produit sur ta liste, avec chaque marque/format comme variante. Les prix, reçus et codes-barres suivent. Rien n'est fait sans ta confirmation, et une variante peut être séparée plus tard (fiche → Marques et formats → ↗).</p>
     ${paires.length ? `<h3>Doublons probables</h3>${paires.map((p, i) => `<div class="carte" style="padding:8px;margin-bottom:6px">
       <div><b>${esc(p.a.nom)}</b> + <b>${esc(p.b.nom)}</b> <span class="doux">· ${esc(p.raison)}</span></div>
-      <details style="margin-top:4px"><summary class="doux" style="cursor:pointer">Voir les détails</summary>${detailFusion(e, p.a)}${detailFusion(e, p.b)}</details>
+      ${comparaisonFusion(e, p.a, p.b)}
+      <details style="margin-top:4px" open><summary class="doux" style="cursor:pointer">Détails des deux fiches</summary>${detailFusion(e, p.a)}${detailFusion(e, p.b)}</details>
       <div class="rang" style="margin-top:6px"><button class="btn" data-paire="${i}">🔗 Fusionner…</button><button class="btn sec" data-pasdoublon="${i}">Pas un doublon</button></div></div>`).join('')}`
       : '<p class="doux">Aucun doublon évident repéré. Tu peux en choisir toi-même ci-dessous.</p>'}
     <h3>Choisir moi-même</h3>
@@ -234,6 +269,7 @@ function confirmerFusion(ids, apres) {
     <h3 style="margin-top:0">Garder le nom de :</h3>
     ${arts.map((a) => `<label class="item" style="cursor:pointer;align-items:flex-start"><input type="radio" name="fuCible" value="${a.id}" ${a === defaut ? 'checked' : ''} style="width:auto;margin-top:12px">
       <span class="grandir">${detailFusion(e, a)}</span></label>`).join('')}
+    ${arts.length === 2 ? comparaisonFusion(e, arts[0], arts[1]) : ''}
     <div class="alerte" id="fuApercu" style="margin-top:8px">${texteApercu(defaut.id)}</div>
     <div class="rang" style="margin-top:8px"><button class="btn" id="fuOk">🔗 Fusionner</button><button class="btn sec" id="fuRetour">‹ Retour</button></div>`, (c) => {
     const cible = () => $('[name="fuCible"]:checked', c).value;
