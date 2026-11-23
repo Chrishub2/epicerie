@@ -1,5 +1,5 @@
 // Outils partagés : échappement, fenêtre modale, calculs de prix.
-import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable, formatLisible } from './normalise.js';
+import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable, formatLisible, marquerDouteux } from './normalise.js';
 import { get } from './store.js';
 import { BANNIERES } from './demo-data.js';
 import { prixEnVigueur } from './rabais.js';
@@ -40,7 +40,10 @@ export function nomBanniere(b) { return BANNIERES[b]?.nom || b; }
 export function puce(b) { return `<i class="ban" style="background:${BANNIERES[b]?.couleur || '#999'}"></i>`; }
 
 // Pastille aux couleurs de la bannière, qui remplace son nom (style inspiré, pas le logo officiel).
-const LOGOS = { iga: 'IGA', super_c: 'SUPER C', metro: 'metro', maxi: 'maxi', costco: 'COSTCO', jean_coutu: 'Jean Coutu', provigo: 'provigo', walmart: 'Walmart ✱', voila: 'voilà', instacart: '🥕 instacart' };
+const LOGOS = { iga: 'IGA', super_c: 'SUPER C', metro: 'metro', maxi: 'maxi', costco: 'COSTCO', jean_coutu: 'Jean Coutu', provigo: 'provigo', walmart: 'Walmart ✱', voila: 'voilà', instacart: '🥕 instacart',
+  // v141 : pastilles construites pour les bannières qui n'en avaient pas (mêmes règles : couleurs de la bannière, jamais le logo officiel)
+  tigre_geant: 'Tigre Géant', uniprix: 'uniprix', uniprix_sante: 'uniprix santé', familiprix_clinique: 'Familiprix Clinique',
+  familiprix_extra: 'Familiprix Extra', pharmaprix: 'PHARMAPRIX', canadian_tire: 'CANADIAN TIRE' };
 export function logo(b) {
   return LOGOS[b] ? `<span class="logo logo-${b}" title="${esc(nomBanniere(b))}">${LOGOS[b]}</span>` : esc(nomBanniere(b));
 }
@@ -49,6 +52,14 @@ export function logoVille(b) {
   const villes = [...new Set(magasinsActifs(b).map(villeMagasin).filter(Boolean))];
   return `${logo(b)}${villes.length ? ` <span class="ville">${esc(villes.join(', '))}</span>` : ''}`;
 }
+/** v141 — Villes sous la pastille d'une colonne : une par ville où la bannière a UNE succursale active ;
+ *  deux succursales de la même bannière dans une ville → cette ville n'est pas nommée (elle ne dirait pas laquelle). */
+export function villesColonne(b) {
+  const n = new Map();
+  for (const m of magasinsActifs(b)) { const v = villeMagasin(m); if (v) n.set(v, (n.get(v) || 0) + 1); }
+  return [...n].filter(([, k]) => k === 1).map(([v]) => v);
+}
+
 /** Logo + nom de la succursale sans la bannière : « [IGA] Extra Varennes ». */
 export function logoMagasin(m) {
   const reste = m.nom.replace(new RegExp(`^${nomBanniere(m.banniere).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '');
@@ -273,15 +284,18 @@ export function offresArticle(article) {
 
 /** Trie les offres du moins cher au plus cher (prix comparable) et les colore (vert = meilleur, rouge = le plus cher). */
 function classerLignes(lignes) {
+  marquerDouteux(lignes);
   const cmp = (l) => prixComparable(l) ?? Infinity;
-  lignes.sort((a, b) => cmp(a) - cmp(b) || (a.pu ?? Infinity) - (b.pu ?? Infinity));
-  const avecPrix = lignes.filter((l) => prixComparable(l) != null);
+  // Les prix douteux passent après tous les autres : ils ne sont jamais « le moins cher »
+  lignes.sort((a, b) => (a.douteux ? 1 : 0) - (b.douteux ? 1 : 0) || cmp(a) - cmp(b) || (a.pu ?? Infinity) - (b.pu ?? Infinity));
+  const avecPrix = lignes.filter((l) => prixComparable(l) != null && !l.douteux);
   const meilleur = avecPrix.length ? prixComparable(avecPrix[0]) : null;
   const pire = avecPrix.length > 1 ? prixComparable(avecPrix[avecPrix.length - 1]) : null;
   lignes.forEach((l) => {
     const c = prixComparable(l);
     l.classe = classer(c, meilleur);
     if (pire != null && c === pire && pire > meilleur) l.classe = 'cher'; // rouge = le plus cher
+    if (l.douteux) l.classe = 'douteux';
   });
   return lignes;
 }

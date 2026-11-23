@@ -52,6 +52,16 @@
 .logo-walmart { background: #0071ce; color: #fff; }
 .logo-voila { background: #6a1b9a; color: #fff; text-transform: lowercase; }
 .logo-instacart { background: #0aad0a; color: #fff; text-transform: lowercase; }
+/* v141 : pastilles construites (couleurs de la bannière, style inspiré, pas le logo officiel) */
+.logo-tigre_geant { background: #e4002b; color: #fff; border-bottom: 3px solid #ffb81c; }
+.logo-uniprix { background: #00843d; color: #fff; text-transform: lowercase; }
+.logo-uniprix_sante { background: #006b32; color: #fff; text-transform: lowercase; }
+.logo-familiprix_clinique { background: #5b2c83; color: #fff; font-weight: 700; }
+.logo-familiprix_extra { background: #7a3fa8; color: #fff; font-weight: 700; }
+.logo-pharmaprix { background: #cc0033; color: #fff; letter-spacing: .04em; }
+.logo-canadian_tire { background: #d2232a; color: #fff; border-bottom: 3px solid #111; font-size: 10px; }
+.ville-col { display: block; font-size: 9px; line-height: 1.15; color: var(--doux); margin-top: 3px; white-space: normal;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .icone.photo-mag { width: 40px; height: 40px; border-color: var(--accent); background: var(--accent-doux); font-size: 18px; }
 .res-choix { cursor: pointer; }
 .vignette.mini { width: 28px; height: 28px; border-radius: 6px; flex: none; }
@@ -164,7 +174,7 @@ html.modale-ouverte, html.modale-ouverte body { overflow: hidden; }
 table.prep-t { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13px; }
 .prep.seule table.prep-t { width: 100%; }
 .prep-t th, .prep-t td { padding: 0 2px; vertical-align: middle; border-bottom: 1px solid var(--ligne); }
-.prep-t thead th { height: 66px; font-weight: 400; font-size: 11px; color: var(--doux); text-align: center; background: var(--fond); }
+.prep-t thead th { height: 78px; font-weight: 400; font-size: 11px; color: var(--doux); text-align: center; background: var(--fond); }
 .prep-t tr.pl td { height: 56px; }
 .prep-t .pc { position: sticky; left: 0; z-index: 2; background: var(--fond); border-right: 1px solid var(--ligne); padding: 0 4px 0 8px; text-align: left; }
 .prep.seule .pc { border-right: 0; padding-right: 10px; }
@@ -282,12 +292,20 @@ tr.se-vide > td, .item-liste.se-vide { opacity: 0; transition: opacity .22s; }
 .prg.perso { text-decoration: none; color: var(--vert); }
 /* v139 (maquette prepa-colonnes-v1) : 3e ligne = prix et format vendus ; fenêtre photo au toucher (ombre seulement, aucun mouvement) */
 .pfv { font-size: 10px; opacity: .8; font-variant-numeric: tabular-nums; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 0 3px; }
-.bulle-produit { position: fixed; z-index: 60; width: 200px; background: var(--carte); color: var(--texte); border: 1px solid var(--ligne); border-radius: 12px;
+.bulle-produit .bp-photo { position: relative; width: 100%; aspect-ratio: 1; background: #fff; border-radius: 8px; display: grid; place-items: center; }
+.bulle-produit .bp-attente { position: absolute; inset: 0; background: transparent; }
+.bulle-produit .bp-attente .pt-rond { width: 46%; }
+.bulle-produit .bp-doute { color: #8a5a00; margin-top: 2px; }
+.bulle-produit img[hidden] { display: none; }
+.bulle-produit { position: absolute; z-index: 60; width: 200px; background: var(--carte); color: var(--texte); border: 1px solid var(--ligne); border-radius: 12px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, .22); padding: 10px; }
 .bulle-produit img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; border-radius: 8px; }
 .bulle-produit b { display: block; font-size: 13px; margin-top: 6px; }
 .bulle-produit small { display: block; color: var(--doux); font-size: 12px; }
 .bulle-produit .bp-ban { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 5px; background: var(--fond); margin-top: 4px; }
+/* v141 : prix démesuré → ⚠ à vérifier */
+.pp.douteux { color: var(--doux); text-decoration: line-through dotted; }
+.pdoute { position: absolute; top: -7px; left: -3px; font-size: 11px; line-height: 1; padding: 1px 3px; border-radius: 6px; background: #ffd54f; color: #412402; }
 .prg.pkg { text-decoration: none; }   /* prix au kg des contenants de poids différents (tomates cerises) : c'est lui qui compare */
 .pmax { position: absolute; top: -8px; right: -3px; font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 6px; background: #ffd54f; color: #412402; }
 .prep-t tr.pl.indisponible { opacity: .55; }

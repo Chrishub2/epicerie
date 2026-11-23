@@ -5,7 +5,7 @@ import { estFsa, secteurDe, memeVille, enSecteur } from './secteurs.js';
 import { appliquerRegistre } from './bannieres-registre.js';
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
-  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive, magasinsActifs } from './ui.js';
+  libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive, magasinsActifs, villesColonne } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserOffre, analyserFormat, formatLisible, gtinVariantes, normaliser, prixComparable } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
@@ -748,7 +748,9 @@ function htmlPrixCase(o, u, { avecMax = true, vendu = false } = {}) {
     ? `<span class="prg perso">${esc((o.rabaisTexte || '').match(/−\s*\d+\s*%/)?.[0] || 'perso')}</span>`
     : o.economie && o.prixNum ? `<span class="prg">${argent(o.pu * o.prixRegulier / o.prixNum)}</span>`
     : `<span class="prg${o.pc != null ? ' pkg' : ''}">${o.pc != null ? puCourt(o.pc, o.pcUnite) : ''}</span>`;   // contenants de poids différents : prix au kg dessous (c'est lui qui compare)
-  return `${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}${
+  // v141 : prix démesuré par rapport aux autres bannières → ⚠ « à vérifier » (jamais retenu comme le moins cher)
+  const doute = o.douteux ? `<span class="pdoute" title="Prix inhabituel : ${String(o.douteux).replace('.', ',')} fois la médiane des autres bannières. À vérifier (format mal lu ?)">⚠</span>` : '';
+  return `${doute}${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}${o.douteux ? ' douteux' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}${
     fv ? `<span class="pfv">${esc(fv)}</span>` : ''}`;
 }
 
@@ -764,25 +766,34 @@ let bulleProduit = null;
 function fermerBulleProduit() { bulleProduit?.remove(); bulleProduit = null; }
 function ouvrirBulleProduit(btn, a, o) {
   fermerBulleProduit();
-  const img = o.image || photoListe(a) || '';
+  const photos = [o.image, photoListe(a)].filter(Boolean);   // photo du produit vendu, sinon celle de ta fiche
   const nom = o.nomProduit || o.produitOffre || [a.marque, a.nom].filter(Boolean).join(' ');
   const b = document.createElement('div');
   b.className = 'bulle-produit';
   b.setAttribute('role', 'dialog');
   b.setAttribute('aria-label', 'Produit vendu');
-  b.innerHTML = `${img ? `<img src="${esc(img)}" alt="">` : ''}<b>${esc(nom)}</b>
+  // Règle de Chris (v141) : photo pas encore là et en chargement → le panier qui tourne à sa place
+  b.innerHTML = `${photos.length ? `<div class="bp-photo"><span class="panier-tourne bp-attente"><span class="pt-rond"><span class="pt-anneau"></span><span class="pt-chariot" aria-hidden="true">🛒</span></span></span><img alt="" hidden></div>` : ''}<b>${esc(nom)}</b>
     <small>${esc([prixFormatVendu(o), estRabais(o) ? 'en rabais' : ''].filter(Boolean).join(' · '))}</small>
+    ${o.douteux ? `<small class="bp-doute">⚠ Prix inhabituel (${String(o.douteux).replace('.', ',')} fois les autres) : à vérifier</small>` : ''}
     <span class="bp-ban">${esc(nomBanniere(o.banniere))}</span>`;
   document.body.appendChild(b);
   bulleProduit = b;
-  // Posée sous la case (au-dessus s'il manque de place), jamais hors de l'écran ; elle ne bouge pas ensuite
-  const r = btn.getBoundingClientRect(), L = b.offsetWidth, H = b.offsetHeight, m = 8;
+  if (photos.length) {
+    const img = b.querySelector('img'), attente = b.querySelector('.bp-attente');
+    let i = 0;
+    img.onload = () => { attente.remove(); img.hidden = false; };
+    img.onerror = () => { if (++i < photos.length) img.src = photos[i]; else { attente.remove(); b.querySelector('.bp-photo').remove(); } };
+    img.src = photos[0];
+  }
+  // Posée sous la case (au-dessus s'il manque de place), dans la page : elle suit le défilement et reste
+  // ouverte jusqu'à ce que tu touches à côté
+  const r = btn.getBoundingClientRect(), L = b.offsetWidth, H = 260, m = 8;
   const gauche = Math.min(Math.max(m, r.left + r.width / 2 - L / 2), innerWidth - L - m);
   const haut = r.bottom + 6 + H < innerHeight - m ? r.bottom + 6 : Math.max(m, r.top - 6 - H);
-  b.style.left = `${gauche}px`; b.style.top = `${haut}px`;
+  b.style.left = `${gauche + scrollX}px`; b.style.top = `${haut + scrollY}px`;
 }
 document.addEventListener('pointerdown', (ev) => { if (bulleProduit && !ev.target.closest('.bulle-produit, .pcel')) fermerBulleProduit(); }, true);
-addEventListener('scroll', () => fermerBulleProduit(), true);
 
 const SVG_ETIQ = '<svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8.6V2.2a.7.7 0 0 1 .7-.7h6.4l6 6a1 1 0 0 1 0 1.4l-5.2 5.2a1 1 0 0 1-1.4 0z" fill="currentColor"/><circle cx="5" cy="5" r="1.4" fill="#d7f7e4"/></svg>';
 const SVG_RAPPEL = '<svg class="p-rappel" viewBox="0 0 18 16" role="img" aria-label="Rappel ou avis sur ce produit"><path d="M9 1 17 15H1z" fill="#ffd54f" stroke="#8a5a00" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 6v4" stroke="#412402" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="12.4" r=".9" fill="#412402"/></svg>';
@@ -1048,11 +1059,13 @@ function vueListe(v) {
   const nCol = seule ? 1 : cols.length + 3;
   const bascule = (id, lib, on) => `<label class="bascule"><span class="interrupteur"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></span><span class="lib">${lib}</span></label>`;
   // Largeur fixe : sans largeur de tableau, le navigateur élargit la colonne produit au nom le plus long
-  const largeur = (photo ? 52 : 184) + 72 + cols.length * 72 + 40;
+  // v141 : colonnes de bannière 72 → 86 px (« 9,99 $ · 850 g » en entier)
+  const LC = 86;
+  const largeur = (photo ? 52 : 184) + 72 + cols.length * LC + 40;
   // Deux tableaux de mêmes colonnes : la tête (bannières, totaux) flotte en haut pendant le défilement,
   // le corps défile dessous ; leurs défilements horizontaux restent synchronisés.
   const ouvrirTable = () => `<table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>${seule ? ''
-    : `<colgroup><col style="width:${photo ? 52 : 184}px"><col style="width:72px">${cols.map(() => '<col style="width:72px">').join('')}<col style="width:40px"></colgroup>`}`;
+    : `<colgroup><col style="width:${photo ? 52 : 184}px"><col style="width:72px">${cols.map(() => `<col style="width:${LC}px">`).join('')}<col style="width:40px"></colgroup>`}`;
   let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
   // Les deux interrupteurs restent toujours à leur place (Photo s'applique quand Liste est désactivée)
   // À droite des interrupteurs : nombre d'articles sur la liste (Prépa. = ceux qui restent à acheter)
@@ -1060,7 +1073,9 @@ function vueListe(v) {
   h += `<thead><tr><th class="pc"><div class="pc-tete"><div class="bascules">${bascule('bPhoto', 'Photo', photo)}${bascule('bListe', 'Liste', seule)}</div>${nb}</div></th>`;
   if (!seule) {
     h += '<th><button class="p-deal" id="btnDeal" title="Tout au meilleur prix">Deal</button></th>';
-    h += cols.map((b) => `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : ''}</div>${logo(b)}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`).join('');
+    // v141 : ville(s) sous la pastille, sauf une ville où la bannière a deux succursales
+    h += cols.map((b) => { const vs = villesColonne(b); return `<th><div class="p-tot">${tot[b] ? argent(tot[b]) : ''}</div>${logo(b)}${
+      vs.length ? `<span class="ville-col" title="${esc(vs.join(', '))}">${esc(vs.join(', '))}</span>` : ''}<div class="p-eco">${eco[b] > 0.004 ? `−${argent(eco[b])}` : ''}</div></th>`; }).join('');
     h += '<th><button class="p-ajban" id="btnAjBan" aria-label="Ajouter une bannière">+</button></th>';
   }
   h += `</tr></thead></table></div><div class="prep-defile">${ouvrirTable()}<tbody>`;

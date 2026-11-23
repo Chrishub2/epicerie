@@ -93,8 +93,37 @@ export function presenter(p, marquesVues = []) {
 /** Marques en majuscules vues dans une demande (servent à reconnaître la même marque écrite autrement ailleurs). */
 export function marquesDeLaDemande(r) {
   const s = new Set([...MARQUES, ...MARQUES_SITES]);
-  for (const b of ORDRE) for (const p of r?.bannieres?.[b]?.produits || []) { const m = separerMarque(String(p.nom || '').replace(RE_MENTIONS, '').trim()).marque; if (m) s.add(m); }
+  for (const b of ORDRE) for (const p of produitsDe(r, b)) { const m = separerMarque(String(p.nom || '').replace(RE_MENTIONS, '').trim()).marque; if (m) s.add(m); }
   return s;
+}
+
+// v141 — Format lu par erreur dans un prix unitaire (« 7,54 $ … $1.29/100g » → « 100 g » ; tourtière Walmart à 75 $/kg).
+// L'extension 1.14.2 ne le fait plus ; les recherches déjà reçues sont corrigées à la lecture : format recalculé du prix unitaire.
+const RE_FMT_G = /(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lb|oz)\b/gi;
+const cleFmt = (q, u) => `${Number(String(q).replace(',', '.'))}${u.toLowerCase()}`;
+export function corrigerFormat(p) {
+  const f = String(p?.format || '').match(/^(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|lb|oz)$/i);
+  if (!f || !p?.texte) return p;
+  const voulu = cleFmt(f[1], f[2]);
+  const libre = [], apresBarre = [];
+  for (const t of [String(p.nom || ''), String(p.texte)]) {
+    for (const m of t.matchAll(RE_FMT_G)) (/\/\s*\$?\s*$/.test(t.slice(Math.max(0, m.index - 3), m.index)) ? apresBarre : libre).push(cleFmt(m[1], m[2]));
+  }
+  if (libre.includes(voulu) || !apresBarre.includes(voulu)) return p;   // le format est vraiment écrit sur la tuile
+  const pu = String(p.texte).match(/\$?\s*(\d+(?:[.,]\d+)?)\s*\$?\s*\/\s*(100\s*g|100\s*ml|kg|l)\b/i);
+  const v = pu && Number(pu[1].replace(',', '.'));
+  if (!v || !p.prix) return { ...p, format: '' };
+  const u = pu[2].replace(/\s+/g, '').toLowerCase();
+  const q = u.startsWith('100') ? Math.round((p.prix / v) * 100) : Math.round((p.prix / v) * 1000);
+  return { ...p, format: `${q} ${u === '100ml' || u === 'l' ? 'ml' : 'g'}` };
+}
+const corriges = new WeakMap();
+/** Produits trouvés chez une bannière, formats corrigés (mémorisé par liste). */
+export function produitsDe(r, b) {
+  const liste = r?.bannieres?.[b]?.produits;
+  if (!liste) return [];
+  if (!corriges.has(liste)) corriges.set(liste, liste.map(corrigerFormat));
+  return corriges.get(liste);
 }
 
 /** Deux mots presque pareils : un préfixe, ou une lettre d'écart (« Ficelo » ≈ « Ficello », « gauffre » ≈ « gaufre »). */
@@ -148,7 +177,7 @@ export function moinsCherParBanniere(r, q) {
   const vues = marquesDeLaDemande(r);
   const out = [];
   for (const b of ORDRE) {
-    const cands = (r?.bannieres?.[b]?.produits || []).filter((p) => pertinent(p, q) && (mots(q).size >= 2 || enTete(p, q, vues)))
+    const cands = (produitsDe(r, b)).filter((p) => pertinent(p, q) && (mots(q).size >= 2 || enTete(p, q, vues)))
       .map((p) => ({ banniere: b, produit: p, vue: presenter(p, vues), prix: p.prix, regulier: p.regulier || null, prixUnitaire: prixUnitaire(p) }));
     if (!cands.length) continue;
     cands.sort(comparerPrix);
@@ -175,7 +204,7 @@ function comparerPrix(a, b) {
  */
 export function choixPresentes(r, q) {
   const vues = marquesDeLaDemande(r);
-  const filtre = { ...r, bannieres: Object.fromEntries(ORDRE.map((b) => [b, { ...(r?.bannieres?.[b] || {}), produits: (r?.bannieres?.[b]?.produits || []).filter((p) => pertinent(p, q)) }])) };
+  const filtre = { ...r, bannieres: Object.fromEntries(ORDRE.map((b) => [b, { ...(r?.bannieres?.[b] || {}), produits: (produitsDe(r, b)).filter((p) => pertinent(p, q)) }])) };
   return regrouper(filtre).map((g) => ({ ...g, vue: presenter({ nom: g.nom, format: g.format }, vues),
     offres: [...g.offres].sort((x, y) => x.prix - y.prix) }))
     .sort((a, b) => a.meilleur.prix - b.meilleur.prix);
@@ -189,7 +218,7 @@ export function choixPresentes(r, q) {
 export function regrouper(r, seuil = 0.75) {
   const groupes = [];
   for (const b of ORDRE) {
-    for (const p of r?.bannieres?.[b]?.produits || []) {
+    for (const p of produitsDe(r, b)) {
       const cf = cleFormat(p.format || p.nom);
       const ms = mots(p.nom);
       const g = groupes.find((x) => !x.offres.some((o) => o.banniere === b)
@@ -335,7 +364,7 @@ export function prixVerification(r, fiche, prixExistants = [], codes = []) {
   for (const b of ORDRE) {
     const res = r?.bannieres?.[b];
     if (res?.etat !== 'fait') continue;
-    const p = memeProduit(fiche, res.produits, codes);
+    const p = memeProduit(fiche, produitsDe(r, b), codes);
     if (!p) continue;
     const rabais = p.regulier && p.regulier > p.prix;
     const regulier = rabais ? p.regulier : p.prix;

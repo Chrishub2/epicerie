@@ -286,3 +286,24 @@ export function classer(prix, meilleur, seuilPct = 5) {
   if (Math.abs(prix - meilleur) < 1e-9) return 'meilleur';
   return (prix - meilleur) / meilleur * 100 <= seuilPct ? 'proche' : 'autre';
 }
+
+/**
+ * v141 (règle de Chris) — Prix démesuré : 2,5 fois plus cher, ou 2,5 fois moins cher, que la médiane des autres offres
+ * (au moins 3 prix comparables) → « douteux » : affiché avec ⚠ « à vérifier », jamais retenu comme le moins cher.
+ * Cause la plus fréquente trouvée : un format lu dans le prix unitaire (« $1.29/100g » pris pour « 100 g »).
+ */
+export const SEUIL_ECART = 2.5;
+export function marquerDouteux(lignes) {
+  for (const l of lignes) delete l.douteux;
+  const vals = lignes.filter((l) => !l.perso).map(prixComparable).filter((v) => v != null).sort((a, b) => a - b);
+  if (vals.length < 3) return lignes;
+  const n = vals.length, med = n % 2 ? vals[(n - 1) / 2] : (vals[n / 2 - 1] + vals[n / 2]) / 2;
+  if (!(med > 0)) return lignes;
+  for (const l of lignes) {
+    const c = prixComparable(l);
+    if (c == null) continue;
+    const r = c / med;
+    if (r > SEUIL_ECART || r < 1 / SEUIL_ECART) l.douteux = Math.round(r * 10) / 10;
+  }
+  return lignes;
+}
