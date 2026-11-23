@@ -184,16 +184,27 @@ function fichesAVerifier(a) {
   return a?.estGenerique ? enfantsGenerique(a, e.articles, familleDe) : a ? [a] : [];
 }
 
+/** v140 — Mode essai (Plus → Sauvegarde, ce téléphone) : les prix sont revérifiés à CHAQUE ajout, même déjà vérifiés depuis jeudi. */
+const CLE_ESSAI = 'essai.verifierChaqueAjout';
+function modeEssai() { try { return localStorage.getItem(CLE_ESSAI) === '1'; } catch { return false; } }
+
 /** Dépose une demande par fiche pas encore vérifiée depuis jeudi (et sans demande en cours). Rien hors connexion au foyer. */
 function lancerVerifications(articleId) {
   if (!Sync.estPret()) return;
   const e = S.get();
   const jour = jourQuebec();
+  const essai = modeEssai();
   const a = e.articles.find((x) => x.id === articleId);
-  const nouvelles = fichesAVerifier(a)
-    .filter((x) => !RB.verifieCetteSemaine(x, jour) && !RB.verificationOuverte(e.recherches, x.id))
+  const aFaire = (x) => (essai || !RB.verifieCetteSemaine(x, jour)) && !RB.verificationOuverte(e.recherches, x.id);
+  const nouvelles = fichesAVerifier(a).filter(aFaire)
     .map((x) => ({ ...RB.nouvelleRecherche(RB.requeteFiche(x), S.uid('rch')), articleId: x.id, but: 'verif' }))
     .filter((r) => r.q.length >= 2);
+  // v140 : une fiche famille (« Tourtière », niveau 1 ou 2) cherche aussi SON nom : le moins cher de chaque bannière,
+  // toutes sortes confondues (avant, seules ses fiches dessous étaient vérifiées : une seule tourtière, une seule bannière)
+  if (a?.estGenerique && aFaire(a)) {
+    const q = restaurerAccents(a.nom, vocabAccents());
+    if (q.length >= 2) nouvelles.push({ ...RB.nouvelleRecherche(q, S.uid('rch')), articleId: a.id, but: 'generique' });
+  }
   if (!nouvelles.length) return;
   S.maj((x) => {
     const vieilles = new Set(RB.aRetirer(x.recherches));
@@ -226,7 +237,18 @@ function appliquerVerifications() {
   if (changements.length) toast(`Prix régulier changé : ${changements.slice(0, 3).map((c) => `${c.nom} chez ${nomBanniere(c.banniere)} ${argent(c.avant)} → ${argent(c.apres)}`).join(' · ')} (noté dans l'historique)`);
   else if (nPrix) toast(`Prix vérifiés chez les bannières · ${nPrix} relevé${nPrix > 1 ? 's' : ''} ajouté${nPrix > 1 ? 's' : ''}`);
 }
-S.abonner(() => { if (!applicationPrevue) { applicationPrevue = true; setTimeout(() => { applicationPrevue = false; appliquerVerifications(); deciderNomsInconnus(); }, 0); } });
+S.abonner(() => { if (!applicationPrevue) { applicationPrevue = true; setTimeout(() => { applicationPrevue = false; appliquerVerifications(); deciderNomsInconnus(); appliquerGeneriques(); }, 0); } });
+
+/** v140 — Fiche famille : les bannières ont répondu pour son nom → le moins cher de chacune devient un prix de la fiche. */
+function appliquerGeneriques() {
+  const e = S.get();
+  for (const r of RB.generiquesPrets(e.recherches)) {
+    const fiche = e.articles.find((a) => a.id === r.articleId);
+    const offres = fiche ? RB.moinsCherParBanniere(r, fiche.nom) : [];
+    if (offres.length) garderNomGenerique(r.id, offres, { famille: true });
+    S.maj((x) => { const y = x.recherches.find((z) => z.id === r.id); if (y) { y.appliqueLe = new Date().toISOString(); if (!offres.length) { y.choix = 'aucun'; y.choixLe = y.appliqueLe; } } });
+  }
+}
 
 // --- v120 : nom inconnu (« Mon nom tel quel ») — choisir dans la liste ou garder ton nom ---
 /** Bannières répondues pour un nom inconnu : rien → sans prix ; nom exact unique → rattaché ; sinon fenêtre (ouverte une fois, puis au toucher). */
@@ -275,7 +297,7 @@ function choisirProduitNom(rechId, g, auto = false) {
 
 /** v138 — Ton nom est générique (« Tourtière ») : la fiche le garde tel quel, sans marque ni format,
  *  et reçoit le moins cher de chaque bannière (chaque prix garde le produit et le format vraiment vendus). */
-function garderNomGenerique(rechId, offres) {
+function garderNomGenerique(rechId, offres, { famille = false } = {}) {
   const e = S.get();
   const r = e.recherches.find((x) => x.id === rechId);
   const fiche = r && e.articles.find((a) => a.id === r.articleId);
@@ -283,7 +305,8 @@ function garderNomGenerique(rechId, offres) {
   const prix = RB.prixGenerique(offres, fiche.id, jourQuebec(), (b) => `px-${rechId}-${b}`);
   S.maj((x) => {
     const ar = x.articles.find((a) => a.id === fiche.id);
-    Object.assign(ar, { uniteRef: RB.uniteGenerique(offres), prixVerifieLe: jourQuebec() });
+    // Une fiche famille garde son unité (celle du référentiel) ; une fiche à ton nom prend celle des produits trouvés
+    Object.assign(ar, famille ? { prixVerifieLe: jourQuebec() } : { uniteRef: RB.uniteGenerique(offres), prixVerifieLe: jourQuebec() });
     const ids = new Set(x.prix.map((p) => p.id));
     prix.forEach((p) => { if (!ids.has(p.id)) x.prix.push(p); });
     const y = x.recherches.find((z) => z.id === rechId);
@@ -323,7 +346,7 @@ function panierQuiTourne(a) {
   const e = S.get();
   if (!(e.recherches || []).length) return '';
   if (choixNomDe(a.id)) return '<span class="point-choix" title="Les bannières ont répondu : touche pour choisir"></span>';
-  const ids = new Set(a.estGenerique ? fichesAVerifier(a).map((x) => x.id) : [a.id]);
+  const ids = new Set(a.estGenerique ? [a.id, ...fichesAVerifier(a).map((x) => x.id)] : [a.id]);   // v140 : la fiche famille cherche aussi son nom
   const ouvertes = (e.recherches || []).filter((r) => ids.has(r.articleId) && !r.appliqueLe && r.etat !== 'fait'
     && RB.verificationOuverte(e.recherches, r.articleId));
   if (!ouvertes.length) return '';

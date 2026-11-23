@@ -1014,6 +1014,8 @@ async function vueRecus(v) {
 const PROGRAMMES_NOMS = { iga: 'IGA', super_c: 'Super C', metro: 'Metro', maxi: 'Maxi', costco: 'Costco', jean_coutu: 'Jean Coutu', provigo: 'Provigo', walmart: 'Walmart' };
 
 // --- Sauvegarde -------------------------------------------------------
+// v140 : même clé que modeEssai() dans app.js
+const essaiActif = () => { try { return localStorage.getItem('essai.verifierChaqueAjout') === '1'; } catch { return false; } };
 function vueSauvegarde(v) {
   v.innerHTML = retour() + `<div class="carte"><h2>Exporter / importer</h2>
       <p class="doux">Copie de sécurité de tes données (sans les photos). Elle contient tes numéros de carte : garde-la en lieu sûr.</p>
@@ -1021,9 +1023,16 @@ function vueSauvegarde(v) {
     ${S.copieAvantV3() ? `<div class="carte"><h2>Copie avant la mise à jour des produits</h2>
       <p class="doux">Faite automatiquement le ${new Date(S.copieAvantV3().date).toLocaleDateString('fr-CA', { dateStyle: 'medium' })}, avant le passage aux variantes (marque + format). Gardée 30 jours. À utiliser seulement si quelque chose semble perdu.</p>
       <button class="btn sec" id="avantV3">↩︎ Revenir à avant</button></div>` : ''}
+    <div class="carte"><h2>Mode essai</h2>
+      <div class="mag-ligne"><label class="interrupteur" title="Revérifier les prix à chaque ajout"><input type="checkbox" id="modeEssai" ${essaiActif() ? 'checked' : ''}><span></span></label>
+        <label for="modeEssai" class="grandir" style="cursor:pointer">Revérifier les prix à chaque ajout<small class="doux" style="display:block">Pour les essais : la recherche chez les bannières repart même si le produit a déjà été vérifié depuis jeudi. Ce téléphone seulement.</small></label></div></div>
     <div class="carte"><h2>Mode démo</h2><p class="doux">Remet les données d'exemple (prix fictifs). Tes ajouts seront effacés de ce téléphone.</p>
       <button class="btn danger" id="reinit">Réinitialiser la démo</button></div>`;
   brancherRetour(v);
+  $('#modeEssai', v).onchange = (ev) => {
+    try { ev.target.checked ? localStorage.setItem('essai.verifierChaqueAjout', '1') : localStorage.removeItem('essai.verifierChaqueAjout'); } catch { /* navigation privée */ }
+    toast(ev.target.checked ? 'Mode essai : prix revérifiés à chaque ajout' : 'Mode essai arrêté : une vérification par semaine de circulaires');
+  };
   $('#exp', v).onclick = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([S.exporter()], { type: 'application/json' }));

@@ -223,7 +223,9 @@ export function offresArticle(article) {
   if (article?.estGenerique) {
     const lignesGen = enfantsGenerique(article, e.articles, familleDe).flatMap((x) => offresArticle(x).map((l) => ({
       ...l, articleEnfant: x.id, produitOffre: l.produitOffre || [[x.marque, x.nom].filter(Boolean).join(' '), formatLisible(l.format || x.format)].filter(Boolean).join(' · ') })));
-    return classerLignes(lignesGen);
+    // v140 : plus ses propres prix (son nom cherché chez les bannières : le moins cher de chacune, toutes sortes)
+    const propres = offresArticle({ ...article, estGenerique: false }).map((l) => ({ ...l, produitOffre: l.produitOffre || l.nomProduit || '' }));
+    return classerLignes([...lignesGen, ...propres]);
   }
   const lignes = [];
   // Toutes les marques/formats du produit sont comparées au kg / L ; une variante retirée ne compte plus

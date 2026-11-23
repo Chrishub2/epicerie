@@ -372,6 +372,10 @@ export function aAppliquer(recherches, maintenant = Date.now()) {
 //  - sinon → fenêtre « choisis dans la liste, ou garde ton nom sans référence ».
 // =====================================================================
 
+/** v140 — Demandes « générique » (fiche famille : son nom cherché chez les bannières) terminées, pas encore appliquées. */
+export const generiquesPrets = (recherches, maintenant = Date.now()) => (recherches || []).filter((r) => r.but === 'generique' && r.articleId
+  && !r.appliqueLe && (r.etat === 'fait' || maintenant - Date.parse(r.le) >= 24 * 3600000));
+
 /** Demandes « nom » terminées dont le choix n'est pas encore fait. */
 export const choixEnAttente = (recherches) => (recherches || []).filter((r) => r.but === 'nom' && r.articleId && r.etat === 'fait' && !r.choixLe);
 
