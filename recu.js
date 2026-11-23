@@ -742,6 +742,19 @@ function ecartLigne(l) {
   return Math.round((vd.paye - vd.attendu) * qte * 100) / 100;
 }
 
+/** Total « à réclamer » d'un reçu : payé plus que le prix affiché de CE magasin, avec preuve forte (même règle que htmlDetail). */
+export function aReclamer(r) {
+  let t = 0;
+  for (const l of r.lignes || []) {
+    const et = etatLigne(l);
+    if (et === 'hors' || et === 'verifier' || et === 'aucun' || l.verdict?.statut !== 'plus') continue;
+    const src = sourcePrevu(r, l);
+    if (src && r.banniere && src.banniere && src.banniere !== r.banniere) continue;
+    if (forcePreuve(src, r.date) === 'forte') t += ecartLigne(l);
+  }
+  return Math.round(t * 100) / 100;
+}
+
 export function htmlDetail(r) {
   const champ = (lib, val) => (val != null && val !== '' ? `<tr><td class="doux">${esc(lib)}</td><td>${esc(String(val))}</td></tr>` : '');
   const v = r.statut === 'lu' ? verifierRecu(r) : null;

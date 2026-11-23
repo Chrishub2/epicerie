@@ -986,16 +986,23 @@ async function choisirLigne(r, cands, p) {
   return rep2 ? Number(rep2) : null;
 }
 
-function vueRecus(v) {
+async function vueRecus(v) {
+  const R = await import('./recu.js');
   const e = S.get();
   const jour = (r) => r.date || (r.cree || '').slice(0, 10);
   const recus = [...(e.recus || [])].sort((a, b) => jour(b).localeCompare(jour(a)) || (b.cree || '').localeCompare(a.cree || ''));
   const dateLisible = (d) => { const x = new Date(`${d}T12:00`); return isNaN(x) ? d : x.toLocaleDateString('fr-CA', { day: 'numeric', month: 'short', year: 'numeric' }); };
   v.innerHTML = retour()
-    + (recus.length ? `<table class="recus-tab"><thead><tr><th>Magasin</th><th>Date</th><th class="p">Total</th></tr></thead><tbody>`
-      + recus.map((r) => `<tr data-recu="${r.id}"><td>${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'}</td>
-        <td class="d">${esc(dateLisible(jour(r)))}</td>
-        <td class="p">${r.statut === 'à lire' ? '<span class="doux">En lecture…</span>' : r.total != null ? argent(r.total) : '—'}</td></tr>`).join('')
+    + (recus.length ? `<table class="recus-tab"><thead><tr><th>Reçu</th><th class="p">Payé</th><th class="p">Économisé</th><th class="p">À réclamer</th></tr></thead><tbody>`
+      + recus.map((r) => {
+        const mag = `<b>${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'}</b><span class="d">${esc(dateLisible(jour(r)))}</span>`;
+        if (r.statut === 'à lire') return `<tr data-recu="${r.id}"><td class="m">${mag}</td><td class="p doux" colspan="3">En lecture…</td></tr>`;
+        const rec = r.statut === 'lu' ? R.aReclamer(r) : 0;
+        return `<tr data-recu="${r.id}"><td class="m">${mag}</td>
+          <td class="p">${r.total != null ? argent(r.total) : '—'}</td>
+          <td class="p vert">${r.economies != null ? argent(r.economies) : '—'}</td>
+          <td class="p ${rec > 0 ? 'rouge' : 'doux'}">${rec > 0 ? argent(rec) : '—'}</td></tr>`;
+      }).join('')
       + '</tbody></table>'
       : '<div class="vide">Aucun reçu. Après l\'épicerie, prends ton reçu en photo.</div>')
     + '<button class="btn recu-flottant" id="nouvRecu">📷 Photographier un reçu</button>';
