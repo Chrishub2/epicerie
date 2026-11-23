@@ -92,7 +92,8 @@ export function aRelier(articles, generiques, corr = {}, alternatifs = {}) {
   if (!generiques) return [];
   const res = [];
   for (const a of articles || []) {
-    if (!a?.id || !a.nom || a.generique || a.generiqueNom || corr[a.id]) continue;
+    // familleDetachee (date) : une famille fausse a été retirée ; on ne la remet jamais automatiquement
+    if (!a?.id || !a.nom || a.generique || a.generiqueNom || a.familleDetachee || corr[a.id]) continue;
     if (!dejaVus.has(a.nom)) dejaVus.set(a.nom, rattacher(a.nom, generiques, alternatifs));
     const r = dejaVus.get(a.nom);
     if (r) res.push({ id: a.id, ...r });
