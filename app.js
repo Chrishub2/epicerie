@@ -29,6 +29,7 @@ import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
 import { aRelier, appliquerFamilles, rattacher } from './rattacher.js';
 import { aRanger, appliquerRangement } from './rayons-defaut.js';
+import { appareil, etapesPosition, messagePosition } from './position-aide.js';
 import { construireArbre, nouvelleFicheGenerique, enfantsGenerique } from './arbre-recherche.js';
 import { chargerVisuels, sourcesRattachement, familleDe, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, aPhotoPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
@@ -2147,12 +2148,23 @@ function vueMagasins(v) {
   const autour = () => {
     const o = lireLocal(CLE_ORIGINE_MAG);
     $('#mAutour', v).innerHTML = `Autour de ${o ? esc(o.mode === 'position' ? 'ma position' : o.nom) : 'ton premier secteur'}, 100 km · <a href="#" id="mPosition">📍 Ma position</a>${o?.mode === 'position' ? ' · <a href="#" id="mSecteur">mon secteur</a>' : ''}`;
-    $('#mPosition', v).onclick = (ev) => {
-      ev.preventDefault();
+    const localiser = () => {
       if (!navigator.geolocation) { toast('Position non disponible sur ce téléphone'); return; }
-      navigator.geolocation.getCurrentPosition((p) => { ecrireLocal(CLE_ORIGINE_MAG, { mode: 'position', nom: 'ma position', lat: p.coords.latitude, lng: p.coords.longitude }); vueMagasins(v); },
-        () => toast('Position refusée : je garde ton secteur.'), { maximumAge: 600000, timeout: 15000 });
+      navigator.geolocation.getCurrentPosition((p) => { fermerModale(); ecrireLocal(CLE_ORIGINE_MAG, { mode: 'position', nom: 'ma position', lat: p.coords.latitude, lng: p.coords.longitude }); vueMagasins(v); },
+        (err) => {
+          const m = messagePosition(err);
+          if (!m.refus) { toast(m.note); return; }
+          // Refus retenu par le navigateur : il ne redemandera plus ; on dit où le redonner selon l'appareil
+          const etapes = etapesPosition(appareil(navigator.userAgent, navigator.maxTouchPoints));
+          ouvrirModale('Position bloquée', `<p class="doux" style="margin-top:0">Tu as refusé l’accès une fois : ton téléphone s’en souvient et ne redemande plus. Aucune page web ne peut ouvrir les Réglages pour toi ; voici où le changer :</p>
+            <ol style="padding-left:20px;display:grid;gap:8px;margin:12px 0">${etapes.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+            <div class="rang" style="gap:8px"><button class="btn" id="posReessayer">Réessayer</button><button class="btn sec" id="posSecteur">Garder mon secteur</button></div>`, (c) => {
+            $('#posReessayer', c).onclick = () => localiser();
+            $('#posSecteur', c).onclick = () => fermerModale();
+          });
+        }, { maximumAge: 600000, timeout: 15000 });
     };
+    $('#mPosition', v).onclick = (ev) => { ev.preventDefault(); localiser(); };
     const ms = $('#mSecteur', v);
     if (ms) ms.onclick = (ev) => { ev.preventDefault(); try { localStorage.removeItem(CLE_ORIGINE_MAG); } catch { /* rien */ } origineMagasins().then(() => vueMagasins(v)); };
   };
