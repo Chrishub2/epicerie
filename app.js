@@ -27,7 +27,8 @@ import { ajouterTache, traiterFile, nbEnAttente } from './attente.js';
 import { htmlVerdictListe, htmlDernierAchat, htmlAchats } from './recu.js';
 import * as P from './produits.js';
 import { jourQuebec } from './couverture-circulaires.js';
-import { aRelier, appliquerFamilles } from './rattacher.js';
+import { aRelier, appliquerFamilles, rattacher } from './rattacher.js';
+import { aRanger, appliquerRangement } from './rayons-defaut.js';
 import { construireArbre, nouvelleFicheGenerique, enfantsGenerique } from './arbre-recherche.js';
 import { chargerVisuels, sourcesRattachement, familleDe, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, aPhotoPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
@@ -87,6 +88,12 @@ function relierFamilles() {
   if (!src || !syncFaite) return;
   const liens = aRelier(S.get().articles, src.generiques, src.corr, src.alternatifs);
   if (liens.length) S.maj((e) => appliquerFamilles(e.articles, liens));
+  // Fiches encore dans Divers : rangées dans le rayon de leur famille (table validée par Chris) ;
+  // une famille trouvée automatiquement est revérifiée par le nom, jamais une fiche classée à la main.
+  const e = S.get();
+  const verifier = (a, g) => rattacher(a.nom, src.generiques, src.alternatifs)?.g === g;
+  const aMettre = aRanger(e.articles, e.rayons, src.rayonsDefaut, (a) => familleDe(a), verifier);
+  if (aMettre.length) S.maj((x) => appliquerRangement(x, aMettre, S.uid));
 }
 S.abonner(() => { if (!reliageprevu) { reliageprevu = true; setTimeout(() => { reliageprevu = false; relierFamilles(); }, 0); } });
 setTimeout(async () => {

@@ -34,7 +34,9 @@ export function rattacher(nom, generiques, alternatifs = {}) {
   const liste = mots(nom), sac = new Set(liste);
   if (!sac.size || !generiques) return null;
   const [h0, h1] = liste;            // français : le premier mot (« Pesto de basilic » est un pesto, pas du basilic)
-  const hEn = liste[liste.length - 1]; // anglais : le dernier (« Parboiled white rice » est du riz)
+  // anglais : le dernier mot AVANT « with » (« Parboiled white rice » est du riz ; « Tuna salad with corn » est une salade, pas du maïs)
+  const avantWith = mots(String(nom || '').split(/\bwith\b/i)[0]);
+  const hEn = avantWith.length ? avantWith[avantWith.length - 1] : liste[liste.length - 1];
   const tetesFr = tetesFrancaises(generiques);
   let meilleur = null, score = 0, egalite = false;
   const parLangue = { fr: { id: null, sc: 0 }, en: { id: null, sc: 0 } };   // meilleur générique de chaque règle
