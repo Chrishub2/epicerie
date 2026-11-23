@@ -24,7 +24,23 @@ const COLLECTIONS = {
 const cleDe = (type, o) => (type === 'cp' ? o.code : o.id);
 // Réglages partagés du foyer (un seul objet)
 const REGLAGES = ['ordreRayons', 'rayonsJoints', 'optim'];
-const META = 'epicerie-sync'; // { foyerId, empreintes: { 'type:id': json } }
+const META = 'epicerie-sync'; // { foyerId, empreintes: { 'type:id': empreinte courte du json } }
+
+/** Empreinte courte d'un texte (cyrb53 + longueur). v133 : remplace la copie complète de chaque objet,
+ *  qui doublait les données dans la mémoire du navigateur et la remplissait (« Mémoire du téléphone pleine », 23 nov. 2026). */
+export function empreinte(txt) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < txt.length; i++) { const c = txt.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `${txt.length.toString(36)}.${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}`;
+}
+/** Anciennes empreintes (json complet) → empreintes courtes, sans rien renvoyer à la base. */
+function compacterEmpreintes(m) {
+  let change = false;
+  for (const [k, v] of Object.entries(m.empreintes || {})) if (typeof v === 'string' && /^[[{"]/.test(v)) { m.empreintes[k] = empreinte(v); change = true; }
+  return change;
+}
 
 let sb = null;          // client Supabase
 let session = null;
@@ -34,6 +50,7 @@ let canal = null;
 let minuterie = null;
 let enEnvoi = false;
 let meta = lireMeta();
+if (compacterEmpreintes(meta)) ecrireMeta();
 const ecouteurs = new Set();
 
 function lireMeta() { try { return JSON.parse(localStorage.getItem(META)) || { empreintes: {} }; } catch { return { empreintes: {} }; } }
@@ -197,22 +214,31 @@ export async function pousser() {
     const lignes = [];
     for (const o of locaux) {
       const k = `${o.type}:${o.id}`; vus.add(k);
-      const json = JSON.stringify(o.data);
-      if (meta.empreintes[k] !== json) lignes.push({ foyer_id: foyer.id, type: o.type, id: o.id, data: o.data, supprime: false, _k: k, _json: json });
+      const emp = empreinte(JSON.stringify(o.data));
+      if (meta.empreintes[k] !== emp) lignes.push({ foyer_id: foyer.id, type: o.type, id: o.id, data: o.data, supprime: false, _k: k, _emp: emp });
     }
-    // Éléments supprimés sur ce téléphone → suppression douce (sauf l'historique des prix)
+    // Éléments supprimés sur ce téléphone → suppression douce (sauf l'historique des prix) ; la base garde leur dernière version
     for (const k of Object.keys(meta.empreintes)) {
       if (vus.has(k)) continue;
       const [type, ...r] = k.split(':'); const id = r.join(':');
       if (type === 'prix') { delete meta.empreintes[k]; continue; }
-      lignes.push({ foyer_id: foyer.id, type, id, data: JSON.parse(meta.empreintes[k]), supprime: true, _k: k, _json: null });
+      lignes.push({ foyer_id: foyer.id, type, id, supprime: true, _k: k, _emp: null });
     }
     // Un élément refusé par la base ne doit JAMAIS bloquer les autres (incident du 2026-11-16 :
     // un seul prix refusé faisait échouer tout le paquet de 200, plus rien ne passait).
     const envoyer = async (lot) => {
-      const { error } = await sb.from('objets').upsert(lot.map(({ _k, _json, ...l }) => l), { onConflict: 'foyer_id,type,id' });
-      if (!error) { lot.forEach((l) => { if (l._json == null) delete meta.empreintes[l._k]; else meta.empreintes[l._k] = l._json; }); ecrireMeta(); }
-      return error;
+      const ajouts = lot.filter((l) => !l.supprime), retraits = lot.filter((l) => l.supprime);
+      if (ajouts.length) {
+        const { error } = await sb.from('objets').upsert(ajouts.map(({ _k, _emp, ...l }) => l), { onConflict: 'foyer_id,type,id' });
+        if (error) return error;
+      }
+      for (const l of retraits) {
+        const { error } = await sb.from('objets').update({ supprime: true }).eq('foyer_id', foyer.id).eq('type', l.type).eq('id', l.id);
+        if (error) return error;
+      }
+      lot.forEach((l) => { if (l._emp == null) delete meta.empreintes[l._k]; else meta.empreintes[l._k] = l._emp; });
+      ecrireMeta();
+      return null;
     };
     const refuses = await envoyerParPaquets(lignes, envoyer, new Set((meta.refuses || []).map((r) => r.k)));
     if (refuses.length) console.warn('Synchronisation : élément(s) refusé(s) par la base', refuses);
@@ -220,13 +246,18 @@ export async function pousser() {
     // 102 prix dont la variante avait été réécrite) → on reprend la version de la base, rien n'est perdu.
     const aRetablir = refuses.filter((r) => r.k.startsWith('prix:') && /ajout seulement/i.test(r.erreur) && meta.empreintes[r.k]);
     if (aRetablir.length) {
-      S.maj((e) => {
-        for (const r of aRetablir) {
-          const id = r.k.slice(5);
-          const i = (e.prix || []).findIndex((p) => String(cleDe('prix', p)) === id);
-          if (i >= 0) e.prix[i] = JSON.parse(meta.empreintes[r.k]);
-        }
-      });
+      // La version de la base est relue (le téléphone ne garde plus de copie complète, seulement une empreinte)
+      const ids = aRetablir.map((r) => r.k.slice(5));
+      const { data: versions } = await sb.from('objets').select('id,data').eq('foyer_id', foyer.id).eq('type', 'prix').in('id', ids);
+      if (versions?.length) {
+        S.maj((e) => {
+          for (const v of versions) {
+            const i = (e.prix || []).findIndex((p) => String(cleDe('prix', p)) === v.id);
+            if (i >= 0) e.prix[i] = v.data;
+          }
+        });
+        versions.forEach((v) => { meta.empreintes[`prix:${v.id}`] = empreinte(JSON.stringify(v.data)); });
+      }
     }
     meta.refuses = refuses.filter((r) => !aRetablir.includes(r));
     await envoyerPhotos();
@@ -255,14 +286,14 @@ function appliquer(lignes) {
   S.maj((e) => {
     for (const l of lignes) {
       const k = `${l.type}:${l.id}`;
-      if (l.type === 'reglages') { for (const c of REGLAGES) if (l.data[c] != null) e[c] = l.data[c]; meta.empreintes[k] = JSON.stringify(l.data); continue; }
+      if (l.type === 'reglages') { for (const c of REGLAGES) if (l.data[c] != null) e[c] = l.data[c]; meta.empreintes[k] = empreinte(JSON.stringify(l.data)); continue; }
       const coll = COLLECTIONS[l.type];
       if (!coll) continue;
       e[coll] ||= [];
       const i = e[coll].findIndex((o) => String(cleDe(l.type, o)) === l.id);
       if (l.supprime) { if (i >= 0) e[coll].splice(i, 1); delete meta.empreintes[k]; continue; }
       if (i >= 0) e[coll][i] = l.data; else e[coll].push(l.data);
-      meta.empreintes[k] = JSON.stringify(l.data);
+      meta.empreintes[k] = empreinte(JSON.stringify(l.data));
     }
   });
   ecrireMeta();

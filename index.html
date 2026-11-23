@@ -565,6 +565,16 @@ table.matrice td.cher { background: var(--rouge-fond); color: var(--rouge); }
 .btn-releve { flex: none; width: 56px; height: 44px; font-size: 24px; border-radius: 12px; border: 1px solid var(--accent);
   background: var(--accent-doux); cursor: pointer; }
 .mag-ligne.inactif { opacity: .55; }
+/* Mes magasins v2 (maquette magasins-v2) : tri, distance, ✕ retirer, recherche par bannière */
+.seg-tri { display: flex; background: var(--fond); border: 1px solid var(--ligne); border-radius: 999px; padding: 3px; margin: 0 0 10px; }
+.seg-tri button { flex: 1; border: 0; background: none; color: var(--doux); font: inherit; font-size: 14px; padding: 8px; border-radius: 999px; cursor: pointer; }
+.seg-tri button.actif { background: var(--accent); color: #fff; font-weight: 700; }
+.mag-sous { display: block; font-size: 12px; margin-top: 1px; }
+.btn-retirer-mag { flex: none; width: 40px; height: 44px; border-radius: 12px; border: 1px solid var(--ligne); background: var(--fond); color: var(--doux); font-size: 16px; cursor: pointer; }
+.mag-res { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--ligne); }
+.mag-km { flex: none; width: 48px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mag-km small { display: block; font-weight: 400; font-size: 11px; color: var(--doux); }
+.mag-deja { flex: none; font-size: 13px; color: var(--vert); font-weight: 700; }
 .interrupteur { position: relative; width: 40px; height: 24px; flex: none; }
 .interrupteur input { opacity: 0; width: 0; height: 0; position: absolute; }
 .interrupteur span { position: absolute; inset: 0; background: var(--ligne); border-radius: 999px; transition: .2s; cursor: pointer; }

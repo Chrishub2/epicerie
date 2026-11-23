@@ -37,7 +37,7 @@ let filtreMagasin = 'tous'; // filtre de la liste après « Utiliser cette répa
 // ---------------------------------------------------------------------
 // Démarrage
 // ---------------------------------------------------------------------
-S.charger();
+await S.demarrer();   // v133 : données dans IndexedDB (déménagées de localStorage au premier démarrage)
 
 /**
  * Bandeau d'état sous l'en-tête : seulement quand quelque chose cloche (envoi refusé, hors ligne).
@@ -2069,87 +2069,268 @@ export function ficheArticle(articleId, ligneId) {
 // ---------------------------------------------------------------------
 const lienMaps = (m) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(m.adresse ? `${m.nom}, ${m.adresse}` : m.nom)}`;
 
+// --- Maquette magasins-v2 (accord de Chris, 23 nov. 2026) ---
+// Tri « Par proximité » / « Par bannière » ; ✕ = retirer de ma liste (m.retire : la base garde ses prix et continue
+// d'en noter) ; « Ajouter un magasin » : bannière tapée → succursales à moins de 100 km (OpenStreetMap), de la plus
+// proche à la plus loin ; Secteurs tout en bas.
+const CLE_TRI_MAG = 'epicerie.triMagasins', CLE_ORIGINE_MAG = 'epicerie.origineMagasins';
+const rechMag = { txt: '', saisie: null, res: [], montres: 10, message: '' };
+const lireLocal = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+const ecrireLocal = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sans effet */ } };
+function distanceKm(a, b) {
+  if (!a || !b || a.lat == null || b.lat == null || a.lng == null || b.lng == null) return null;
+  const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+const km = (d) => (d == null ? '' : `${d.toLocaleString('fr-CA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`);
+
+/** Point de départ des distances : ma position (si choisie) sinon le premier secteur, situé une fois (gardé sur ce téléphone). */
+async function origineMagasins() {
+  const o = lireLocal(CLE_ORIGINE_MAG);
+  const s = S.get().codesPostaux[0];
+  if (o?.mode === 'position' || (o && s && o.cle === s.code)) return o;
+  if (!s) return null;
+  try {
+    const p = new URLSearchParams({ q: `${s.libelle || s.code}, Québec, Canada`, format: 'jsonv2', limit: 1, countrycodes: 'ca' });
+    const j = await (await fetch(`https://nominatim.openstreetmap.org/search?${p}`)).json();
+    if (!j[0]) return null;
+    const n = { mode: 'secteur', cle: s.code, nom: estFsa(s.code) ? `${s.libelle} (${s.code})` : (s.libelle || s.code), lat: Number(j[0].lat), lng: Number(j[0].lon) };
+    ecrireLocal(CLE_ORIGINE_MAG, n);
+    return n;
+  } catch { return null; }
+}
+
 function vueMagasins(v) {
   const e = S.get();
-  let html = `<h2 style="margin-top:0">Mes magasins</h2>
-    <p class="doux" style="margin:0 0 8px">Interrupteur = magasin <b>considéré</b> ou <b>ignoré</b> dans les comparaisons, les listes et les paniers (sans le supprimer). Touche un nom pour l'adresse, l'itinéraire ou le retirer. 🏷️ = relevé de prix dans ce magasin.</p>
+  const tri = lireLocal(CLE_TRI_MAG) === 'banniere' ? 'banniere' : 'proximite';
+  const orig = lireLocal(CLE_ORIGINE_MAG);
+  const mags = e.magasins.filter((m) => !m.retire).map((m) => ({ m, d: distanceKm(orig, m) }));
+  const parDistance = (a, b) => (a.d ?? 1e9) - (b.d ?? 1e9) || a.m.nom.localeCompare(b.m.nom);
+  mags.sort(parDistance);
+  const ligne = ({ m, d }) => {
+    const rp = e.rabaisPerso.find((r) => r.magasinId === m.id && r.actif);
+    const actif = m.actif !== false;
+    const sous = [km(d), villeMagasin(m), actif ? '' : 'ignoré'].filter(Boolean).join(' · ');
+    return `<div class="mag-ligne ${actif ? '' : 'inactif'}">
+      <label class="interrupteur" title="${actif ? 'Considéré dans les comparaisons' : 'Ignoré (pas supprimé)'}"><input type="checkbox" data-actif="${m.id}" ${actif ? 'checked' : ''}><span></span></label>
+      <button class="grandir nom-mag" data-magfiche="${m.id}"><span class="une-ligne" style="display:block">${logoMagasin(m)}${rp ? ' <span class="pastille vert">%</span>' : ''}</span>${sous ? `<small class="doux mag-sous">${esc(sous)}</small>` : ''}</button>
+      <button class="btn-releve" data-releve="${m.id}" aria-label="Relevé de prix">🏷️</button>
+      <button class="btn-retirer-mag" data-retirermag="${m.id}" aria-label="Retirer de ma liste">✕</button></div>`;
+  };
+  let liste = '';
+  if (tri === 'banniere') {
+    const groupes = new Map();
+    for (const x of mags) { const k = x.m.banniere || '?'; if (!groupes.has(k)) groupes.set(k, []); groupes.get(k).push(x); }
+    for (const [k, g] of groupes) liste += `<h3 class="titre-cp">${esc(nomBanniere(k))} (${g.length})</h3>${g.map(ligne).join('')}`;
+  } else liste = mags.map(ligne).join('');
+  v.innerHTML = `<h2 style="margin-top:0">Mes magasins</h2>
+    <div class="seg-tri" role="group" aria-label="Affichage"><button data-tri="proximite" class="${tri === 'proximite' ? 'actif' : ''}">Par proximité</button><button data-tri="banniere" class="${tri === 'banniere' ? 'actif' : ''}">Par bannière</button></div>
+    ${liste || '<p class="doux">Aucun magasin. Ajoute-en un plus bas.</p>'}
+    <h3 class="titre-cp" style="margin-top:22px">Ajouter un magasin</h3>
+    <div class="carte">
+      <div class="rang"><input id="mBan" class="grandir" placeholder="Bannière (ex. IGA, Maxi, Costco)" autocomplete="off"><button class="btn" id="mChercher">Chercher</button></div>
+      <div class="doux" id="mAutour" style="font-size:13px;margin-top:8px"></div>
+      <div id="mResultats"></div></div>
     <div class="carte"><h2>Secteurs</h2>
-    <p class="doux" style="margin:0 0 6px">Une ville couvre toutes ses succursales, peu importe leur code postal.</p>
-    <div>${e.codesPostaux.map((c) => `<span class="pastille" style="font-size:13px;padding:4px 10px">${estFsa(c.code) ? `${esc(c.code)} · ${esc(c.libelle)}` : esc(c.libelle || c.code)} <a href="#" data-supcp="${esc(c.code)}" aria-label="Retirer">✕</a></span>`).join(' ')}</div>
-    <div class="rang" style="margin-top:8px"><input id="cpCode" class="grandir" placeholder="Ville ou code postal (ex. Beloeil, J3X)"><button class="btn sec" id="cpAjout">Ajouter</button></div></div>`;
+      <div>${e.codesPostaux.map((c) => `<span class="pastille" style="font-size:13px;padding:4px 10px">${estFsa(c.code) ? `${esc(c.code)} · ${esc(c.libelle)}` : esc(c.libelle || c.code)} <a href="#" data-supcp="${esc(c.code)}" aria-label="Retirer">✕</a></span>`).join(' ')}</div>
+      <div class="rang" style="margin-top:8px"><input id="cpCode" class="grandir" placeholder="Ville ou code postal (ex. Beloeil, J3X)"><button class="btn sec" id="cpAjout">Ajouter</button></div></div>`;
 
-  // Chaque magasin dans UN seul secteur : d'abord sa ville (plus large), sinon son code postal ; les autres à la fin.
-  const places = new Set();
-  const groupes = e.codesPostaux.map((c) => ({ c, mags: [] }));
-  for (const m of e.magasins) {
-    const g = groupes.find((x) => !estFsa(x.c.code) && enSecteur(m, x.c)) || groupes.find((x) => enSecteur(m, x.c));
-    if (g) { g.mags.push(m); places.add(m.id); }
-  }
-  const autres = e.magasins.filter((m) => !places.has(m.id));
-  if (autres.length) groupes.push({ c: { code: '', libelle: 'Autres magasins' }, mags: autres });
-  for (const { c, mags } of groupes) {
-    html += `<h3 class="titre-cp">${c.code && estFsa(c.code) ? `${esc(c.code)} — ${esc(c.libelle)}` : esc(c.libelle || c.code)}</h3>`;
-    if (!mags.length) html += `<p class="doux">Aucun magasin dans ce secteur.</p>`;
-    for (const m of mags) {
-      const rp = e.rabaisPerso.find((r) => r.magasinId === m.id && r.actif);
-      const actif = m.actif !== false;
-      html += `<div class="mag-ligne ${actif ? '' : 'inactif'}">
-        <label class="interrupteur" title="${actif ? 'Considéré dans les comparaisons' : 'Ignoré (pas supprimé)'}"><input type="checkbox" data-actif="${m.id}" ${actif ? 'checked' : ''}><span></span></label>
-        <button class="grandir une-ligne nom-mag" data-magfiche="${m.id}">${logoMagasin(m)}${rp ? ' <span class="pastille vert">%</span>' : ''} <span class="doux">›</span></button>
-        <button class="btn-releve" data-releve="${m.id}" aria-label="Relevé de prix">🏷️</button></div>`;
-    }
-  }
-  html += `<div class="carte"><h2>Trouver une succursale</h2>
-    <p class="doux">Choisis la bannière et la ville (ou le code postal) : je cherche les succursales et leurs adresses (OpenStreetMap).</p>
-    <div class="rang envelopper">
-      <select id="mBan" class="grandir">${Object.entries(BANNIERES).filter(([, b]) => !b.enLigneSeulement).map(([k, b]) => `<option value="${k}">${b.nom}</option>`).join('')}</select>
-      <input id="mVille" class="grandir" placeholder="Ville ou code postal (ex. Chambly, J3L)"></div>
-    <button class="btn" id="mChercher" style="margin-top:8px">🔎 Chercher</button>
-    <div id="mResultats" style="margin-top:8px"></div></div>`;
-  v.innerHTML = html;
+  // Point de départ : affiché, et situé au besoin (première fois) ; les distances apparaissent alors
+  const autour = () => {
+    const o = lireLocal(CLE_ORIGINE_MAG);
+    $('#mAutour', v).innerHTML = `Autour de ${o ? esc(o.mode === 'position' ? 'ma position' : o.nom) : 'ton premier secteur'}, 100 km · <a href="#" id="mPosition">📍 Ma position</a>${o?.mode === 'position' ? ' · <a href="#" id="mSecteur">mon secteur</a>' : ''}`;
+    $('#mPosition', v).onclick = (ev) => {
+      ev.preventDefault();
+      if (!navigator.geolocation) { toast('Position non disponible sur ce téléphone'); return; }
+      navigator.geolocation.getCurrentPosition((p) => { ecrireLocal(CLE_ORIGINE_MAG, { mode: 'position', nom: 'ma position', lat: p.coords.latitude, lng: p.coords.longitude }); vueMagasins(v); },
+        () => toast('Position refusée : je garde ton secteur.'), { maximumAge: 600000, timeout: 15000 });
+    };
+    const ms = $('#mSecteur', v);
+    if (ms) ms.onclick = (ev) => { ev.preventDefault(); try { localStorage.removeItem(CLE_ORIGINE_MAG); } catch { /* rien */ } origineMagasins().then(() => vueMagasins(v)); };
+  };
+  autour();
+  if (!orig) origineMagasins().then((o) => { if (o && document.body.contains(v)) vueMagasins(v); });
+  completerCoordonnees();
 
-  $('#cpAjout').onclick = () => {
-    const s = secteurDe($('#cpCode').value); if (!s) return;
+  $$('[data-tri]', v).forEach((b) => b.onclick = () => { ecrireLocal(CLE_TRI_MAG, b.dataset.tri); vueMagasins(v); });
+  $('#cpAjout', v).onclick = () => {
+    const s = secteurDe($('#cpCode', v).value); if (!s) return;
     if (e.codesPostaux.some((c) => c.code === s.code || (!estFsa(c.code) && memeVille(c.code, s.code)))) { toast('Déjà là'); return; }
     S.maj((x) => x.codesPostaux.push(s));
   };
-  $$('[data-supcp]').forEach((a) => a.onclick = (ev) => {
+  $$('[data-supcp]', v).forEach((a) => a.onclick = (ev) => {
     ev.preventDefault();
-    const code = a.dataset.supcp;
-    const c = e.codesPostaux.find((x) => x.code === code);
-    if (c && e.magasins.some((m) => enSecteur(m, c))) { toast('Retire d\'abord les magasins de ce secteur.'); return; }
-    S.maj((x) => { x.codesPostaux = x.codesPostaux.filter((c) => c.code !== code); });
+    S.maj((x) => { x.codesPostaux = x.codesPostaux.filter((c) => c.code !== a.dataset.supcp); });
   });
-  // Décocher = ne plus considérer ce magasin (comparaisons, listes, paniers) sans le supprimer
-  $$('[data-releve]').forEach((b) => b.onclick = () => { ouvrirReleve(b.dataset.releve); allerOnglet('plus'); });
-  $$('[data-actif]').forEach((i) => i.onchange = () => S.maj((x) => { x.magasins.find((m) => m.id === i.dataset.actif).actif = i.checked; }));
-  $$('[data-magfiche]').forEach((b) => b.onclick = () => ficheMagasin(b.dataset.magfiche));
-  $('#mChercher').onclick = async () => {
-    const ban = $('#mBan').value, ville = $('#mVille').value.trim();
-    if (!ville) { toast('Entre une ville ou un code postal'); return; }
-    const zone = $('#mResultats');
-    zone.innerHTML = '<p class="doux">Recherche…</p>';
-    let res = [];
-    try { res = await chercherSuccursales(BANNIERES[ban].nom, ville); } catch { /* réseau */ }
-    // Ville demandée (pas un code postal) : on garde celles de cette ville si possible
-    const estCode = /^[a-z]\d[a-z]/i.test(ville);
-    const memeVille = estCode ? res.filter((r) => r.fsa.toUpperCase() === ville.slice(0, 3).toUpperCase())
-      : res.filter((r) => sansAccents(r.ville) === sansAccents(ville));
-    const note = res.length && !memeVille.length ? `<p class="doux">Aucune succursale trouvée exactement à ${esc(ville)} ; voici les résultats proches :</p>` : '';
-    if (memeVille.length) res = memeVille;
-    if (!res.length) { zone.innerHTML = '<p class="doux">Rien trouvé. Essaie une ville voisine ou le nom complet de la ville.</p>'; return; }
-    zone.innerHTML = note + res.map((r, i) => `<div class="item"><div class="grandir"><div class="nom">${esc(r.nom)}</div><div class="info">${esc(r.adresse)}</div></div>
-      <button class="btn sec" data-ajmag="${i}">Ajouter</button></div>`).join('');
-    $$('[data-ajmag]', zone).forEach((b) => b.onclick = () => {
-      const r = res[Number(b.dataset.ajmag)];
-      if (S.get().magasins.some((m) => m.adresse === r.adresse)) { toast('Déjà dans tes magasins'); return; }
-      S.maj((x) => {
-        if (!x.codesPostaux.some((c) => c.code === r.fsa)) x.codesPostaux.push({ code: r.fsa, libelle: r.ville || r.fsa });
-        x.magasins.push({ id: S.uid('m'), banniere: ban, nom: `${BANNIERES[ban].nom} ${r.ville || ''}`.trim(), codePostal: r.fsa, adresse: r.adresse, lat: r.lat, lng: r.lng });
-      });
-      toast('Magasin ajouté');
-    });
+  $$('[data-releve]', v).forEach((b) => b.onclick = () => { ouvrirReleve(b.dataset.releve); allerOnglet('plus'); });
+  $$('[data-actif]', v).forEach((i) => i.onchange = () => S.maj((x) => { x.magasins.find((m) => m.id === i.dataset.actif).actif = i.checked; }));
+  $$('[data-magfiche]', v).forEach((b) => b.onclick = () => ficheMagasin(b.dataset.magfiche));
+  $$('[data-retirermag]', v).forEach((b) => b.onclick = () => retirerMagasin(b.dataset.retirermag));
+
+  // Recherche par bannière (OpenStreetMap), de la plus proche à la plus loin, 100 km.
+  // Gardée entre deux affichages (un ajout redessine l'écran) dans rechMag.
+  const montrer = () => {
+    const { res, montres } = rechMag;
+    const zone = document.getElementById('mResultats');
+    if (!zone) return;
+    const actuels = S.get().magasins.filter((m) => !m.retire);
+    zone.innerHTML = res.slice(0, montres).map((r, i) => {
+      const deja = actuels.some((m) => (distanceKm(m, r) ?? 99) < 0.15);
+      return `<div class="mag-res"><div class="mag-km">${r.d == null ? '' : esc(r.d.toLocaleString('fr-CA', { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}<small>km</small></div>
+        <div class="grandir" style="min-width:0"><b>${esc(r.nom)}</b><div class="doux" style="font-size:13px">${esc(r.adresse || 'adresse complétée à l’ajout')}</div></div>
+        ${deja ? '<span class="mag-deja">✓ Dans ma liste</span>' : `<button class="btn sec" data-ajmag="${i}">Ajouter</button>`}</div>`;
+    }).join('')
+      + (res.length ? `<p class="doux" style="font-size:13px;margin:8px 0 0">${res.length} à moins de 100 km · ${Math.min(montres, res.length)} plus proches${res.length > montres ? ' · <a href="#" id="mPlus">Voir 10 de plus</a>' : ''}</p>` : '');
+    const plus = $('#mPlus', zone);
+    if (plus) plus.onclick = (ev) => { ev.preventDefault(); rechMag.montres += 10; montrer(); };
+    $$('[data-ajmag]', zone).forEach((b) => b.onclick = async () => { b.disabled = true; await ajouterSuccursale(res[Number(b.dataset.ajmag)]); montrer(); });
   };
+  // Message d'état (recherche en cours, rien trouvé…) gardé dans rechMag : il survit à un nouvel affichage de l'écran
+  const message = (html) => { rechMag.message = html; const z = document.getElementById('mResultats'); if (z) z.innerHTML = html; };
+  const chercher = async () => {
+    const txt = ($('#mBan') || $('#mBan', v)).value.trim();
+    if (!txt) { toast('Écris une bannière (ex. IGA)'); return; }
+    Object.assign(rechMag, { txt, saisie: txt, res: [], montres: 10 });
+    message('<p class="doux">Recherche… (jusqu’à 30 secondes)</p>');
+    const o = lireLocal(CLE_ORIGINE_MAG) || await origineMagasins();
+    if (!o) { message('<p class="doux">Je n’arrive pas à situer ton secteur. Touche « 📍 Ma position ».</p>'); return; }
+    let res;
+    try { res = await succursalesProches(txt, o); } catch { res = null; }
+    if (rechMag.txt !== txt) return;   // une autre recherche a été lancée entre-temps
+    if (res == null) { message('<p class="doux">La carte (OpenStreetMap) est saturée en ce moment. Réessaie dans quelques minutes.</p>'); return; }
+    if (!res.length) { message(`<p class="doux">Aucun « ${esc(txt)} » à moins de 100 km. Vérifie l’orthographe (ex. Super C, Maxi).</p>`); return; }
+    rechMag.message = '';
+    rechMag.res = res;
+    montrer();
+  };
+  $('#mChercher', v).onclick = chercher;
+  $('#mBan', v).onkeydown = (ev) => { if (ev.key === 'Enter') chercher(); };
+  $('#mBan', v).oninput = () => { rechMag.saisie = $('#mBan', v).value; };
+  if (rechMag.saisie) $('#mBan', v).value = rechMag.saisie;
+  if (rechMag.message) $('#mResultats', v).innerHTML = rechMag.message;
+  else if (rechMag.res.length) montrer();
+}
+
+/** Clé de bannière connue (« iga », « super_c »…) d'après le texte tapé, sinon une clé simple. */
+function cleBanniere(txt) {
+  const t = sansAccents(txt).replace(/[^a-z0-9]+/g, ' ').trim();
+  const k = Object.keys(BANNIERES).find((x) => sansAccents(BANNIERES[x].nom).replace(/[^a-z0-9]+/g, ' ').trim() === t)
+    || Object.keys(BANNIERES).find((x) => sansAccents(BANNIERES[x].nom).startsWith(t));
+  return k || t.replace(/\s+/g, '_');
+}
+
+/** Succursales d'une bannière à moins de 100 km du point de départ (OpenStreetMap / Overpass, lecture seule). */
+async function succursalesProches(txt, o) {
+  const motif = txt.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
+  const autour = `(around:100000,${o.lat},${o.lng})`;
+  const requete = `[out:json][timeout:25];(nwr["shop"]["name"~"^${motif}",i]${autour};nwr["shop"]["brand"~"^${motif}",i]${autour};`
+    + `nwr["amenity"="pharmacy"]["name"~"^${motif}",i]${autour};nwr["amenity"="pharmacy"]["brand"~"^${motif}",i]${autour};);out center tags;`;
+  // Serveur principal, puis un miroir (12 s chacun au plus) ; sinon, recherche de secours par Nominatim
+  let j = null;
+  for (const url of ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter']) {
+    const arret = new AbortController();
+    const minut = setTimeout(() => arret.abort(), 12000);
+    try {
+      const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: requete }), signal: arret.signal });
+      if (r.ok) { j = await r.json(); break; }
+    } catch { /* serveur suivant */ } finally { clearTimeout(minut); }
+  }
+  if (!j) return succursalesNominatim(txt, o);   // Overpass saturé : recherche de secours
+  const vus = new Set();
+  return (j.elements || []).map((x) => {
+    const c = x.center || x, t = x.tags || {};
+    const ville = t['addr:city'] || '';
+    const cp = String(t['addr:postcode'] || '').toUpperCase();
+    const rue = [t['addr:housenumber'], t['addr:street']].filter(Boolean).join(' ');
+    const adresse = rue || ville ? [rue, ville, cp ? `QC ${cp}` : 'QC'].filter(Boolean).join(', ') : '';
+    const nom = [t.brand || t.name || txt, ville].filter(Boolean).join(' ');
+    return { nom: t.name && ville && !sansAccents(t.name).includes(sansAccents(ville)) ? `${t.name} ${ville}` : (t.name || nom), adresse, ville, fsa: cp.slice(0, 3), lat: c.lat, lng: c.lon, d: distanceKm(o, { lat: c.lat, lng: c.lon }), cle: cleBanniere(txt) };
+  }).filter((x) => x.lat != null && x.d != null && x.d <= 100)
+    .filter((x) => { const k = `${x.lat.toFixed(4)},${x.lng.toFixed(4)}`; if (vus.has(k)) return false; vus.add(k); return true; })
+    .sort((a, b) => a.d - b.d);
+}
+
+/** Secours quand Overpass est saturé : Nominatim, en 3 cercles de plus en plus grands (≈ 20, 50 et 100 km) pour avoir
+ *  d'abord les plus proches (Nominatim rend au plus 40 résultats par requête). 1 requête par seconde, règle d'OpenStreetMap. */
+async function succursalesNominatim(txt, o) {
+  const cle = sansAccents(txt).replace(/\s/g, '');
+  const vus = new Map();
+  for (const [i, delta] of [0.2, 0.5, 1.3].entries()) {
+    if (i) await new Promise((ok) => setTimeout(ok, 1100));
+    const dLng = delta * 1.4;
+    const p = new URLSearchParams({ q: txt, format: 'jsonv2', addressdetails: 1, limit: 40, countrycodes: 'ca', bounded: 1,
+      viewbox: `${o.lng - dLng},${o.lat + delta},${o.lng + dLng},${o.lat - delta}` });
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?${p}`);
+    if (!r.ok) { if (vus.size) break; throw new Error('Carte indisponible'); }
+    for (const x of await r.json()) {
+      if (!sansAccents(x.name || '').replace(/\s/g, '').startsWith(cle)) continue;
+      const a = x.address || {};
+      const ville = a.city || a.town || a.village || a.municipality || '';
+      const cp = String(a.postcode || '').toUpperCase();
+      const lat = Number(x.lat), lng = Number(x.lon);
+      const d = distanceKm(o, { lat, lng });
+      if (d == null || d > 100) continue;
+      const adresse = [[a.house_number, a.road].filter(Boolean).join(' '), ville, cp ? `QC ${cp}` : 'QC'].filter(Boolean).join(', ');
+      vus.set(`${lat.toFixed(4)},${lng.toFixed(4)}`, { nom: ville && !sansAccents(x.name).includes(sansAccents(ville)) ? `${x.name} ${ville}` : x.name, adresse, ville, fsa: cp.slice(0, 3), lat, lng, d, cle: cleBanniere(txt) });
+    }
+  }
+  return [...vus.values()].sort((a, b) => a.d - b.d);
+}
+
+/** Adresse d'un point (OpenStreetMap Nominatim, 1 requête). */
+async function adresseDe(lat, lng) {
+  try {
+    const p = new URLSearchParams({ lat, lon: lng, format: 'jsonv2', addressdetails: 1, zoom: 18 });
+    const a = (await (await fetch(`https://nominatim.openstreetmap.org/reverse?${p}`)).json()).address || {};
+    const ville = a.city || a.town || a.village || a.municipality || '';
+    const cp = String(a.postcode || '').toUpperCase();
+    return { ville, fsa: cp.slice(0, 3), adresse: [[a.house_number, a.road].filter(Boolean).join(' '), ville, cp ? `QC ${cp}` : 'QC'].filter(Boolean).join(', ') };
+  } catch { return null; }
+}
+
+/** Ajoute (ou remet) une succursale trouvée dans ma liste. Un magasin retiré au même endroit est simplement remis : ses prix le suivent. */
+async function ajouterSuccursale(r) {
+  const retire = S.get().magasins.find((m) => m.retire && (distanceKm(m, r) ?? 99) < 0.15);
+  if (retire) {
+    S.maj((x) => { const m = x.magasins.find((y) => y.id === retire.id); m.retire = false; m.actif = true; });
+    toast(`${retire.nom} remis dans ta liste`);
+    return;
+  }
+  if (!r.ville || !r.adresse) { const a = await adresseDe(r.lat, r.lng); if (a) Object.assign(r, { ville: r.ville || a.ville, fsa: r.fsa || a.fsa, adresse: r.adresse || a.adresse }); }
+  const nomBan = BANNIERES[r.cle]?.nom || r.nom.split(' ')[0];
+  const nom = `${nomBan} ${r.ville || ''}`.trim();
+  S.maj((x) => { x.magasins.push({ id: S.uid('m'), banniere: r.cle, nom, codePostal: r.fsa || '', adresse: r.adresse || '', ville: r.ville || '', lat: r.lat, lng: r.lng }); });
+  toast(`${nom} ajouté`);
+}
+
+/** Retirer de ma liste : le magasin n'apparaît plus et n'est plus comparé, mais ses prix et reçus restent et la base continue d'en noter. */
+function retirerMagasin(id) {
+  const m = S.get().magasins.find((x) => x.id === id);
+  if (!m) return;
+  if (!confirm(`Retirer ${m.nom} de ma liste ?
+
+Il n’apparaîtra plus dans tes magasins ni tes comparaisons. Ses prix et reçus restent dans ta base, et la base continue de noter ses prix. Tu peux le rajouter avec la recherche.`)) return;
+  S.maj((x) => { const y = x.magasins.find((z) => z.id === id); y.retire = true; y.actif = false; });
+  toast(`${m.nom} retiré de ta liste`);
+}
+
+/** Magasins sans coordonnées (ajoutés à la main) : situés par leur adresse, un à la fois (1 requête / s, règle d'OpenStreetMap). */
+let coordEnCours = false;
+const coordEssayes = new Set();   // une seule tentative par magasin et par ouverture de l'app
+async function completerCoordonnees() {
+  if (coordEnCours) return;
+  coordEnCours = true;
+  try {
+    const sans = S.get().magasins.filter((m) => !m.retire && m.lat == null && m.adresse && !coordEssayes.has(m.id)).slice(0, 5);
+    for (const m of sans) {
+      coordEssayes.add(m.id);
+      const p = new URLSearchParams({ q: m.adresse, format: 'jsonv2', limit: 1, countrycodes: 'ca' });
+      const j = await (await fetch(`https://nominatim.openstreetmap.org/search?${p}`)).json().catch(() => []);
+      if (j[0]) S.maj((x) => { const y = x.magasins.find((z) => z.id === m.id); if (y && y.lat == null) { y.lat = Number(j[0].lat); y.lng = Number(j[0].lon); } });
+      await new Promise((ok) => setTimeout(ok, 1100));
+    }
+  } catch { /* hors ligne : on réessaiera */ } finally { coordEnCours = false; }
 }
 
 /** Détails d'un magasin : adresse, itinéraire, rabais perso, relevé de prix, retrait. */
@@ -2166,29 +2347,11 @@ function ficheMagasin(id) {
     <button class="btn" id="mfReleve" style="width:100%;margin-bottom:8px">🏷️ Relevé de prix dans ce magasin</button>
     ${rp.length ? `<div class="doux" style="margin-bottom:8px">Rabais perso : ${rp.map((r) => esc(r.description)).join(', ')}</div>` : ''}
     <div class="doux" style="margin-bottom:12px">${nbPrix} prix relevé(s) dans ce magasin.</div>
-    <button class="btn danger" id="mfSup" style="width:100%">🗑 Retirer ce magasin</button>
+    <button class="btn danger" id="mfSup" style="width:100%">✕ Retirer de ma liste</button>
     <p class="doux">Pour seulement l'ignorer dans les comparaisons, utilise plutôt l'interrupteur dans la liste des magasins.</p>`, (c) => {
     $('#mfAdr', c).onchange = () => S.maj((x) => { x.magasins.find((y) => y.id === m.id).adresse = $('#mfAdr', c).value.trim(); });
     $('#mfReleve', c).onclick = () => { fermerModale(); ouvrirReleve(m.id); allerOnglet('plus'); };
-    $('#mfSup', c).onclick = () => {
-      if (!confirm(`Retirer ${m.nom} de tes magasins ?`)) return;
-      S.maj((x) => { x.magasins = x.magasins.filter((y) => y.id !== m.id); x.rabaisPerso = x.rabaisPerso.filter((r) => r.magasinId !== m.id); });
-      fermerModale(); toast(`${m.nom} retiré`);
-    };
+    $('#mfSup', c).onclick = () => { fermerModale(); retirerMagasin(m.id); };
   });
 }
 
-/** Succursales d'une bannière près d'une ville / d'un code postal (OpenStreetMap Nominatim, 1 requête). */
-async function chercherSuccursales(nomBanniere, ville) {
-  const p = new URLSearchParams({ q: `${nomBanniere}, ${ville}, Québec`, format: 'jsonv2', addressdetails: 1, limit: 8, countrycodes: 'ca' });
-  const r = await fetch(`https://nominatim.openstreetmap.org/search?${p}`);
-  const j = await r.json();
-  const cle = sansAccents(nomBanniere).replace(/\s/g, '');
-  return j.filter((x) => sansAccents(x.name || x.display_name).replace(/\s/g, '').includes(cle)).map((x) => {
-    const a = x.address || {};
-    const ville2 = a.city || a.town || a.village || a.municipality || '';
-    const cp = (a.postcode || '').toUpperCase();
-    const adresse = [[a.house_number, a.road].filter(Boolean).join(', '), ville2, cp ? `QC ${cp}` : 'QC'].filter(Boolean).join(', ');
-    return { nom: x.name || nomBanniere, adresse, ville: ville2, fsa: cp.slice(0, 3) || ville2 || '?', lat: Number(x.lat), lng: Number(x.lon) };
-  });
-}

@@ -56,9 +56,76 @@ export let memoirePleine = false;
 let etat = null;
 const abonnes = new Set();
 
-export function charger() {
+// ---------------------------------------------------------------------
+// v133 (23 nov. 2026) : les données vont dans IndexedDB (grande mémoire du navigateur, celle des photos).
+// localStorage est limité à ≈ 5 Mo et ne suffisait plus (« Mémoire du téléphone pleine »).
+// Au premier démarrage, les données de localStorage sont recopiées dans IndexedDB, puis retirées de localStorage.
+// ---------------------------------------------------------------------
+const DB_DONNEES = 'epicerie-donnees';
+let dbDonnees = null;      // ouverte et lue avec succès → les sauvegardes vont là
+function ouvrirDonnees() {
+  return new Promise((ok, ko) => {
+    const r = indexedDB.open(DB_DONNEES, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => ko(r.error);
+  });
+}
+function lireKV(db, cle) {
+  return new Promise((ok, ko) => { const r = db.transaction('kv').objectStore('kv').get(cle); r.onsuccess = () => ok(r.result ?? null); r.onerror = () => ko(r.error); });
+}
+function ecrireKV(db, cle, valeur) {
+  return new Promise((ok, ko) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(valeur, cle); tx.oncomplete = ok; tx.onerror = () => ko(tx.error); tx.onabort = () => ko(tx.error); });
+}
+
+/** Démarrage : lit les données dans IndexedDB (ou les y déménage depuis localStorage). Sans IndexedDB : comme avant. */
+export async function demarrer() {
   try {
-    const brut = localStorage.getItem(CLE);
+    const db = await ouvrirDonnees();
+    let brut = await lireKV(db, 'etat');
+    const depuisLocal = !brut;
+    if (depuisLocal) brut = localStorage.getItem(CLE);
+    preparer(brut);
+    dbDonnees = db;
+    if (migrationAEnregistrer && !depuisLocal) { await ecrireKV(db, 'etat', JSON.stringify(etat)); migrationAEnregistrer = false; }
+    if (depuisLocal && brut) {
+      await ecrireKV(db, 'etat', JSON.stringify(etat));     // copie vérifiée avant de libérer localStorage
+      if (await lireKV(db, 'etat')) try { localStorage.removeItem(CLE); } catch { /* rien */ }
+    }
+  } catch (err) {
+    console.warn('IndexedDB indisponible : données dans localStorage', err);
+    dbDonnees = null;
+    if (!etat) charger();
+  }
+  return etat;
+}
+
+let minuterieEcriture = null;
+function ecrireMaintenant() {
+  clearTimeout(minuterieEcriture); minuterieEcriture = null;
+  if (!dbDonnees || !etat) return;
+  ecrireKV(dbDonnees, 'etat', JSON.stringify(etat)).then(() => { memoirePleine = false; }).catch((e) => signalerPlein(e));
+}
+function signalerPlein(e) {
+  console.warn('Sauvegarde impossible', e);
+  // Signalé une fois par ouverture de l'app (app.js affiche l'avertissement)
+  if (!memoirePleine) { memoirePleine = true; try { window.dispatchEvent(new CustomEvent('epicerie:memoire-pleine')); } catch { /* hors navigateur */ } }
+}
+try {
+  addEventListener('pagehide', () => { if (minuterieEcriture) ecrireMaintenant(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && minuterieEcriture) ecrireMaintenant(); });
+} catch { /* hors navigateur (tests) */ }
+
+let migrationAEnregistrer = false;
+export function charger() {
+  try { preparer(localStorage.getItem(CLE)); } catch { etat = etatDemo(); }
+  if (migrationAEnregistrer) try { localStorage.setItem(CLE, JSON.stringify(etat)); migrationAEnregistrer = false; } catch (err) { console.warn('Migration non enregistrée', err); }
+  return etat;
+}
+
+/** Données lues (texte JSON ou null) → état prêt : migrations, normalisation. */
+function preparer(brut) {
+  try {
     const lu = brut ? JSON.parse(brut) : null;
     const versionLue = lu?.version || 1;
     // v115 (accord de Chris, 2026-11-22) : la copie d'avant la migration v3 prenait la moitié de la mémoire du
@@ -67,9 +134,7 @@ export function charger() {
     etat = lu ? migrer(lu) : etatDemo();
     // Migration faite : on l'enregistre tout de suite (sinon elle serait refaite à chaque ouverture)
     // (essai séparé : un échec ici ne doit JAMAIS faire tomber dans le cas « données de démo » plus bas)
-    if (lu && etat.version !== versionLue) {
-      try { normaliserProduits(etat); localStorage.setItem(CLE, JSON.stringify(etat)); } catch (err) { console.warn('Migration non enregistrée', err); }
-    }
+    migrationAEnregistrer = !!(lu && etat.version !== versionLue);
   } catch {
     etat = etatDemo();
   }
@@ -84,10 +149,11 @@ export function sauver() {
   // Garde la structure produit → variantes cohérente après chaque modification,
   // une synchro (téléphone encore en v30), un import ou une réinitialisation.
   try { normaliserProduits(etat); } catch (e) { console.warn('Variantes', e); }
-  try { localStorage.setItem(CLE, JSON.stringify(etat)); memoirePleine = false; } catch (e) {
-    console.warn('Sauvegarde impossible', e);
-    // Signalé une fois par ouverture de l'app (app.js affiche l'avertissement)
-    if (!memoirePleine) { memoirePleine = true; try { window.dispatchEvent(new CustomEvent('epicerie:memoire-pleine')); } catch { /* hors navigateur */ } }
+  if (dbDonnees) {   // IndexedDB : écriture regroupée (250 ms), immédiate si l'app passe en arrière-plan
+    clearTimeout(minuterieEcriture);
+    minuterieEcriture = setTimeout(ecrireMaintenant, 250);
+  } else {
+    try { localStorage.setItem(CLE, JSON.stringify(etat)); memoirePleine = false; } catch (e) { signalerPlein(e); }
   }
   abonnes.forEach((f) => f(etat));
 }
