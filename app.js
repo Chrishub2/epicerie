@@ -2134,6 +2134,9 @@ function vueMagasins(v) {
   } else liste = mags.map(ligne).join('');
   v.innerHTML = `<h2 style="margin-top:0">Mes magasins</h2>
     <div class="seg-tri" role="group" aria-label="Affichage"><button data-tri="proximite" class="${tri === 'proximite' ? 'actif' : ''}">Par proximité</button><button data-tri="banniere" class="${tri === 'banniere' ? 'actif' : ''}">Par bannière</button></div>
+    <div class="mag-ligne" style="margin-bottom:6px">
+      <label class="interrupteur" title="Distances depuis ma position"><input type="checkbox" id="mMaPosition" ${orig?.mode === 'position' ? 'checked' : ''}><span></span></label>
+      <label for="mMaPosition" class="grandir" style="cursor:pointer">📍 Ma position<small class="doux mag-sous" style="display:block">${orig?.mode === 'position' ? 'Distances depuis où tu es' : `Distances depuis ${esc(orig?.nom || 'ton premier secteur')}`}</small></label></div>
     ${liste || '<p class="doux">Aucun magasin. Ajoute-en un plus bas.</p>'}
     <h3 class="titre-cp" style="margin-top:22px">Ajouter un magasin</h3>
     <div class="carte">
@@ -2147,11 +2150,16 @@ function vueMagasins(v) {
   // Point de départ : affiché, et situé au besoin (première fois) ; les distances apparaissent alors
   const autour = () => {
     const o = lireLocal(CLE_ORIGINE_MAG);
-    $('#mAutour', v).innerHTML = `Autour de ${o ? esc(o.mode === 'position' ? 'ma position' : o.nom) : 'ton premier secteur'}, 100 km · <a href="#" id="mPosition">📍 Ma position</a>${o?.mode === 'position' ? ' · <a href="#" id="mSecteur">mon secteur</a>' : ''}`;
+    $('#mAutour', v).textContent = `Autour de ${o ? (o.mode === 'position' ? 'ma position' : o.nom) : 'ton premier secteur'}, 100 km`;
+    // Interrupteur 📍 Ma position : ON = distances depuis où tu es ; OFF = depuis ton secteur.
+    // S'il n'obtient pas la position (refus, délai), il revient à OFF.
+    const interr = $('#mMaPosition', v);
     const localiser = () => {
-      if (!navigator.geolocation) { toast('Position non disponible sur ce téléphone'); return; }
+      if (!navigator.geolocation) { toast('Position non disponible sur ce téléphone'); interr.checked = false; return; }
+      interr.disabled = true;
       navigator.geolocation.getCurrentPosition((p) => { fermerModale(); ecrireLocal(CLE_ORIGINE_MAG, { mode: 'position', nom: 'ma position', lat: p.coords.latitude, lng: p.coords.longitude }); vueMagasins(v); },
         (err) => {
+          interr.disabled = false; interr.checked = false;
           const m = messagePosition(err);
           if (!m.refus) { toast(m.note); return; }
           // Refus retenu par le navigateur : il ne redemandera plus ; on dit où le redonner selon l'appareil
@@ -2164,9 +2172,11 @@ function vueMagasins(v) {
           });
         }, { maximumAge: 600000, timeout: 15000 });
     };
-    $('#mPosition', v).onclick = (ev) => { ev.preventDefault(); localiser(); };
-    const ms = $('#mSecteur', v);
-    if (ms) ms.onclick = (ev) => { ev.preventDefault(); try { localStorage.removeItem(CLE_ORIGINE_MAG); } catch { /* rien */ } origineMagasins().then(() => vueMagasins(v)); };
+    interr.onchange = () => {
+      if (interr.checked) { localiser(); return; }
+      try { localStorage.removeItem(CLE_ORIGINE_MAG); } catch { /* rien */ }
+      origineMagasins().then(() => vueMagasins(v));
+    };
   };
   autour();
   if (!orig) origineMagasins().then((o) => { if (o && document.body.contains(v)) vueMagasins(v); });
