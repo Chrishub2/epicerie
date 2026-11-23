@@ -1,12 +1,10 @@
 // =====================================================================
-// Appareil photo des reçus : cadre JAUNE vertical pour centrer le reçu,
-// une ou plusieurs photos (reçu long = plusieurs sections, de haut en bas).
-// Seule la zone dans le cadre est gardée. Secours : appareil photo du téléphone.
+// Appareil photo des reçus : plein écran, sans cadre ni zone ombrée (demande de Chris, 22 nov. 2026 :
+// le cadre coupait les bords du reçu). Une ou plusieurs photos (reçu long = plusieurs sections,
+// de haut en bas). L'image complète de la caméra est gardée. Secours : appareil photo du téléphone.
 // =====================================================================
 import { toast } from './ui.js';
 import { prendrePhoto } from './ocr.js';
-
-const CADRE = { largeur: 0.62, hauteur: 0.86 }; // proportion de l'image (reçu = long et étroit)
 
 /** Ouvre la caméra ; résout avec un tableau de photos (Blob), dans l'ordre, ou [] si annulé. */
 export function photographierRecu() {
@@ -27,7 +25,7 @@ export function photographierRecu() {
     ecran.className = 'camera-recu';
     ecran.innerHTML = `
       <video playsinline muted autoplay></video>
-      <div class="cadre-jaune"><div class="cam-raccord" hidden><img alt=""><em>Aligne ici le bas de la photo précédente</em></div><span>Centre le reçu dans le cadre jaune</span></div>
+      <div class="cadre-jaune"><div class="cam-raccord" hidden><img alt=""><em>Aligne ici le bas de la photo précédente</em></div><span>Tout le reçu doit paraître à l'écran</span></div>
       <div class="cam-haut"><b id="camCompte">Section 1</b><span class="doux-blanc">Reçu long : prends le haut, puis la suite.</span></div>
       <div class="cam-bas">
         <button class="cam-btn sec" id="camAnnuler">Annuler</button>
@@ -69,16 +67,10 @@ export function photographierRecu() {
     ecran.querySelector('#camPrendre').onclick = async () => {
       const vw = video.videoWidth, vh = video.videoHeight;
       if (!vw) { demarrer(); toast('La caméra démarre… réessaie dans un instant.'); return; }
-      // La vidéo remplit l'écran (object-fit: cover) : on retrouve la zone du cadre dans l'image réelle
-      const ew = ecran.clientWidth, eh = ecran.clientHeight;
-      const k = Math.max(ew / vw, eh / vh);
-      const dx = (vw * k - ew) / 2, dy = (vh * k - eh) / 2;
-      const cw = ew * CADRE.largeur, ch = eh * CADRE.hauteur;
-      const cx = (ew - cw) / 2, cy = (eh - ch) / 2;
-      const sx = (cx + dx) / k, sy = (cy + dy) / k, sw = cw / k, sh = ch / k;
+      // Image complète de la caméra : rien n'est coupé
       const c = document.createElement('canvas');
-      c.width = Math.round(sw); c.height = Math.round(sh);
-      c.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      c.width = vw; c.height = vh;
+      c.getContext('2d').drawImage(video, 0, 0, vw, vh);
       const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.88));
       photos.push(blob);
       navigator.vibrate?.(40);

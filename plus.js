@@ -543,7 +543,7 @@ function vueReleve(v) {
  */
 export async function nouveauRecu(opts = {}) {
   fermerModale(); // la caméra doit passer devant (une fenêtre ouverte la cacherait)
-  const blobs = await photographierRecu(); // cadre jaune, 1 ou plusieurs sections
+  const blobs = await photographierRecu(); // plein écran sans cadre, 1 ou plusieurs sections
   if (!blobs.length) return;
   const { iaDisponible, lireRecu } = await import('./ocr.js');
   if (!iaDisponible()) {
