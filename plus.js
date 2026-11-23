@@ -612,7 +612,7 @@ export async function nouveauRecu(opts = {}) {
   }
   const R = await import('./recu.js');
   ouvrirModale('Vérification du reçu', `<div id="rvVerdict"><div class="lecture-prog" id="rvProg"></div></div>
-    <p class="doux">Le reçu entier, tel que je le vois :</p><div id="rvEntier"></div><div id="rvActions" class="rang envelopper" style="margin-top:10px"></div>`, async (c) => {
+    <p class="doux">Le reçu entier, tel que je le vois :</p><div id="rvEntier"></div><div id="rvActions" class="rv-actions"></div>`, async (c) => {
     R.apercuEntier(blobs, $('#rvEntier', c));
     const prog = barreLecture($('#rvProg', c), blobs.length);
     let lu;
@@ -627,13 +627,18 @@ export async function nouveauRecu(opts = {}) {
             ${v.ecart.suspects.length ? `<ul>${v.ecart.suspects.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
             Reprendre les photos n'aide pas pour une ligne mal lue. Enregistre le reçu ; vérifie seulement ${v.ecart.suspects.length ? 'les lignes ci-dessus' : 'les lignes du reçu'} dans « Mes reçus ».<br><span class="doux">${esc(v.resume)}</span></div>`
         : `<div class="alerte">⚠️ <b>${v.incertain ? 'Je ne peux pas confirmer ce reçu.' : 'Reçu incomplet ou mal lu — reprends les photos.'}</b><ul>${v.problemes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${v.resume ? `<span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
-    $('#rvActions', c).innerHTML = v.ok
-      ? '<button class="btn" id="rvOk">✓ Enregistrer et remplir ma liste</button><button class="btn sec" id="rvRefaire">📷 Reprendre</button>'
-      : v.photosOk
-        ? '<button class="btn" id="rvOk">✓ Enregistrer le reçu</button><button class="btn sec" id="rvRefaire">📷 Reprendre</button>'
-        : '<button class="btn" id="rvRefaire">📷 Reprendre les photos</button><button class="btn sec" id="rvOk">Garder quand même</button>';
-    $('#rvRefaire', c).onclick = () => nouveauRecu(opts);
-    $('#rvOk', c).onclick = async () => {
+    // Barre collée au bas de la fenêtre, toujours visible pendant qu'on fait défiler la photo du reçu
+    $('#rvActions', c).innerHTML = v.ok || v.photosOk
+      ? `<button class="btn rv-principal" id="rvOk">✓ Enregistrer ce reçu</button>
+         <div class="rv-note">Rien n'est gardé tant que tu n'as pas touché ce bouton.</div>
+         <button class="btn sec rv-second" id="rvRefaire">📷 Reprendre les photos</button>`
+      : `<button class="btn rv-principal" id="rvRefaire">📷 Reprendre les photos</button>
+         <button class="btn sec rv-second" id="rvOk">Enregistrer quand même</button>`;
+    // Fermer (✕, Échap, Retour) sans choisir ne jette plus une lecture réussie : on demande d'abord.
+    let decide = false;
+    $('#rvRefaire', c).onclick = () => { decide = true; nouveauRecu(opts); };
+    const enregistrerLu = async () => {
+      decide = true;
       const q = await questionsPanier(opts); // ce reçu correspond-il au panier ? retirer les cochés ensuite ?
       const id = await enregistrerRecu(blobs, lu, q.lienListe);
       ouvrirModale('Enregistrement du reçu', '<div id="rvEtat" class="alerte">⏳ J\'enregistre ton reçu…</div>');
@@ -650,6 +655,16 @@ export async function nouveauRecu(opts = {}) {
       }
       apresApplication(id);
     };
+    $('#rvOk', c).onclick = enregistrerLu;
+    if (lu?.source === 'ia') {   // une lecture par l'IA a coûté ~1 min : on ne la perd pas sur un ✕
+      quandFermee(async () => {
+        if (decide) return;
+        const rep = await demander('Garder ce reçu ?',
+          `<p>Ta lecture${v.ok ? ' est complète, mais elle' : ''} n'est pas encore enregistrée. Si tu l'oublies, il faudra reprendre les photos.</p>`,
+          [['garder', '✓ Enregistrer le reçu'], ['oublier', 'Non, l\'oublier']], 'garder');
+        if (rep === 'garder') enregistrerLu();
+      });
+    }
   });
 }
 
@@ -964,7 +979,7 @@ function vueRecus(v) {
   const e = S.get();
   const recus = e.recus || [];
   v.innerHTML = retour() + `<button class="btn" id="nouvRecu" style="width:100%;margin-bottom:10px">📷 Photographier un reçu</button>
-    <p class="doux">Centre le reçu dans le cadre jaune. Reçu long : prends-le en plusieurs sections, de haut en bas ; le bas de la photo précédente s'affiche en haut du cadre pour que les photos se chevauchent. Je te montre ensuite le reçu entier et je te confirme s'il est complet, sinon je te demande de reprendre.</p>`
+    <p class="doux">Tout le reçu doit paraître à l'écran. Reçu long : prends-le en plusieurs sections, de haut en bas ; le bas de la photo précédente s'affiche en haut de l'écran pour que les photos se chevauchent. La lecture prend environ une minute, puis touche « ✓ Enregistrer » pour garder le reçu.</p>`
     + (recus.length ? recus.map((r) => `<div class="carte" data-recu="${r.id}" style="cursor:pointer"><div class="rang">
         <b class="grandir">${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'} · ${esc(r.date || r.cree.slice(0, 10))}</b><b>${r.total != null ? argent(r.total) : ''}</b></div>
         <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : `${(r.lignes || []).length} ligne(s) · ✓ ${(r.lignes || []).filter((l) => etatLigne(l) === 'ok').length} · ! ${(r.lignes || []).filter((l) => etatLigne(l) === 'verifier').length} · ✗ ${(r.lignes || []).filter((l) => etatLigne(l) === 'aucun').length}${r.verification?.complet === false ? ' · ⚠️ à vérifier' : ''}`} · ${(r.photoIds || [1]).length} photo(s) · par ${esc(r.par || '')}</div></div>`).join('')

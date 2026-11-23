@@ -330,6 +330,13 @@ button.icone { font-size: 20px; width: 44px; height: 44px; border-radius: 10px; 
 .liste-arret li::before { content: "•"; position: absolute; left: 0; color: var(--doux); }
 .liste-arret li .doux { white-space: nowrap; }
 .alerte { border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+/* Vérification du reçu : boutons collés au bas de la fenêtre (toujours visibles), enregistrement en grand */
+.rv-actions { position: sticky; bottom: -14px; margin: 12px -14px -14px; padding: 10px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--carte); border-top: 1px solid var(--ligne); box-shadow: 0 -6px 14px rgba(0,0,0,.18); display: grid; gap: 6px; }
+.rv-actions:empty { display: none; }
+button.btn.rv-principal { width: 100%; min-height: 54px; font-size: 18px; font-weight: 700; border-radius: 14px; }
+button.btn.rv-second { width: 100%; }
+.rv-note { font-size: 12px; color: var(--doux); text-align: center; }
 /* Barre de progression de la lecture d'un reçu (remplissage seulement, aucun autre mouvement) */
 .lecture-prog { background: var(--accent-doux); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
 .lp-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 14px; color: var(--texte); }
