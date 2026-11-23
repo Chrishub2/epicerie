@@ -330,6 +330,14 @@ button.icone { font-size: 20px; width: 44px; height: 44px; border-radius: 10px; 
 .liste-arret li::before { content: "•"; position: absolute; left: 0; color: var(--doux); }
 .liste-arret li .doux { white-space: nowrap; }
 .alerte { border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+/* Barre de progression de la lecture d'un reçu (remplissage seulement, aucun autre mouvement) */
+.lecture-prog { background: var(--accent-doux); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.lp-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 14px; color: var(--texte); }
+.lp-tete span { font-variant-numeric: tabular-nums; color: var(--doux); }
+.lp-rail { height: 10px; border-radius: 5px; background: var(--carte); margin: 8px 0 6px; overflow: hidden; }
+.lp-plein { height: 100%; width: 0; background: var(--accent); border-radius: 5px; transition: width 1s linear; }
+.lp-note { font-size: 12px; color: var(--doux); }
+@media (prefers-reduced-motion: reduce) { .lp-plein { transition: none; } }
 /* Reçu : une ligne par produit, état ✓ / ! / ✗ */
 .rc-liste { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--ligne); }
 .rc-l { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--ligne); cursor: pointer; font-size: 14px; }

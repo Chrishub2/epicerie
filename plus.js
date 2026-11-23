@@ -541,6 +541,60 @@ function vueReleve(v) {
  *  - sans réseau / sans IA : gardé et lu plus tard (file d'attente).
  * Exporté pour le bouton de la liste.
  */
+// ---------------------------------------------------------------------
+// Barre de progression de la lecture d'un reçu.
+// La lecture est UNE demande à l'IA : on ne reçoit aucun avancement réel. La barre suit donc
+// le temps écoulé par rapport à la durée HABITUELLE, mesurée sur tes dernières lectures
+// (≈ 33 s par photo au départ : 63 à 72 s pour 2 photos le 22 nov. 2026). Les secondes écoulées
+// montrent que l'app travaille ; au-delà de l'estimation, elle le dit au lieu de rester figée.
+// ---------------------------------------------------------------------
+const CLE_DUREES = 'epicerie.dureesLecture';   // [secondes par photo], 5 dernières lectures
+function secondesParPhoto() {
+  try {
+    const d = JSON.parse(localStorage.getItem(CLE_DUREES) || '[]').filter((x) => x > 5 && x < 300);
+    if (d.length) return d.reduce((s, x) => s + x, 0) / d.length;
+  } catch { /* navigation privée : valeur par défaut */ }
+  return 33;
+}
+function noterDuree(secParPhoto) {
+  try {
+    const d = JSON.parse(localStorage.getItem(CLE_DUREES) || '[]');
+    localStorage.setItem(CLE_DUREES, JSON.stringify([...d, Math.round(secParPhoto)].slice(-5)));
+  } catch { /* rien à garder */ }
+}
+const duree = (s) => (s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${String(s % 60).padStart(2, '0')} s` : ''}`);
+
+/** Affiche la barre dans `zone` ; retourne { fin(reussie) } à appeler quand la lecture est terminée.
+ *  Seule une lecture réussie par l'IA sert à l'estimation suivante (un échec rapide la fausserait). */
+function barreLecture(zone, nPhotos) {
+  const estime = Math.max(20, Math.round(secondesParPhoto() * nPhotos));
+  const debut = Date.now();
+  zone.innerHTML = `<div class="lp-tete"><b id="lpEtape">Envoi des photos…</b><span id="lpTemps">0 s</span></div>
+    <div class="lp-rail" role="progressbar" aria-label="Lecture du reçu" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="lp-plein" id="lpPlein"></div></div>
+    <div class="lp-note" id="lpNote">Environ ${duree(estime)} pour ${nPhotos} photo${nPhotos > 1 ? 's' : ''}. Garde l'app ouverte.</div>`;
+  const plein = zone.querySelector('#lpPlein'), rail = zone.querySelector('.lp-rail');
+  const tic = () => {
+    const t = (Date.now() - debut) / 1000;
+    // 0 → 90 % jusqu'à l'estimation, puis on approche lentement de 97 % (jamais 100 % avant la fin réelle)
+    const p = t < estime ? 90 * t / estime : 90 + 7 * (1 - Math.exp(-(t - estime) / estime));
+    plein.style.width = `${p.toFixed(1)}%`;
+    rail.setAttribute('aria-valuenow', String(Math.round(p)));
+    zone.querySelector('#lpTemps').textContent = duree(Math.floor(t));
+    zone.querySelector('#lpEtape').textContent = t < 4 ? 'Envoi des photos…' : p < 80 ? 'Lecture des lignes du reçu…' : 'Vérification des totaux…';
+    if (t > estime) zone.querySelector('#lpNote').textContent = `Plus long que d'habitude (environ ${duree(estime)}), mais toujours en cours. Garde l'app ouverte.`;
+  };
+  tic();
+  const minuterie = setInterval(tic, 1000);
+  return {
+    fin(reussie = false) {
+      clearInterval(minuterie);
+      if (reussie) noterDuree((Date.now() - debut) / 1000 / Math.max(1, nPhotos));
+      plein.style.width = '100%';
+      rail.setAttribute('aria-valuenow', '100');
+    },
+  };
+}
+
 export async function nouveauRecu(opts = {}) {
   fermerModale(); // la caméra doit passer devant (une fenêtre ouverte la cacherait)
   const blobs = await photographierRecu(); // plein écran sans cadre, 1 ou plusieurs sections
@@ -557,10 +611,12 @@ export async function nouveauRecu(opts = {}) {
     return;
   }
   const R = await import('./recu.js');
-  ouvrirModale('Vérification du reçu', `<div id="rvVerdict"><div class="alerte">⏳ Je lis et je vérifie ton reçu (${blobs.length} photo(s))… environ 20 à 40 secondes.</div></div>
+  ouvrirModale('Vérification du reçu', `<div id="rvVerdict"><div class="lecture-prog" id="rvProg"></div></div>
     <p class="doux">Le reçu entier, tel que je le vois :</p><div id="rvEntier"></div><div id="rvActions" class="rang envelopper" style="margin-top:10px"></div>`, async (c) => {
     R.apercuEntier(blobs, $('#rvEntier', c));
-    const lu = await lireRecu(blobs, undefined, R.nomsListe(), R.attendusListe());
+    const prog = barreLecture($('#rvProg', c), blobs.length);
+    let lu;
+    try { lu = await lireRecu(blobs, undefined, R.nomsListe(), R.attendusListe()); } finally { prog.fin(lu?.source === 'ia'); }
     if (!$('#rvVerdict', c)) return; // fenêtre fermée ou remplacée entre-temps
     const v = R.verifierRecu(lu);
     $('#rvVerdict', c).innerHTML = v.ok
