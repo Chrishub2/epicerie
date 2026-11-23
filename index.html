@@ -295,6 +295,18 @@ nav.onglets button { flex: 1; border: 0; background: none; color: var(--doux); p
   font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
 nav.onglets button span { font-size: 20px; }
 nav.onglets button.actif { color: var(--accent); font-weight: 600; }
+/* Liste des reçus : tableau Magasin · Date · Total, bouton photo flottant au-dessus des onglets */
+.recus-tab { width: 100%; border-collapse: collapse; font-size: 16px; margin-bottom: 96px; }
+.recus-tab th { text-align: left; font-size: 13px; font-weight: 400; color: var(--doux); padding: 6px 8px; border-bottom: 1px solid var(--ligne); }
+.recus-tab td { padding: 14px 8px; border-bottom: 1px solid var(--ligne); }
+.recus-tab tbody tr { cursor: pointer; }
+.recus-tab tbody tr:active td { background: var(--fond); }
+.recus-tab .p { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.recus-tab th.p { font-weight: 400; }
+.recus-tab .d { color: var(--doux); font-variant-numeric: tabular-nums; }
+.btn.recu-flottant { position: fixed; z-index: 7; left: 16px; right: 16px; max-width: 688px; margin: 0 auto;
+  bottom: calc(68px + env(safe-area-inset-bottom)); padding: 16px; font-size: 18px; border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3); }
 .carte { background: var(--carte); border-radius: 12px; box-shadow: var(--ombre); border: 1px solid var(--ligne);
   padding: 12px; margin-bottom: 12px; }
 h2 { font-size: 17px; margin: 4px 0 10px; }

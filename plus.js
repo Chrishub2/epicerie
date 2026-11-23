@@ -988,13 +988,17 @@ async function choisirLigne(r, cands, p) {
 
 function vueRecus(v) {
   const e = S.get();
-  const recus = e.recus || [];
-  v.innerHTML = retour() + `<button class="btn" id="nouvRecu" style="width:100%;margin-bottom:10px">📷 Photographier un reçu</button>
-    <p class="doux">Tout le reçu doit paraître à l'écran. Reçu long : prends-le en plusieurs sections, de haut en bas ; le bas de la photo précédente s'affiche en haut de l'écran pour que les photos se chevauchent. La lecture prend environ une minute, puis touche « ✓ Enregistrer » pour garder le reçu.</p>`
-    + (recus.length ? recus.map((r) => `<div class="carte" data-recu="${r.id}" style="cursor:pointer"><div class="rang">
-        <b class="grandir">${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'} · ${esc(r.date || r.cree.slice(0, 10))}</b><b>${r.total != null ? argent(r.total) : ''}</b></div>
-        <div class="doux">${r.statut === 'à lire' ? '⏳ En attente de lecture (réseau)' : `${(r.lignes || []).length} ligne(s) · ✓ ${(r.lignes || []).filter((l) => etatLigne(l) === 'ok').length} · ! ${(r.lignes || []).filter((l) => etatLigne(l) === 'verifier').length} · ✗ ${(r.lignes || []).filter((l) => etatLigne(l) === 'aucun').length}${r.verification?.complet === false ? ' · ⚠️ à vérifier' : ''}`} · ${(r.photoIds || [1]).length} photo(s) · par ${esc(r.par || '')}</div></div>`).join('')
-      : '<div class="vide">Aucun reçu. Après l\'épicerie, prends ton reçu en photo.</div>');
+  const jour = (r) => r.date || (r.cree || '').slice(0, 10);
+  const recus = [...(e.recus || [])].sort((a, b) => jour(b).localeCompare(jour(a)) || (b.cree || '').localeCompare(a.cree || ''));
+  const dateLisible = (d) => { const x = new Date(`${d}T12:00`); return isNaN(x) ? d : x.toLocaleDateString('fr-CA', { day: 'numeric', month: 'short', year: 'numeric' }); };
+  v.innerHTML = retour()
+    + (recus.length ? `<table class="recus-tab"><thead><tr><th>Magasin</th><th>Date</th><th class="p">Total</th></tr></thead><tbody>`
+      + recus.map((r) => `<tr data-recu="${r.id}"><td>${r.banniere ? esc(PROGRAMMES_NOMS[r.banniere] || r.banniere) : 'Magasin ?'}</td>
+        <td class="d">${esc(dateLisible(jour(r)))}</td>
+        <td class="p">${r.statut === 'à lire' ? '<span class="doux">En lecture…</span>' : r.total != null ? argent(r.total) : '—'}</td></tr>`).join('')
+      + '</tbody></table>'
+      : '<div class="vide">Aucun reçu. Après l\'épicerie, prends ton reçu en photo.</div>')
+    + '<button class="btn recu-flottant" id="nouvRecu">📷 Photographier un reçu</button>';
   brancherRetour(v);
   $('#nouvRecu', v).onclick = nouveauRecu;
   $$('[data-recu]', v).forEach((el) => el.onclick = () => ouvrirDetailRecu(el.dataset.recu));
