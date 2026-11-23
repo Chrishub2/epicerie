@@ -776,9 +776,26 @@ function ouvrirBulleProduit(btn, a, o) {
   b.innerHTML = `${photos.length ? `<div class="bp-photo"><span class="panier-tourne bp-attente"><span class="pt-rond"><span class="pt-anneau"></span><span class="pt-chariot" aria-hidden="true">🛒</span></span></span><img alt="" hidden></div>` : ''}<b>${esc(nom)}</b>
     <small>${esc([prixFormatVendu(o), estRabais(o) ? 'en rabais' : ''].filter(Boolean).join(' · '))}</small>
     ${o.douteux ? `<small class="bp-doute">⚠ Prix inhabituel (${String(o.douteux).replace('.', ',')} fois les autres) : à vérifier</small>` : ''}
-    <span class="bp-ban">${esc(nomBanniere(o.banniere))}</span>`;
+    <span class="bp-ban">${esc(nomBanniere(o.banniere))}</span>
+    ${o.id && !o.perso ? '<div class="bp-retirer"><button type="button" class="bp-r1">Retirer ce prix</button></div>' : ''}`;
   document.body.appendChild(b);
   bulleProduit = b;
+  // v142 (demande de Chris) : retirer UN prix qu'il sait faux. Deux touchers (confirmation dans la fenêtre).
+  // Le prix est annulé (annule + raison), pas effacé : il sort de tous les calculs et reste dans l'historique.
+  const zone = b.querySelector('.bp-retirer');
+  if (zone) zone.querySelector('.bp-r1').onclick = () => {
+    zone.innerHTML = `<small>Retirer ce prix de ${esc(nomBanniere(o.banniere))} ? Il ne comptera plus nulle part.</small>
+      <div class="rang" style="gap:6px;margin-top:4px"><button type="button" class="bp-oui">Oui, retirer</button><button type="button" class="bp-non">Annuler</button></div>`;
+    zone.querySelector('.bp-non').onclick = () => fermerBulleProduit();
+    zone.querySelector('.bp-oui').onclick = () => {
+      S.maj((x) => {
+        const p = x.prix.find((y) => y.id === o.id);
+        if (p) { p.annule = true; p.annuleRaison = 'retiré à la main (prix faux)'; p.annuleLe = new Date().toISOString(); }
+      });
+      fermerBulleProduit();
+      toast(`Prix retiré : ${o.offre || ''} chez ${nomBanniere(o.banniere)}`);
+    };
+  };
   if (photos.length) {
     const img = b.querySelector('img'), attente = b.querySelector('.bp-attente');
     let i = 0;

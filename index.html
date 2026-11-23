@@ -297,6 +297,12 @@ tr.se-vide > td, .item-liste.se-vide { opacity: 0; transition: opacity .22s; }
 .bulle-produit .bp-attente .pt-rond { width: 46%; }
 .bulle-produit .bp-doute { color: #8a5a00; margin-top: 2px; }
 .bulle-produit img[hidden] { display: none; }
+/* v142 : retirer un prix faux (deux touchers) */
+.bulle-produit .bp-retirer { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ligne); }
+.bulle-produit .bp-retirer button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--ligne); background: var(--fond); color: var(--texte); }
+.bulle-produit .bp-r1 { color: var(--rouge); }
+.bulle-produit .bp-oui { background: var(--rouge); border-color: var(--rouge); color: #fff; }
 .bulle-produit { position: absolute; z-index: 60; width: 200px; background: var(--carte); color: var(--texte); border: 1px solid var(--ligne); border-radius: 12px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, .22); padding: 10px; }
 .bulle-produit img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; border-radius: 8px; }
