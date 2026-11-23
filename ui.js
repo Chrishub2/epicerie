@@ -303,11 +303,30 @@ export function nomOffre(o) { return o.magasinNom || nomBanniereVille(o.banniere
 
 export { libelleUnitaire };
 
-/** Petite notification en bas d'écran. */
+/** Petite notification en bas d'écran, avec ✕ pour la fermer.
+ *  Courte (« Lait ajouté ») : disparaît seule après 2,6 s. Longue : reste jusqu'au ✕ (demande de Chris, 23 nov. 2026 : pas le temps de la lire). */
 export function toast(msg) {
+  let pile = document.getElementById('pileNotes');
+  if (!pile) {
+    pile = document.createElement('div');
+    pile.id = 'pileNotes';
+    pile.style.cssText = 'position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:50;display:flex;flex-direction:column;gap:6px;width:max-content;max-width:92vw';
+    document.body.appendChild(pile);
+  }
   const t = document.createElement('div');
-  t.textContent = msg;
-  t.style.cssText = 'position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#1d2320;color:#fff;padding:8px 14px;border-radius:10px;z-index:50;font-size:14px;max-width:90vw';
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2600);
+  t.setAttribute('role', 'status');
+  t.style.cssText = 'display:flex;align-items:flex-start;gap:6px;background:#1d2320;color:#fff;padding:8px 6px 8px 14px;border-radius:10px;font-size:14px;line-height:1.35;box-shadow:0 4px 14px rgba(0,0,0,.3)';
+  const texte = document.createElement('span');
+  texte.textContent = msg;
+  texte.style.cssText = 'flex:1;padding-top:3px';
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.textContent = '✕';
+  x.setAttribute('aria-label', 'Fermer la note');
+  x.style.cssText = 'flex:none;width:32px;height:28px;border:0;border-radius:8px;background:rgba(255,255,255,.15);color:#fff;font-size:15px;cursor:pointer';
+  x.onclick = () => t.remove();
+  t.append(texte, x);
+  pile.appendChild(t);
+  while (pile.children.length > 3) pile.firstChild.remove();
+  if (String(msg).length <= 40) setTimeout(() => t.remove(), 2600);
 }

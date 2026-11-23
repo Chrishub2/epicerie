@@ -1359,15 +1359,15 @@ function suggerer(txt) {
       const n = r.articles.length;
       const a = r.article;
       const photo = a ? photoDe(a) : photoDe({ generique: r.g, sorte: r.s });
-      const detail = r.niveau === 1 ? `n'importe quelle sorte ou marque · ${n} produit${n > 1 ? 's' : ''}`
-        : r.niveau === 2 ? `n'importe quelle marque · ${n} produit${n > 1 ? 's' : ''}`
+      const detail = r.niveau === 1 ? `Toutes sortes · ${n} produit${n > 1 ? 's' : ''}`
+        : r.niveau === 2 ? `Toutes marques · ${n} produit${n > 1 ? 's' : ''}`
         : [a.marque, formatLisible(a.format)].filter(Boolean).join(' · ') || (m ? nomOffre(m) : '');
       const decale = r.niveau === 3 && r.orpheline ? 0 : r.niveau === 3 ? (r.sousSorte ? 2 : 1) : r.niveau - 1;
       return `<button class="sugg arbre d${decale}" data-arbre="${i}"><span class="niv n${r.niveau}" title="Niveau ${r.niveau}">${r.niveau}</span>
         ${photo ? `<img class="vignette petite" src="${esc(photo)}" alt="">` : '<span class="vignette petite"></span>'}
-        <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(r.nom)}</span>
-        ${detail ? `<span class="doux une-ligne" style="display:block;font-size:12px">${esc(detail)}</span>` : ''}</span>
-        <span class="doux sugg-px">${m ? `${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}<small>${esc(nomOffre(m))}</small>` : ''}</span></button>`;
+        <span class="grandir" style="min-width:0"><span class="sugg-nom">${esc(r.nom)}</span>
+        ${detail ? `<span class="doux sugg-detail">${esc(detail)}</span>` : ''}</span>
+        <span class="doux sugg-px">${m ? `${esc(libelleUnitaire(m.pu, m.uniteRef).split(' · ')[0])}${String(nomOffre(m)).split(' · ').map((x) => `<small>${esc(x)}</small>`).join('')}` : ''}</span></button>`;
     }).join('')
     + (exact ? '' : `<button class="sugg arbre tel-quel" data-telquel="1"><span class="niv">✎</span><span class="vignette petite" style="display:grid;place-items:center">＋</span>
       <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">Mon nom tel quel : « ${esc(tapeNom.trim())} »</span>
