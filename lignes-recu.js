@@ -21,12 +21,15 @@ export function cibleLignes(r) {
  * Les prix lus incluent-ils déjà les rabais ?
  *  'net'  : somme des prix = montant imprimé → le rabais est seulement affiché (déjà déduit) ;
  *  'brut' : somme des prix − rabais = montant imprimé → le rabais est soustrait ;
+ *  'mixte': somme des prix − lignes de rabais NÉGATIVES (rabaisSoustrait) = montant imprimé → les deux
+ *           sortes sur la même facture (IGA : « rabais sur le prix courant » déjà déduit + « rabais
+ *           instantané -1,00 » soustrait) ;
  *  null   : aucun rabais, ou impossible de trancher.
  * Sans montant imprimé, on se fie à l'IA (rabaisDejaDeduit) si elle est unanime.
  */
 export function modeRabais(r) {
   const lignes = r?.lignes || [];
-  const avecRabais = lignes.filter((l) => num(l.rabais) > 0);
+  const avecRabais = lignes.filter((l) => num(l.rabais) > 0 || soustrait(l) > 0);
   if (!avecRabais.length) return null;
   const cible = cibleLignes(r);
   if (cible != null) {
@@ -35,6 +38,8 @@ export function modeRabais(r) {
     const net = Math.abs(somme - cible) <= TOLERANCE, brut = Math.abs(somme - rabais - cible) <= TOLERANCE;
     if (net && !brut) return 'net';
     if (brut && !net) return 'brut';
+    const avecSoustrait = lignes.some((l) => soustrait(l) > 0);
+    if (avecSoustrait && Math.abs(lignes.reduce((s, l) => s + num(l.prix) - soustrait(l), 0) - cible) <= TOLERANCE) return 'mixte';
   }
   const avis = new Set(avecRabais.map((l) => l.rabaisDejaDeduit));
   if (avis.size === 1 && avis.has(true)) return 'net';
@@ -44,8 +49,12 @@ export function modeRabais(r) {
 
 /** Montant réellement payé pour la ligne (toutes unités). Mode inconnu : le rabais est soustrait (comme avant). */
 export function montantNet(l, mode) {
+  if (mode === 'mixte') return num(l.prix) - soustrait(l);
   return mode === 'net' ? num(l.prix) : num(l.prix) - num(l.rabais);
 }
+
+/** Lignes de rabais négatives imprimées sous le produit (« RABAIS INSTANTANÉ -1,00 »), soustraites du sous-total. */
+export function soustrait(l) { return num(l?.rabaisSoustrait); }
 
 /**
  * Pesée de la ligne : { qte, unite: 'kg'|'lb', deduite } ou null.

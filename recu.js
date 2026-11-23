@@ -21,7 +21,7 @@ function ligneCouvre(etat, ligne, articleId) {
   return !!g?.estGenerique && enfantsGenerique(g, etat.articles, familleDe).some((a) => a.id === articleId);
 }
 import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes, reporterAssociations, etatLigne,
-  texteFiche, indexBase, chercherDansBase, achatsDuProduit, resumeAchats } from './lignes-recu.js';
+  texteFiche, indexBase, chercherDansBase, achatsDuProduit, resumeAchats, soustrait } from './lignes-recu.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -131,15 +131,16 @@ export function verifierRecu(r) {
   let concorde = null;
   const cible = cibleLignes(r); // sous-total imprimé, sinon total − taxes
   const mode = modeRabais(r);
+  const sommeMixte = lignes.reduce((s, l) => s + (Number(l.prix) || 0) - soustrait(l), 0);
   if (cible != null && lignes.length) {
-    concorde = Math.abs(somme - cible) <= ECART_MAX || Math.abs(somme - rabais - cible) <= ECART_MAX;
-    if (!concorde) problemes.push(`La somme des produits lus (${argent(mode === 'net' ? somme : somme - rabais)}) ne correspond pas au ${r.sousTotal != null ? 'sous-total imprimé' : 'total moins les taxes'} (${argent(cible)}) : une section manque ou une ligne est mal lue.`);
+    concorde = Math.abs(somme - cible) <= ECART_MAX || Math.abs(somme - rabais - cible) <= ECART_MAX || Math.abs(sommeMixte - cible) <= ECART_MAX;
+    if (!concorde) problemes.push(`La somme des produits lus (${argent(mode === 'net' ? somme : mode === 'mixte' ? sommeMixte : somme - rabais)}) ne correspond pas au ${r.sousTotal != null ? 'sous-total imprimé' : 'total moins les taxes'} (${argent(cible)}) : une section manque ou une ligne est mal lue.`);
   }
   const nbQte = lignes.reduce((s, l) => s + nbArticles(l), 0);
   const ok = !problemes.length && v.complet !== false && v.lisible !== false;
   const resume = `${lignes.length} produit(s) lu(s)${r.nombreArticles != null ? ` (le reçu en annonce ${r.nombreArticles}${Math.round(nbQte) !== r.nombreArticles ? ` ; j'en compte ${Math.round(nbQte)} avec les quantités` : ''})` : ''}`
     + `${r.total != null ? ` · total ${argent(r.total)}` : ''}${concorde ? ` · la somme des lignes concorde avec le ${r.sousTotal != null ? 'sous-total' : 'total moins les taxes'}` : ''}`
-    + `${rabais > 0 ? (mode === 'net' ? ' · rabais déjà déduits des prix imprimés' : mode === 'brut' ? ' · rabais soustraits des prix' : ' · impossible de confirmer si les rabais sont déjà déduits') : ''}.`;
+    + `${rabais > 0 ? (mode === 'net' ? ' · rabais déjà déduits des prix imprimés' : mode === 'brut' ? ' · rabais soustraits des prix' : mode === 'mixte' ? ' · rabais déjà déduits, sauf les rabais instantanés soustraits à la caisse' : ' · impossible de confirmer si les rabais sont déjà déduits') : ''}.`;
   return { ok, problemes: [...new Set(problemes)], resume };
 }
 
@@ -264,7 +265,9 @@ export function htmlLigne(r, i) {
     l.code ? (plu ? `PLU ${esc(plu.plu)}${plu.bio ? ' bio' : ''}` : `Code ${esc(l.code)}`) : '',
     [l.marque, l.format || l.formatEnLigne].filter(Boolean).map(esc).join(' · '),
     l.poids ? esc(l.poids) : pesee(l) ? `${String(pesee(l).qte).replace('.', ',')} kg (pesé)` : l.quantite > 1 ? `Quantité ${l.quantite}` : '',
-    l.rabais ? (mode === 'net' ? `Économie ${argent(l.rabais)} (déjà déduite)` : `Rabais −${argent(l.rabais)}`) : '',
+    l.rabais ? (mode === 'net' ? `Économie ${argent(l.rabais)} (déjà déduite)`
+      : mode === 'mixte' ? `Économie ${argent(l.rabais)}${soustrait(l) ? ` (dont −${argent(soustrait(l))} à la caisse)` : ' (déjà déduite)'}`
+      : `Rabais −${argent(l.rabais)}`) : '',
     cons ? `+ consigne ${argent(cons)}` : '',
   ].filter(Boolean);
   const v = l.verdict || (a?.dernierAchat?.recuId === r.id ? a.dernierAchat : null);
