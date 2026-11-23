@@ -297,6 +297,20 @@ tr.se-vide > td, .item-liste.se-vide { opacity: 0; transition: opacity .22s; }
 .bulle-produit .bp-attente .pt-rond { width: 46%; }
 .bulle-produit .bp-doute { color: #8a5a00; margin-top: 2px; }
 .bulle-produit img[hidden] { display: none; }
+/* v143 : propositions d'association d'une ligne de reçu, avec leur certitude */
+.rc-props { margin-top: 8px; display: grid; gap: 6px; }
+.rc-props-t { font-size: 12px; font-weight: 600; color: var(--doux); }
+.rc-prop { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; align-items: center; padding: 8px; border: 1px solid var(--ligne); border-radius: 10px; background: var(--fond); }
+.rc-prop-n { font-weight: 600; font-size: 13px; min-width: 0; }
+.rc-prop-n small { display: block; font-weight: 400; color: var(--doux); font-size: 11.5px; }
+.rc-prop-p { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.rc-prop-b { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--gris-fond); overflow: hidden; }
+.rc-prop-b i { display: block; height: 100%; }
+.rc-prop-r { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; }
+.rc-prop-r span { font-size: 10.5px; padding: 1px 7px; border-radius: 8px; border: 1px solid var(--ligne); color: var(--doux); background: var(--carte); }
+.rc-prop-r span.ok { color: var(--vert); }
+.rc-prop-r span.non { color: var(--rouge); }
+.rc-prop .btn { grid-column: 1 / -1; justify-self: start; padding: 4px 12px; font-size: 12px; }
 /* v142 : retirer un prix faux (deux touchers) */
 .bulle-produit .bp-retirer { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ligne); }
 .bulle-produit .bp-retirer button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer;

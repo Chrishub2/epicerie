@@ -245,6 +245,91 @@ export function chercherDansBase(ligne, index) {
 }
 
 // ---------------------------------------------------------------------
+// v143 — Score de certitude d'une association (maquette recu-association-v1, demandes de Chris, 23 nov. 2026)
+// Certitude (0 à 100) = 65 % nom + 15 % marque + 10 % confirmations + 10 % prix (le prix bouge plus que le nom).
+//  - nom : mots de la ligne retrouvés dans la fiche (nom, variantes, libellés confirmés, noms vus dans les prix),
+//          pondérés par leur rareté, et mots du nom de la fiche retrouvés sur la ligne ; note de l'IA entre parenthèses ignorée ;
+//  - marque : la marque de la fiche est écrite sur la ligne (« NATU » → Nature's Path) ; fiche sans marque = neutre ;
+//  - confirmations : libellés semblables que Chris a déjà confirmés pour cette fiche (la part monte à chaque confirmation) ;
+//  - prix : un prix connu de la fiche chez cette bannière = payé (ou régulier = payé + rabais) ; proche (± 15 %) = moitié.
+// Libellé EXACT déjà confirmé à cette bannière : relié sans score (étape d'avant).
+// Reliée seule : ≥ 70 % ET 30 points d'avance sur la 2e fiche (essai sur 78 lignes réelles, reçu après reçu : 0 erreur
+// dès 25 points d'avance) ; 30 % et plus : proposée ; < 30 % : dans le doute.
+// ---------------------------------------------------------------------
+export const SEUIL_AUTO = 70;     // v143b : calibré sur 78 lignes réelles, reçu après reçu (0 erreur dès 25 pts d'avance ; 30 = coussin)
+export const MARGE_AUTO = 30;    // points d'avance exigés sur la 2e fiche pour relier seul (c'est elle qui évite les erreurs)
+export const SEUIL_PROPOSE = 30;
+// v143b (Chris : « le prix bouge plus que le nom » ; « l'association doit apprendre de mes confirmations »)
+export const POIDS = { nom: 0.65, marque: 0.15, confirme: 0.10, prix: 0.10 };
+
+/**
+ * Confirmations d'une fiche pour cette ligne : libellés de reçus que Chris a confirmés pour elle (alias) et qui
+ * ressemblent à la ligne (« NATU CH BAIES RGES » ≈ « NATU CH BAIES ROUGES ») ; même bannière = 1, autre = ½.
+ * → part de 0 à 1 : 1 confirmation 0,6 ; 2 → 0,84 ; 3 → 0,94 (elle monte à chaque confirmation, sans jamais dépasser 1).
+ */
+export function confirmations(f, ligne, banniere) {
+  let n = 0;
+  for (const v of f?.variantes || []) for (const x of v.alias || []) {
+    if (ressemblanceMutuelle(x.libelle, ligne?.libelle) >= 0.5) n += x.banniere === banniere ? 1 : 0.5;
+  }
+  return { n, part: 1 - Math.pow(0.4, n) };
+}
+
+/**
+ * prixConnus : Map(articleId → [montants connus chez la bannière du reçu]) (prix actifs, non annulés).
+ * → [{ id, pct, nom, marque, prix, raisons: [{ ok: true|false|null, t }] }] trié, au plus `max`.
+ */
+export function scoresAssociation(ligne, index, fiches = [], prixConnus = new Map(), max = 3, { banniere = null, poids: P = POIDS } = {}) {
+  if (!index?.n) return [];
+  const texte = `${String(ligne?.nomClair || '').replace(/\([^)]*\)/g, ' ')} ${ligne?.libelle || ''} ${ligne?.marque || ''}`;
+  const req = [...new Set(motsUtiles(texte))];
+  if (!req.length) return [];
+  // Un mot que ta base ne connaît pas (« gratin ») pèse comme un mot rare : il dit justement que c'est autre chose
+  const poids = req.map((m) => {
+    let d = 0;
+    for (const [k, c] of index.df) if (pareil(m, k)) d = Math.max(d, c);
+    return 1 + Math.log(index.n / (d || 1));
+  });
+  const total = poids.reduce((s, x) => s + x, 0);
+  const paye = num(ligne?.prixUnitaire) || num(ligne?.prix);
+  const regulier = paye && num(ligne?.rabais) ? paye + num(ligne.rabais) : null;
+  const parId = new Map(fiches.map((f) => [f.id, f]));
+  const out = [];
+  for (const d of index.docs) {
+    const lus = req.reduce((s, m, k) => s + (d.mots.some((t) => pareil(m, t)) ? poids[k] : 0), 0) / total;
+    if (lus <= 0) continue;
+    // Et dans l'autre sens : les mots du NOM de la fiche retrouvés sur la ligne (« Beurre non salé » ≠ « BEUR SAL »)
+    const motsNom = motsUtiles(d.nom);
+    const couverture = motsNom.length ? motsNom.filter((m) => req.some((t) => pareil(m, t))).length / motsNom.length : 1;
+    const nom = 0.8 * lus + 0.2 * couverture;
+    const f = parId.get(d.id) || {};
+    const mq = motsUtiles(f.marque);
+    const marque = !mq.length ? 0.5 : mq.some((m) => req.some((t) => pareil(m, t))) ? 1 : 0;
+    const connus = prixConnus.get(d.id) || [];
+    const egal = (x) => Math.abs(x - paye) < 0.011 || (regulier && Math.abs(x - regulier) < 0.011);
+    const prix = !paye ? 0.2 : !connus.length ? 0.2 : connus.some(egal) ? 1 : connus.some((x) => Math.abs(x - paye) / paye <= 0.15) ? 0.5 : 0;
+    const conf = confirmations(f, ligne, banniere);
+    const pct = Math.round(100 * (P.nom * nom + P.marque * marque + P.confirme * conf.part + P.prix * prix));
+    const montant = (x) => `${x.toFixed(2).replace('.', ',')} $`;
+    out.push({ id: d.id, pct, nom: Math.round(nom * 100), marque, prix, confirme: conf.n, raisons: [
+      { ok: nom >= 0.75 ? true : null, t: `nom ${Math.round(nom * 100)} %` },
+      ...(mq.length ? [{ ok: marque === 1, t: marque === 1 ? `marque ${f.marque}` : `marque ${f.marque} absente` }] : []),
+      ...(conf.n ? [{ ok: true, t: `${conf.n >= 2 ? `${Math.round(conf.n)} confirmations` : 'déjà confirmé'} pour un libellé semblable` }] : []),
+      { ok: !connus.length ? null : prix === 1, t: !connus.length ? 'aucun prix connu à cette bannière'
+        : prix === 1 ? `prix connu ${montant(connus.find(egal))} = payé` : `prix connu ${montant(connus[0])} ≠ payé` },
+    ] });
+  }
+  return out.sort((a, b) => b.pct - a.pct).slice(0, max);
+}
+
+/** Décision : { auto: candidat | null, proposes: [...] } : reliée seule si ≥ seuil ET avance ≥ marge sur la 2e ; proposée dès 30 %. */
+export function decisionAssociation(cands = [], { seuil = SEUIL_AUTO, marge = MARGE_AUTO } = {}) {
+  const [a, b] = cands;
+  const avance = a ? a.pct - (b?.pct || 0) : 0;
+  return { auto: a && a.pct >= seuil && avance >= marge ? a : null, proposes: cands.filter((c) => c.pct >= SEUIL_PROPOSE) };
+}
+
+// ---------------------------------------------------------------------
 // Historique d'achat d'un produit, tiré des reçus (une seule source : le reçu ; rien n'est recopié).
 // ---------------------------------------------------------------------
 /**

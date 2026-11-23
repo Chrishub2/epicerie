@@ -21,7 +21,7 @@ function ligneCouvre(etat, ligne, articleId) {
   return !!g?.estGenerique && enfantsGenerique(g, etat.articles, familleDe).some((a) => a.id === articleId);
 }
 import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes, reporterAssociations, etatLigne,
-  texteFiche, indexBase, chercherDansBase, achatsDuProduit, resumeAchats, soustrait } from './lignes-recu.js';
+  texteFiche, indexBase, achatsDuProduit, resumeAchats, soustrait, scoresAssociation, decisionAssociation } from './lignes-recu.js';
 
 const TOLERANCE = 0.02; // $ : en deçà, c'est le bon prix
 
@@ -290,6 +290,28 @@ export async function trouverCode(articleId, marqueLigne) {
   return exacts.length === 1 ? 'trouve' : 'propose';
 }
 
+/** v143 : prix connus de chaque fiche à la bannière du reçu (actifs, sans ceux tirés de CE reçu) → part « prix » du score. */
+function prixConnusA(e, banniere, recuId) {
+  const m = new Map();
+  (e.prix || []).forEach((p) => {
+    if (p.annule || p.enAttente || p.banniere !== banniere || p.recuId === recuId || !p.articleId) return;
+    const v = Number(p.prixNum) || Number(String(p.offre || '').replace(',', '.').match(/\d+(?:\.\d+)?/)?.[0]);
+    if (v > 0) (m.get(p.articleId) || m.set(p.articleId, []).get(p.articleId)).push(v);
+  });
+  return m;
+}
+
+/** v143 : fiches proposées pour une ligne (30 % et plus, sauf celle reliée seule), calculées à l'ouverture de la ligne. */
+export function candidatsPourLigne(r, i) {
+  const e = S.get(), l = r?.lignes?.[i];
+  if (!l || l.articleId) return [];
+  const nomsPrix = new Map();
+  (e.prix || []).forEach((p) => { if (p.nomProduit && !p.annule) (nomsPrix.get(p.articleId) || nomsPrix.set(p.articleId, new Set()).get(p.articleId)).add(p.nomProduit); });
+  const base = indexBase(e.articles.map((a) => ({ id: a.id, nom: a.nom, texte: texteFiche(a, [...(nomsPrix.get(a.id) || [])]) })));
+  return scoresAssociation(l, base, e.articles, prixConnusA(e, r.banniere, r.id), 3, { banniere: r.banniere }).filter((c) => c.pct >= 30)
+    .map(({ id, pct, raisons }) => ({ id, pct, raisons }));
+}
+
 /** Associe à la main les lignes d'un reçu : choix = { indexLigne: articleId | '' (aucun) }. Puis recompare et complète. */
 export async function associerManuellement(recuId, choix, etat) {
   S.maj((x) => {
@@ -397,6 +419,7 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
   const nomsPrix = new Map();
   (e.prix || []).forEach((p) => { if (p.nomProduit && !p.annule) (nomsPrix.get(p.articleId) || nomsPrix.set(p.articleId, new Set()).get(p.articleId)).add(p.nomProduit); });
   const base = indexBase(e.articles.map((a) => ({ id: a.id, nom: a.nom, texte: texteFiche(a, [...(nomsPrix.get(a.id) || [])]) })));
+  const prixConnus = prixConnusA(e, r.banniere, recuId);
 
   for (const [i, l] of (r.lignes || []).entries()) {
     etat(`Produit ${i + 1}/${r.lignes.length}…`);
@@ -435,15 +458,22 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
     if (!a) a = l.articleListe && etatNow.articles.find((x) => simple(x.nom) === simple(l.articleListe)
       && etatNow.liste.some((li) => li.articleId === x.id));
     source('liste');
-    // ③b ta base : nom en clair + marque comparés à tout ce qu'elle sait des fiches (à vérifier)
-    if (!a) { const t = chercherDansBase(l, base); if (t) a = etatNow.articles.find((x) => x.id === t.id) || null; }
+    // ③b v143 — ta base, avec un score de certitude par fiche (nom + marque + prix connu à cette bannière) :
+    // ≥ 70 % ET 30 points d'avance : reliée seule (à vérifier) ; 30 % et plus : proposées ; < 30 % : dans le doute
+    let candidats = [];
+    if (!a) {
+      const cands = scoresAssociation(l, base, etatNow.articles, prixConnus, 3, { banniere: r.banniere });
+      const d = decisionAssociation(cands);
+      if (d.auto) a = etatNow.articles.find((x) => x.id === d.auto.id) || null;
+      candidats = d.proposes.filter((c) => !a || c.id !== a.id).map(({ id, pct, raisons }) => ({ id, pct, raisons }));
+    }
     source('base');
-    // ③ secours : par ressemblance de nom (reçu lu sans IA, ou ancienne lecture)
     // (lien deviné : on ne l'apprend pas comme nom de reçu, pour ne pas répéter une erreur)
     let devine = lien === 'liste' || lien === 'base';
-    if (!a && pluL) { a = parNom(`${pluL.produit} ${pluL.variete}${pluL.bio ? ' biologique' : ''}`, etatNow); if (a && pluL.bio !== !!a.bio) a = null; devine = !!a; } // nom officiel du PLU ; bio ↔ bio seulement (S14)
-    if (!a) { a = parNom(`${l.nomClair || ''} ${l.libelle || ''}`, etatNow); devine = !!a; }
+    // Fruit ou légume : nom officiel du PLU ; bio ↔ bio seulement (S14)
+    if (!a && pluL) { a = parNom(`${pluL.produit} ${pluL.variete}${pluL.bio ? ' biologique' : ''}`, etatNow); if (a && pluL.bio !== !!a.bio) a = null; devine = !!a; }
     source('nom');
+    S.maj((x) => { const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i]; if (ln) { if (candidats.length && !a) ln.candidats = candidats; else delete ln.candidats; } });
     // ④ lien d'une application précédente (ex. article retiré de la liste depuis) : gardé, mais à vérifier
     if (!a && l.articleId) { a = etatNow.articles.find((x) => x.id === l.articleId) || null; if (a) devine = true; }
     source('ancien');

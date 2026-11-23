@@ -3,7 +3,7 @@
 // sauvegarde.
 // =====================================================================
 import * as S from './store.js';
-import { $, $$, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin, brancherSelecteurProduit } from './ui.js';
+import { $, $$, esc, argent, ouvrirModale, fermerModale, quandFermee, toast, joursRestants, aujourdhui, themeActuel, appliquerTheme, logoMagasin, brancherSelecteurProduit, nomBanniere } from './ui.js';
 import { PROGRAMMES, BANNIERES } from './demo-data.js';
 import { SKINS, skinActuel, htmlChoixSkin, brancherChoixSkin } from './skins/skins.js';
 import { photographierRecu } from './camera.js';
@@ -12,7 +12,7 @@ import { analyserOffre, analyserFormat } from './normalise.js';
 import { ajouterTache } from './attente.js';
 import * as Sync from './sync.js';
 import * as P from './produits.js';
-import { aPhotoPro } from './visuels.js';
+import { aPhotoPro, photoDe } from './visuels.js';
 import { texteRecherche, sansAccents as sansAccentsNom } from './noms.js';
 import { monterCirculaires } from './circulaires.js';
 import { natureLigne, etatLigne, candidatsLignes, choixEvident, ressemblanceMutuelle, lignesIdentiques } from './lignes-recu.js';
@@ -154,6 +154,34 @@ function vueRabais(v) {
 }
 
 // --- Fusion des doublons (v33) -----------------------------------------
+/** Détails d'une fiche pour décider d'une fusion : photo, marque, format, code-barres, libellés de reçu, prix par magasin (v143). */
+function detailFusion(e, a) {
+  const vs = P.variantesActives(a);
+  const img = photoDe(a) || vs.map((v) => v.imageUrl).find(Boolean) || '';
+  const codes = [...new Set(vs.flatMap((v) => v.codes || []).map((c) => String(c).replace(/^0+/, '')))];
+  const libs = [...new Set(vs.flatMap((v) => (v.alias || []).map((x) => `${x.libelle} (${nomBanniere(x.banniere)})`)))];
+  const formats = [...new Set([a.format, ...vs.map((v) => v.format)].filter(Boolean))];
+  const marques = [...new Set([a.marque, ...vs.map((v) => v.marque)].filter(Boolean))];
+  const parB = new Map();
+  for (const p of e.prix || []) if (p.articleId === a.id && !p.annule && p.source !== 'demo') {
+    const l = parB.get(p.banniere) || []; l.push(p); parB.set(p.banniere, l);
+  }
+  const prix = [...parB].map(([b, l]) => { const d = l.sort((x, y) => String(y.observeLe || '').localeCompare(String(x.observeLe || '')))[0];
+    return `${esc(nomBanniere(b))} ${l.length}× <span class="doux">(${esc(String(d.offre ?? '').slice(0, 18))})</span>`; });
+  const surListe = e.liste.some((l) => l.articleId === a.id);
+  const ligne = (t, v) => `<div><span class="doux">${t} :</span> ${v}</div>`;
+  return `<div class="fu-fiche" style="display:flex;gap:8px;align-items:flex-start;margin-top:6px">
+    ${img ? `<img class="vignette" src="${esc(img)}" alt="">` : '<span class="vignette" style="display:flex;align-items:center;justify-content:center">?</span>'}
+    <div style="font-size:.85em;min-width:0">
+      <div><b>${esc(a.nom)}</b>${surListe ? ' <span class="doux">· sur ta liste</span>' : ''}</div>
+      ${ligne('Marque', esc(marques.join(', ') || '—'))}
+      ${ligne('Format', esc(formats.join(', ') || '—'))}${vs.length > 1 ? ` <span class="doux">(${vs.length} variantes)</span>` : ''}
+      ${ligne('Code-barres', esc(codes.slice(0, 2).join(', ') || '—'))}
+      ${ligne('Sur tes reçus', esc(libs.slice(0, 3).join(' · ') || '—'))}
+      ${ligne('Prix', prix.length ? prix.join(' · ') : 'aucun')}
+    </div></div>`;
+}
+
 /** Écran de fusion : doublons probables, choix libre, puis confirmation avec aperçu. */
 function ouvrirFusion(apres) {
   const e = S.get();
@@ -163,6 +191,7 @@ function ouvrirFusion(apres) {
     <p class="doux" style="margin-top:0">Fusionner = un seul produit sur ta liste, avec chaque marque/format comme variante. Les prix, reçus et codes-barres suivent. Rien n'est fait sans ta confirmation, et une variante peut être séparée plus tard (fiche → Marques et formats → ↗).</p>
     ${paires.length ? `<h3>Doublons probables</h3>${paires.map((p, i) => `<div class="carte" style="padding:8px;margin-bottom:6px">
       <div><b>${esc(p.a.nom)}</b> + <b>${esc(p.b.nom)}</b> <span class="doux">· ${esc(p.raison)}</span></div>
+      <details style="margin-top:4px"><summary class="doux" style="cursor:pointer">Voir les détails</summary>${detailFusion(e, p.a)}${detailFusion(e, p.b)}</details>
       <div class="rang" style="margin-top:6px"><button class="btn" data-paire="${i}">🔗 Fusionner…</button><button class="btn sec" data-pasdoublon="${i}">Pas un doublon</button></div></div>`).join('')}`
       : '<p class="doux">Aucun doublon évident repéré. Tu peux en choisir toi-même ci-dessous.</p>'}
     <h3>Choisir moi-même</h3>
@@ -203,8 +232,8 @@ function confirmerFusion(ids, apres) {
   };
   ouvrirModale('Confirmer la fusion', `
     <h3 style="margin-top:0">Garder le nom de :</h3>
-    ${arts.map((a) => `<label class="item" style="cursor:pointer"><input type="radio" name="fuCible" value="${a.id}" ${a === defaut ? 'checked' : ''} style="width:auto">
-      <span class="grandir">${esc(a.nom)} <span class="doux">${esc([a.marque, a.format].filter(Boolean).join(' · '))}</span></span></label>`).join('')}
+    ${arts.map((a) => `<label class="item" style="cursor:pointer;align-items:flex-start"><input type="radio" name="fuCible" value="${a.id}" ${a === defaut ? 'checked' : ''} style="width:auto;margin-top:12px">
+      <span class="grandir">${detailFusion(e, a)}</span></label>`).join('')}
     <div class="alerte" id="fuApercu" style="margin-top:8px">${texteApercu(defaut.id)}</div>
     <div class="rang" style="margin-top:8px"><button class="btn" id="fuOk">🔗 Fusionner</button><button class="btn sec" id="fuRetour">‹ Retour</button></div>`, (c) => {
     const cible = () => $('[name="fuCible"]:checked', c).value;
@@ -903,7 +932,17 @@ async function basculerLigne(recuId, i, li) {
   const et = etatLigne(l);
   const det = document.createElement('li');
   det.className = 'rc-det';
-  det.innerHTML = `${R.htmlLigne(r, i)}
+  // v143 (maquette recu-association-v1) : fiches proposées avec leur certitude (30 à 89 %), un toucher pour choisir
+  const props = !l.articleId && etatLigne(l) !== 'hors' ? (l.candidats?.length ? l.candidats : R.candidatsPourLigne(r, i)).map((c) => ({ ...c, a: S.get().articles.find((x) => x.id === c.id) })).filter((c) => c.a) : [];
+  const coul = (p) => (p >= 70 ? 'var(--vert)' : p >= 50 ? '#e8a400' : '#b9c0bb');
+  const htmlProps = props.length ? `<div class="rc-props"><div class="rc-props-t">C'est peut-être :</div>${props.map((c) => `<div class="rc-prop">
+      <div class="rc-prop-n">${esc(c.a.nom)}<small>${esc([c.a.marque, c.a.format].filter(Boolean).join(' · '))}</small></div>
+      <div class="rc-prop-p" style="color:${coul(c.pct)}">${c.pct} %</div>
+      <div class="rc-prop-b"><i style="width:${c.pct}%;background:${coul(c.pct)}"></i></div>
+      <div class="rc-prop-r">${(c.raisons || []).map((x) => `<span class="${x.ok === true ? 'ok' : x.ok === false ? 'non' : ''}">${esc(x.t)}</span>`).join('')}</div>
+      <button class="btn sec" data-cestlui="${esc(c.id)}">C'est lui</button></div>`).join('')}</div>`
+    : (!l.articleId && etatLigne(l) !== 'hors' ? '<div class="doux" style="font-size:12px;margin-top:6px">Dans le doute : aucune fiche n\'atteint 30 % de certitude.</div>' : '');
+  det.innerHTML = `${R.htmlLigne(r, i)}${htmlProps}
     <div class="rang envelopper" style="margin-top:8px">
       ${et === 'verifier' ? '<button class="btn" data-bon>✓ C\'est le bon produit</button>' : ''}
       <button class="btn sec" data-changer>🔗 ${l.articleId ? 'Changer' : 'Associer'}</button></div>
@@ -916,6 +955,7 @@ async function basculerLigne(recuId, i, li) {
     ouvrirDetailRecu(recuId);
   };
   det.querySelector('[data-bon]')?.addEventListener('click', () => recalculer({ [i]: l.articleId }));
+  det.querySelectorAll('[data-cestlui]').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); recalculer({ [i]: b.dataset.cestlui }); }));
   brancherSelecteurProduit(det.querySelector('[data-changer]'), det.querySelector('[data-panneau]'), async (nom) => {
     let aid = '';
     if (nom) {
