@@ -711,6 +711,28 @@ function htmlPreuvePrevu(src, dateAchat) {
   return `${liens.length ? `<div class="rc-preuve">${liens.join('')}</div>` : '<div class="rc-vu">Aucune preuve en ligne pour ce prix.</div>'}${vu ? `<div class="rc-vu${vieux ? ' vieux' : ''}">${esc(vu)}</div>` : ''}`;
 }
 
+/**
+ * Force d'une preuve de prix (Québec) :
+ *  'forte'      : photo de l'étiquette en magasin, ou circulaire de cette bannière en vigueur le jour de l'achat (prix affiché / annoncé) ;
+ *  'indicative' : site de la bannière (« les prix peuvent varier »), épiceries.ca, saisie, ou relevé de plus de 14 jours.
+ */
+export function forcePreuve(src, dateAchat) {
+  if (!src) return 'indicative';
+  if (src.source === 'photo') return 'forte';
+  const enVigueur = src.debut && src.fin && dateAchat ? src.debut <= dateAchat && dateAchat <= src.fin : !!(src.fin && dateAchat && src.fin >= dateAchat);
+  if ((src.type === 'circulaire' || src.source === 'circulaire' || src.offreCirculaire) && src.source !== 'epiceries_ca' && src.source !== 'site_banniere' && enVigueur) return 'forte';
+  return 'indicative';
+}
+
+/** Pourquoi une preuve n'est qu'indicative, en mots simples. */
+function texteForce(src) {
+  if (!src) return 'source introuvable';
+  if (src.source === 'site_banniere' || (src.lienMarchand && !src.url)) return 'site web de la bannière';
+  if (src.source === 'epiceries_ca') return 'épiceries.ca, un site qui recopie les prix';
+  if (src.type === 'circulaire') return 'circulaire qui n\'était plus en vigueur';
+  return 'prix noté dans l\'app';
+}
+
 /** Montant de l'écart sur la ligne entière (prix × quantité, ou × poids en kg). */
 function ecartLigne(l) {
   const vd = l.verdict;
@@ -726,6 +748,7 @@ export function htmlDetail(r) {
   const cons = consignes(r.lignes || []);
   const NATURE = { consigne: '♻️ Consigne', coupon: '🎟️ Coupon', sac: '🛍️ Sac', frais: '🧾 Frais' };
   const ban = r.banniere ? nomBanniere(r.banniere) : 'ce magasin';
+  const deBan = `${/^[aeiouyàâéèêîôû]/i.test(ban) ? 'd’' : 'de '}${esc(ban)}`;   // « d’IGA », « de Metro »
   const pu = (x, u) => `${argent(x)}${u || ''}`;
   const nomDe = (l, i) => {
     const et = etatLigne(l), nat = natureLigne(l);
@@ -737,29 +760,38 @@ export function htmlDetail(r) {
 
   // Tri des lignes
   const L = r.lignes || [];
-  const G = { verifier: [], ici: [], ailleurs: [], ok: [], moins: [], sans: [], hors: [] };
+  // Payé plus cher : « à réclamer » seulement avec une preuve FORTE (photo de l'étiquette, circulaire de ce magasin en vigueur) ;
+  // un prix de site web (« les prix peuvent varier »), d'épiceries.ca ou trop vieux → « à vérifier en magasin » (demande de Chris, 22 nov. 2026)
+  const G = { verifier: [], ici: [], indicatif: [], ailleurs: [], ok: [], moins: [], sans: [], hors: [] };
   L.forEach((l, i) => {
     const et = etatLigne(l), st = l.verdict?.statut;
     if (et === 'hors') G.hors.push(i);
     else if (et === 'verifier' || et === 'aucun') G.verifier.push(i);
-    else if (st === 'plus') { const src = sourcePrevu(r, l); (src && r.banniere && src.banniere && src.banniere !== r.banniere ? G.ailleurs : G.ici).push(i); }
+    else if (st === 'plus') {
+      const src = sourcePrevu(r, l);
+      if (src && r.banniere && src.banniere && src.banniere !== r.banniere) G.ailleurs.push(i);
+      else (forcePreuve(src, r.date) === 'forte' ? G.ici : G.indicatif).push(i);
+    }
     else if (st === 'ok') G.ok.push(i);
     else if (st === 'moins') G.moins.push(i);
     else G.sans.push(i);
   });
   const parEcart = (a, b) => ecartLigne(L[b]) - ecartLigne(L[a]);
-  G.ici.sort(parEcart); G.ailleurs.sort(parEcart);
+  G.ici.sort(parEcart); G.indicatif.sort(parEcart); G.ailleurs.sort(parEcart);
   const totIci = Math.round(G.ici.reduce((s, i) => s + ecartLigne(L[i]), 0) * 100) / 100;
+  const totIndicatif = Math.round(G.indicatif.reduce((s, i) => s + ecartLigne(L[i]), 0) * 100) / 100;
   const totAilleurs = Math.round(G.ailleurs.reduce((s, i) => s + ecartLigne(L[i]), 0) * 100) / 100;
   const bansAilleurs = [...new Set(G.ailleurs.map((i) => sourcePrevu(r, L[i])?.banniere).filter(Boolean).map(nomBanniere))];
 
   // Carte d'un écart (ici : à réclamer ; ailleurs : info pour la prochaine fois)
-  const carte = (i, ici) => {
+  // genre : 'ici' (à réclamer, preuve forte) · 'indicatif' (même magasin, prix indicatif) · 'ailleurs'
+  const carte = (i, genre) => {
+    const ici = genre !== 'ailleurs';
     const l = L[i], vd = l.verdict, src = sourcePrevu(r, l);
     const raisons = (vd.explication || []).filter((x) => !/Politique d'exactitude/.test(x));
     const memeTexte = (x, y) => String(x).replace(/\s/g, '') === String(y).replace(/\s/g, '');
     const offreSrc = src?.offre && !memeTexte(src.offre, pu(vd.attendu, vd.unite)) ? ` · ${esc(src.offre)}${src.format ? ` ${esc(src.format)}` : ''}` : '';
-    return `<li class="rc-carte ${ici ? 'ici' : 'ailleurs'}" data-ligne="${i}">
+    return `<li class="rc-carte ${genre}" data-ligne="${i}">
       <div class="rc-c1"><span>${esc(nomDe(l, i))}</span><span class="rc-ecart">${ici ? '+' : '−'}${argent(Math.abs(ecartLigne(l)))}</span></div>
       <dl class="rc-comp">
         <dt>Payé</dt><dd><b>${pu(vd.paye, vd.unite)}</b>${vd.unite || Number(l.quantite) > 1 ? ` <span class="doux">(${argent(l.prix)})</span>` : ''}</dd>
@@ -769,7 +801,8 @@ export function htmlDetail(r) {
       </dl>
       ${raisons.length ? `<div class="rc-pourquoi">${raisons.map(esc).join(' ')}</div>` : ''}
       ${htmlPreuvePrevu(src, r.date)}
-      ${ici ? `<div class="rc-droit">Prix affiché par ${esc(ban)} plus bas que payé : Politique d'exactitude des prix — article gratuit jusqu'à 15 $. Montre la preuve et ton reçu au service à la clientèle.</div>` : ''}
+      ${genre === 'ici' ? `<div class="rc-droit">Preuve forte : ${src?.source === 'photo' ? 'étiquette photographiée en magasin' : `circulaire ${deBan} en vigueur ce jour-là`}. Politique d'exactitude des prix — article gratuit jusqu'à 15 $. Montre la preuve et ton reçu au service à la clientèle.</div>`
+        : genre === 'indicatif' ? `<div class="rc-indicatif">Prix indicatif (${esc(texteForce(src))}) : il peut varier d'une succursale à l'autre. Vérifie l'étiquette en magasin et prends-la en photo : c'est elle qui compte.</div>` : ''}
     </li>`;
   };
   const groupe = (titre, ids, sous) => (ids.length
@@ -786,14 +819,16 @@ export function htmlDetail(r) {
       <div class="rc-chiffres">
         <div><b>${r.total != null ? argent(r.total) : '—'}</b><span>payé</span></div>
         <div class="vert"><b>${r.economies != null ? argent(r.economies) : '—'}</b><span>économisé</span></div>
-        <div class="${totIci > 0 ? 'rouge' : 'vert'}"><b>${argent(totIci)}</b><span>${totIci > 0 ? `de plus qu'affiché chez ${esc(ban)}` : `de plus qu'affiché chez ${esc(ban)} : aucun écart`}</span></div>
+        <div class="${totIci > 0 ? 'rouge' : 'vert'}"><b>${argent(totIci)}</b><span>${totIci > 0 ? 'à réclamer (preuve forte)' : 'à réclamer : aucun écart prouvé'}</span></div>
       </div>
+      ${totIndicatif > 0 ? `<div class="rc-indicatif-tete">🔎 ${argent(totIndicatif)} de plus que le prix indicatif ${deBan} : à vérifier en magasin</div>` : ''}
       ${totAilleurs > 0 ? `<div class="rc-ailleurs-tete">💡 ${argent(totAilleurs)} de moins ailleurs (${esc(bansAilleurs.join(', '))})</div>` : ''}
     </div>
     ${G.verifier.length ? `<h3 class="rc-h">À vérifier <span class="doux">touche une ligne pour confirmer ou changer le produit</span></h3>
       <ul class="rc-liste">${G.verifier.map((i) => ligne(L[i], i, etatLigne(L[i]) === 'aucun' ? 'Aucun produit associé' : 'Produit à confirmer', 'a-voir')).join('')}</ul>` : ''}
-    ${G.ici.length ? `<h3 class="rc-h">Payé plus que le prix affiché chez ${esc(ban)} <span class="doux">à réclamer</span></h3><ul class="rc-liste rc-cartes">${G.ici.map((i) => carte(i, true)).join('')}</ul>` : ''}
-    ${G.ailleurs.length ? `<h3 class="rc-h">Moins cher ailleurs <span class="doux">pour la prochaine fois</span></h3><ul class="rc-liste rc-cartes">${G.ailleurs.map((i) => carte(i, false)).join('')}</ul>` : ''}
+    ${G.ici.length ? `<h3 class="rc-h">Payé plus que le prix affiché chez ${esc(ban)} <span class="doux">à réclamer</span></h3><ul class="rc-liste rc-cartes">${G.ici.map((i) => carte(i, 'ici')).join('')}</ul>` : ''}
+    ${G.indicatif.length ? `<h3 class="rc-h">Plus cher que le prix indicatif ${deBan} <span class="doux">à vérifier en magasin</span></h3><ul class="rc-liste rc-cartes">${G.indicatif.map((i) => carte(i, 'indicatif')).join('')}</ul>` : ''}
+    ${G.ailleurs.length ? `<h3 class="rc-h">Moins cher ailleurs <span class="doux">pour la prochaine fois</span></h3><ul class="rc-liste rc-cartes">${G.ailleurs.map((i) => carte(i, 'ailleurs')).join('')}</ul>` : ''}
     <h3 class="rc-h">Le reste du reçu</h3>
     ${groupe('✓ Au bon prix', G.ok, (l) => sousRabais(l))}
     ${groupe('↓ Moins cher que prévu', G.moins, (l) => `<span class="rc-vert">${argent(Math.abs(ecartLigne(l)))} de moins que prévu (${pu(l.verdict.attendu, l.verdict.unite)})</span>${l.rabais ? ` · ${sousRabais(l)}` : ''}`)}

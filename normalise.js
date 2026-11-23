@@ -180,6 +180,7 @@ export function chiffreControle(sansControle) {
 }
 
 export function gtinValide(code) {
+  if (/^\d{8}$/.test(code) && upceVersUpca(code)) return true;   // UPC-E : contrôle calculé sur le code long
   return /^\d{8}$|^\d{12,14}$/.test(code) && chiffreControle(code.slice(0, -1)) === code.slice(-1);
 }
 
@@ -189,9 +190,43 @@ export function gtinValide(code) {
  * - ITF-14 / GTIN-14 (caisses Costco) → code du produit à l'unité :
  *   on retire l'indicateur (1er chiffre) et on recalcule le contrôle.
  */
+/**
+ * UPC-E (code court de 8 chiffres des petits emballages, ex. Kraft Singles « 0 683601 4 ») → UPC-A de 12 chiffres
+ * (« 068100003604 »). null si ce n'est pas un UPC-E valide (système 0 ou 1, chiffre de contrôle exact).
+ */
+export function upceVersUpca(code) {
+  const c = String(code || '').replace(/\D/g, '');
+  if (c.length !== 8 || !/^[01]/.test(c)) return null;
+  const [ns, d1, d2, d3, d4, d5, d6, ck] = c;
+  const corps = d6 <= '2' ? `${d1}${d2}${d6}0000${d3}${d4}${d5}`
+    : d6 === '3' ? `${d1}${d2}${d3}00000${d4}${d5}`
+    : d6 === '4' ? `${d1}${d2}${d3}${d4}00000${d5}`
+    : `${d1}${d2}${d3}${d4}${d5}0000${d6}`;
+  const base = ns + corps;
+  return chiffreControle(base) === ck ? base + ck : null;
+}
+
+/** UPC-A de 12 chiffres → sa forme courte UPC-E de 8 chiffres, si elle existe (sinon null). */
+export function upcaVersUpce(code) {
+  const c = String(code || '').replace(/\D/g, '');
+  if (c.length !== 12 || !/^[01]/.test(c)) return null;
+  const ns = c[0], m = c.slice(1, 6), p = c.slice(6, 11), ck = c[11];
+  let e = null;
+  if (m.slice(3) === '00' && m[2] <= '2' && p.startsWith('00')) e = `${m[0]}${m[1]}${p.slice(2)}${m[2]}`;
+  else if (m.slice(3) === '00' && p.startsWith('000')) e = `${m.slice(0, 3)}${p.slice(3)}3`;
+  else if (m[4] === '0' && p.startsWith('0000')) e = `${m.slice(0, 4)}${p[4]}4`;
+  else if (p.startsWith('0000') && p[4] >= '5') e = `${m}${p[4]}`;
+  return e && upceVersUpca(ns + e + ck) === c ? ns + e + ck : null;
+}
+
 export function gtinVariantes(code) {
   const c = String(code).replace(/\D/g, '');
   const v = [c];
+  // UPC-E ↔ UPC-A : le même produit, imprimé court ou long selon l'emballage ou le site
+  const long = upceVersUpca(c);
+  if (long) v.push(long, '0' + long);
+  const court = c.length === 12 ? upcaVersUpce(c) : c.length === 13 && c.startsWith('0') ? upcaVersUpce(c.slice(1)) : null;
+  if (court) v.push(court);
   if (c.length === 12) v.push('0' + c);
   if (c.length === 13 && c.startsWith('0')) v.push(c.slice(1));
   if (c.length === 14) {
