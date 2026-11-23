@@ -53,11 +53,132 @@ export function separerMarque(nom) {
   const n = String(nom || '').trim();
   const m = MARQUES.find((x) => sansAcc(n).startsWith(`${sansAcc(x)} `));
   if (m) return { marque: m, nom: n.slice(m.length).trim() };
-  const mot = n.split(/\s+/)[0] || '';
-  if (mot.length >= 3 && /^[A-ZÀ-Ý&'-]+$/.test(mot) && mot !== mot.toLowerCase()) {
-    return { marque: mot.charAt(0) + mot.slice(1).toLowerCase(), nom: n.slice(mot.length).trim() };
+  // Marque en majuscules, en entier (v122 : « BLACK DIAMOND » → « Black Diamond », pas seulement « Black »)
+  const majuscules = n.match(/^(?:[A-ZÀ-Ý][A-ZÀ-Ý&'’.-]*\s+)*[A-ZÀ-Ý][A-ZÀ-Ý&'’.-]*(?=\s|$)/);
+  const bloc = majuscules ? majuscules[0] : '';
+  if (bloc.replace(/[^A-ZÀ-Ý]/g, '').length >= 3 && bloc !== n) {
+    const joli = bloc.toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+    return { marque: joli, nom: n.slice(bloc.length).trim() };
   }
   return { marque: '', nom: n };
+}
+
+// Mentions de site sans intérêt dans un nom (v122, demande de Chris : « je n'ai pas besoin de voir ça »)
+const RE_MENTIONS = /^(?:(?:pr[ée]par[ée]\s+au\s+(?:canada|qu[ée]bec)|prepared\s+in\s+canada|produit\s+du\s+qu[ée]bec|product\s+of\s+canada|sponsoris[ée]e?|sponsored|commandit[ée]e?|promo|nouveau|new)\s*[.:,-]?\s*)+/i;
+const RE_PRIX_UNITAIRE = /,?\s*(?:environ\s*)?\$?\s*\d+(?:[.,]\d+)?\s*\$?\s*\/\s*\d*(?:[.,]\d+)?\s*(?:100\s*)?(?:g|kg|ml|l|lb|un|ea)\b/gi;
+
+/**
+ * Nom d'un produit trouvé sur un site, présenté proprement : sans « Préparé au Canada », « Commandité »,
+ * « Sponsorisé », ni prix au 100 g ; marque en entier à part ; format à part.
+ * → { marque, nom, format }
+ */
+export function presenter(p, marquesVues = []) {
+  const brut = String(p?.nom || '').replace(RE_PRIX_UNITAIRE, ' ').replace(/\s+/g, ' ').trim();
+  const sansMention = brut.replace(RE_MENTIONS, '').trim();
+  let { marque, nom } = separerMarque(sansMention);
+  // Marque écrite en casse normale (« Black Diamond Ficello… » chez IGA) : reconnue si un autre site l'a écrite en majuscules
+  if (!marque) {
+    const m = [...marquesVues].sort((a, b) => b.length - a.length).find((x) => sansAcc(sansMention).startsWith(`${sansAcc(x)} `));
+    if (m) { marque = m; nom = sansMention.slice(m.length).trim(); }
+  }
+  // Format : celui écrit dans le nom ; un « 100 g » ou « 1 kg » qui vient du prix au 100 g / au kg ne compte pas
+  const compte = brut.match(/\b(\d+)\s*(unités?|bâtonnets|un|ct)\b/i);
+  const taille = brut.match(RE_TAILLE_AFFICHE);
+  let format = p?.format ? formatLisible(p.format) : '';
+  if (format && !taille) format = compte ? `${compte[1]} ${compte[2].toLowerCase()}` : '';
+  const sansFormat = nom.replace(RE_TAILLE_AFFICHE, '').replace(/\s*\b\d+\s*(?:unités?|un|bâtonnets|ct)\b/gi, '').replace(/[,.\s]+$/, '').trim() || nom;
+  return { marque, nom: sansFormat.replace(/^./, (c) => c.toUpperCase()), format };
+}
+
+/** Marques en majuscules vues dans une demande (servent à reconnaître la même marque écrite autrement ailleurs). */
+export function marquesDeLaDemande(r) {
+  const s = new Set([...MARQUES, ...MARQUES_SITES]);
+  for (const b of ORDRE) for (const p of r?.bannieres?.[b]?.produits || []) { const m = separerMarque(String(p.nom || '').replace(RE_MENTIONS, '').trim()).marque; if (m) s.add(m); }
+  return s;
+}
+
+/** Deux mots presque pareils : un préfixe, ou une lettre d'écart (« Ficelo » ≈ « Ficello », « gauffre » ≈ « gaufre »). */
+function procheMot(m, v) {
+  if (v === m || v.startsWith(m)) return true;
+  if (m.length < 5) return false;
+  const a = m, b = v.slice(0, m.length + 1);
+  // distance d'édition ≤ 1 (préfixe du mot du site de même longueur ± 1)
+  for (const cible of [b, b.slice(0, a.length), b.slice(0, a.length - 1)]) {
+    if (Math.abs(cible.length - a.length) > 1) continue;
+    let i = 0, j = 0, ecarts = 0;
+    while (i < a.length && j < cible.length) {
+      if (a[i] === cible[j]) { i++; j++; continue; }
+      if (++ecarts > 1) break;
+      if (a.length > cible.length) i++; else if (a.length < cible.length) j++; else { i++; j++; }
+    }
+    if (ecarts + (a.length - i) + (cible.length - j) <= 1) return true;
+  }
+  return false;
+}
+const singulier = (m) => m.replace(/[sx]$/, '');
+
+/** Le produit trouvé parle-t-il de ce que Chris a écrit ? (tous ses mots, au pluriel ou à une lettre près) — écarte le bruit (paprika pour « poivron »). */
+export function pertinent(p, q) {
+  const voulus = [...mots(q)].map(singulier);
+  const vus = [...mots(String(p?.nom || '').replace(RE_MENTIONS, ''))].map(singulier);
+  // Prix lu qui n'est que la consigne (« Cocktail Dole …, Cons. 1,20 $/emb » à 1,20 $) : écarté
+  const cons = String(p?.nom || '').match(/cons\.\s*(\d+[.,]\d+)\s*\$/i);
+  if (cons && Math.abs(Number(cons[1].replace(',', '.')) - p.prix) < 0.005) return false;
+  return voulus.length > 0 && voulus.every((m) => vus.some((v) => procheMot(m, v)));
+}
+
+// Marques maison et courantes des sites (pour séparer « Sans Nom », « Oasis »… quand le site les écrit en casse normale)
+const MARQUES_SITES = ['Le Choix du Président', 'Sans Nom', 'Compliments', 'Selection', 'Irresistibles', 'Great Value', 'Our Finest', 'Kirkland Signature',
+  'Black Diamond', 'Saputo', 'Oasis', 'Kraft', 'Dole', 'Tre Stelle', 'P’tit Québec', "P'tit Québec", 'Catelli', 'Heinz', 'Natrel', 'Québon', 'Lactantia',
+  'Liberté', 'Danone', 'Activia', 'iögo', 'Yoplait', 'Kellogg’s', "Kellogg's", 'Quaker', 'Christie', 'Dempster’s', "Dempster's", 'POM', 'Gadoua', 'Mieux-Être', 'Dora'];
+
+/** Le produit est-il CE générique (le mot cherché vient en tête du nom, marque retirée) ? « Fraises locales » oui, « Crème glacée à la fraise » non. */
+export function enTete(p, q, marquesVues = []) {
+  const v = presenter(p, marquesVues);
+  const tete = [...mots(v.nom)].map(singulier)[0];
+  const premier = [...mots(q)].map(singulier)[0];
+  return !!tete && !!premier && procheMot(premier, tete);
+}
+
+/**
+ * v122 — choix « générique » : pour chaque bannière, le moins cher des produits pertinents (le prix à l'étiquette ;
+ * au kg / L quand les formats le permettent). → [{ banniere, produit, prix, regulier, prixUnitaire }] trié du moins cher.
+ */
+export function moinsCherParBanniere(r, q) {
+  const vues = marquesDeLaDemande(r);
+  const out = [];
+  for (const b of ORDRE) {
+    const cands = (r?.bannieres?.[b]?.produits || []).filter((p) => pertinent(p, q) && (mots(q).size >= 2 || enTete(p, q, vues)))
+      .map((p) => ({ banniere: b, produit: p, vue: presenter(p, vues), prix: p.prix, regulier: p.regulier || null, prixUnitaire: prixUnitaire(p) }));
+    if (!cands.length) continue;
+    cands.sort(comparerPrix);
+    out.push(cands[0]);
+  }
+  return out.sort((a, b) => a.prix - b.prix);
+}
+
+/** Prix au kg / L quand le format le permet, sinon null. */
+function prixUnitaire(p) {
+  const f = analyserFormat(p.format || '');
+  return f && f.total && (f.base === 'kg' || f.base === 'l') ? p.prix / f.total : null;
+}
+/** Du moins cher au plus cher : au kg / L quand les deux le permettent (même unité), sinon le prix à l'étiquette. */
+function comparerPrix(a, b) {
+  const fa = analyserFormat(a.produit?.format || ''), fb = analyserFormat(b.produit?.format || '');
+  if (a.prixUnitaire != null && b.prixUnitaire != null && fa?.base === fb?.base) return a.prixUnitaire - b.prixUnitaire;
+  return a.prix - b.prix;
+}
+
+/**
+ * v122 — liste des choix de la fenêtre : produits pertinents regroupés (même produit chez plusieurs bannières),
+ * présentés proprement (nom, marque, format en entier) et triés du moins cher au plus cher.
+ */
+export function choixPresentes(r, q) {
+  const vues = marquesDeLaDemande(r);
+  const filtre = { ...r, bannieres: Object.fromEntries(ORDRE.map((b) => [b, { ...(r?.bannieres?.[b] || {}), produits: (r?.bannieres?.[b]?.produits || []).filter((p) => pertinent(p, q)) }])) };
+  return regrouper(filtre).map((g) => ({ ...g, vue: presenter({ nom: g.nom, format: g.format }, vues),
+    offres: [...g.offres].sort((x, y) => x.prix - y.prix) }))
+    .sort((a, b) => a.meilleur.prix - b.meilleur.prix);
 }
 
 /**

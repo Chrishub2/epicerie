@@ -492,7 +492,9 @@ const replies = new Set(); // groupes de magasins repliés (vue « Tout »)
 function htmlItem(l, a) {
   // Article placé dans un magasin (Prépa.) : on montre le prix de CE magasin, sinon le meilleur prix.
   const k = l.magasinCible;
-  const m = (k && offresArticle(a).find((o) => o.pu != null && cleOffre(o) === k)) || meilleureOffre(a);
+  // v122 : sans le rabais perso d'une seule succursale (10 % d'IGA Varennes), comme dans Prépa
+  const m = (k && offresArticle(a).find((o) => o.pu != null && !o.perso && cleOffre(o) === k))
+    || offresArticle(a).find((o) => o.pu != null && !o.perso) || meilleureOffre(a);
   // Prix tel qu'affiché sur l'étagère (« 3,99 $ », « 2/5,00 $ ») pour comparer d'un coup d'œil
   const etiquette = m ? (m.offre || (m.prixArticle != null ? argent(m.prixArticle) : '')) : '';
   const promo = m && (m.economie || m.perso || (m.type && m.type !== 'regulier'));
@@ -643,7 +645,7 @@ const estRabais = (o) => !!(o.perso || o.economie || (o.type && o.type !== 'regu
  */
 function banAvecRabaisListe(base, articles) {
   const avec = new Set();
-  for (const a of articles) for (const o of offresArticle(a)) if (o.pu != null && estRabais(o)) avec.add(o.banniere);
+  for (const a of articles) for (const o of offresArticle(a)) if (o.pu != null && !o.perso && estRabais(o)) avec.add(o.banniere);
   const cols = base.filter((b) => avec.has(b));
   return cols.length ? cols : base;
 }
@@ -671,8 +673,10 @@ const puCourt = (pu, u) => {
 
 /** Une rangée : offres par bannière (la moins chère de chacune), bannière choisie et son offre. */
 function rangeeListe(l, a, cols) {
-  // Seulement les bannières affichées (déjà triées du moins cher au plus cher)
-  const offres = offresArticle(a).filter((o) => o.pu != null && cols.includes(o.banniere));
+  // Seulement les bannières affichées (déjà triées du moins cher au plus cher).
+  // v122 (demande de Chris) : jamais le rabais perso d'UNE succursale (10 % d'IGA Varennes) dans Prépa — la colonne IGA
+  // vaut pour tous les IGA (Saint-Hilaire n'a pas ce 10 %). Il reste dans Plus → rabais perso et dans Comparer.
+  const offres = offresArticle(a).filter((o) => o.pu != null && !o.perso && cols.includes(o.banniere));
   const parBan = {};
   for (const o of offres) if (!parBan[o.banniere]) parBan[o.banniere] = o;
   const choisie = banDeCle(l.magasinCible);
