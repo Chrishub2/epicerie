@@ -462,10 +462,16 @@ button.btn.rv-second { width: 100%; }
 .ep-photo { position: relative; }
 .panier-tourne { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 8px; background: rgba(18, 22, 20, .55);
   color: var(--accent, #2fbf7a); pointer-events: none; }
-.panier-tourne svg { width: 60%; height: 60%; animation: tourne 1.4s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .panier-tourne svg { animation-duration: 4s; } }
-/* v121 : en file d'attente, le panier est là mais immobile (il tourne seulement pendant la recherche) */
-.panier-tourne.attente svg { animation: none; opacity: .75; }
+/* v138 : même panier que l'extension — 🛒 immobile sur rond foncé, anneau vert qui tourne autour */
+.pt-rond { position: relative; width: 78%; aspect-ratio: 1; max-width: 100%; border-radius: 50%; background: rgba(38, 50, 56, .9);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .35); display: grid; place-items: center; container-type: inline-size; }
+.pt-anneau { position: absolute; inset: 6%; border-radius: 50%; border: max(2px, 7cqi) solid rgba(255, 255, 255, .18);
+  border-top-color: #4caf50; border-right-color: #4caf50; animation: tourne .9s linear infinite; }
+.pt-chariot { font-size: 46cqi; line-height: 1; }
+@media (prefers-reduced-motion: reduce) { .pt-anneau { animation-duration: 2.4s; } }
+/* v121 : en file d'attente, le panier est là mais rien ne tourne */
+.panier-tourne.attente .pt-anneau { animation: none; border-top-color: rgba(255, 255, 255, .18); border-right-color: rgba(255, 255, 255, .18); }
+.panier-tourne.attente .pt-rond { opacity: .8; }
 /* v120 : point ambre = les bannières ont répondu pour ton nom, choix à faire */
 .point-choix { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--ambre, #f0b43c);
   border: 2px solid var(--carte, #1b211e); pointer-events: none; }

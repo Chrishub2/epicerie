@@ -30,6 +30,7 @@ import { jourQuebec } from './couverture-circulaires.js';
 import { aRelier, appliquerFamilles, rattacher } from './rattacher.js';
 import { aRanger, appliquerRangement } from './rayons-defaut.js';
 import { appareil, etapesPosition, messagePosition } from './position-aide.js';
+import { vocabulaire, restaurerAccents } from './accents.js';
 import { construireArbre, nouvelleFicheGenerique, enfantsGenerique } from './arbre-recherche.js';
 import { chargerVisuels, sourcesRattachement, familleDe, photoDe, photoListe, PHOTO_VIDE, definirPhotosPro, aPhotoPro, etatPhotoPro, marquerPhotoEnvoyee, photoMaisonPermise } from './visuels.js';
 
@@ -241,6 +242,8 @@ function deciderNomsInconnus() {
       toast(`Rien trouvé chez les bannières pour « ${fiche.nom} » : il reste dans Prépa, sans prix proposé.`);
     } else if (d.choix === 'auto') {
       choisirProduitNom(r.id, d.groupe, true);
+    } else if (d.choix === 'generique') {
+      garderNomGenerique(r.id, d.offres);
     } else {
       S.maj((x) => { const y = x.recherches.find((z) => z.id === r.id); y.choixAttendu = true; });
       if (!document.hidden && !document.documentElement.classList.contains('modale-ouverte')) ouvrirChoixNom(r.id);
@@ -270,13 +273,32 @@ function choisirProduitNom(rechId, g, auto = false) {
   toast(`${auto ? 'Trouvé tel quel' : 'Choisi'} : ${maj.nom} · prix de ${prix.length} bannière${prix.length > 1 ? 's' : ''}`);
 }
 
+/** v138 — Ton nom est générique (« Tourtière ») : la fiche le garde tel quel, sans marque ni format,
+ *  et reçoit le moins cher de chaque bannière (chaque prix garde le produit et le format vraiment vendus). */
+function garderNomGenerique(rechId, offres) {
+  const e = S.get();
+  const r = e.recherches.find((x) => x.id === rechId);
+  const fiche = r && e.articles.find((a) => a.id === r.articleId);
+  if (!fiche) return;
+  const prix = RB.prixGenerique(offres, fiche.id, jourQuebec(), (b) => `px-${rechId}-${b}`);
+  S.maj((x) => {
+    const ar = x.articles.find((a) => a.id === fiche.id);
+    Object.assign(ar, { uniteRef: RB.uniteGenerique(offres), prixVerifieLe: jourQuebec() });
+    const ids = new Set(x.prix.map((p) => p.id));
+    prix.forEach((p) => { if (!ids.has(p.id)) x.prix.push(p); });
+    const y = x.recherches.find((z) => z.id === rechId);
+    y.choix = 'generique'; y.choixLe = new Date().toISOString();
+  });
+  toast(`${fiche.nom} : toutes sortes · le moins cher chez ${prix.length} bannière${prix.length > 1 ? 's' : ''}`);
+}
+
 /** Fenêtre « Ton nom ne correspond pas tout à fait » (maquette recherche-niveaux-v2, moment 6). */
 function ouvrirChoixNom(rechId) {
   const e = S.get();
   const r = e.recherches.find((x) => x.id === rechId);
   const fiche = r && e.articles.find((a) => a.id === r.articleId);
   if (!fiche) return;
-  const groupes = RB.regrouper(r).slice(0, 8);
+  const groupes = RB.choixPresentes(r, fiche.nom).slice(0, 8);   // v138 : seulement les produits qui parlent de ton nom
   ouvrirModale('Ton nom ne correspond pas tout à fait', `<p class="doux">J'ai trouvé ceci chez les bannières pour « ${esc(fiche.nom)} ». Choisis le bon, ou garde ton nom.</p>
     ${groupes.map((g, i) => `<button class="sugg" data-choix="${i}" style="border:1px solid var(--ligne);border-radius:10px;margin-top:6px">${g.image ? `<img class="vignette petite" src="${esc(g.image)}" alt="">` : '<span class="vignette petite"></span>'}
       <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(g.nom)}</span>
@@ -297,7 +319,6 @@ function ouvrirChoixNom(rechId) {
 const choixNomDe = (articleId) => (S.get().recherches || []).find((r) => r.but === 'nom' && r.articleId === articleId && r.choixAttendu && !r.choixLe) || null;
 
 /** Panier qui tourne sur la photo : une vérification ou une recherche de cette fiche (ou de ses fiches dessous) est en cours. */
-const SVG_PANIER = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 13 L13 5 M23 13 L19 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/><path d="M4 13 H28 L25 26 a2 2 0 0 1 -2 1.6 H9 a2 2 0 0 1 -2 -1.6 Z" fill="currentColor"/><path d="M11 17 V23 M16 17 V23 M21 17 V23" stroke="var(--carte, #1b211e)" stroke-width="2" stroke-linecap="round"/></svg>';
 function panierQuiTourne(a) {
   const e = S.get();
   if (!(e.recherches || []).length) return '';
@@ -308,8 +329,10 @@ function panierQuiTourne(a) {
   if (!ouvertes.length) return '';
   // v121 : le panier TOURNE seulement quand une bannière a commencé à répondre ; en file d'attente, il reste immobile
   const cherche = ouvertes.some((r) => Object.keys(r.bannieres || {}).length > 0);
-  return cherche ? `<span class="panier-tourne" title="Je cherche chez les bannières">${SVG_PANIER}</span>`
-    : `<span class="panier-tourne attente" title="En attente de recherche chez les bannières">${SVG_PANIER}</span>`;
+  // v138 : même panier que l'extension (🛒 sur rond foncé) ; seul l'anneau vert tourne, le panier reste immobile
+  const panier = '<span class="pt-rond"><span class="pt-anneau"></span><span class="pt-chariot" aria-hidden="true">🛒</span></span>';
+  return cherche ? `<span class="panier-tourne" title="Je cherche chez les bannières">${panier}</span>`
+    : `<span class="panier-tourne attente" title="En attente de recherche chez les bannières">${panier}</span>`;
 }
 
 /**
@@ -1235,6 +1258,21 @@ async function valider() {
 }
 
 
+// Vocabulaire des accents : noms du référentiel, leurs noms alternatifs français et les noms de tes fiches (recalculé si ça change)
+let vocabCache = null, vocabCle = '';
+function vocabAccents() {
+  const src = sourcesRattachement(), e = S.get();
+  const cle = `${src ? 1 : 0}:${e.articles.length}`;
+  if (vocabCache && vocabCle === cle) return vocabCache;
+  const noms = [...e.articles.map((a) => a.nom)];
+  if (src) {
+    for (const r of Object.values(src.generiques)) noms.push(r[2]);
+    for (const alt of Object.values(src.alternatifs || {})) noms.push(...(alt.fr || []));
+  }
+  vocabCache = vocabulaire(noms); vocabCle = cle;
+  return vocabCache;
+}
+
 // --- Recherche chez tes bannières (maquette recherche-bannieres-v1) ---
 let rechercheVue = null;   // { id, desabonner } : la demande affichée sous le champ, redessinée quand l'ordinateur répond
 function arreterRechercheVue() { rechercheVue?.desabonner(); rechercheVue = null; }
@@ -1242,6 +1280,8 @@ function arreterRechercheVue() { rechercheVue?.desabonner(); rechercheVue = null
 /** Dépose la demande (synchronisée vers l'ordinateur) ; null si le téléphone n'est pas relié à ton foyer. */
 function deposerRecherche(q, articleId = null) {
   if (!Sync.estPret()) return null;
+  // v138 : accents manquants remis avant l'envoi (« tourtiere » → « tourtière ») ; certains sites ne trouvent rien sans eux
+  q = restaurerAccents(q, vocabAccents());
   const r = { ...RB.nouvelleRecherche(q, S.uid('rch')), ...(articleId ? { articleId, but: 'nom' } : {}) };   // articleId : la fiche à compléter
   S.maj((e) => {
     const vieilles = new Set(RB.aRetirer(e.recherches));
@@ -1261,9 +1301,13 @@ function suivreRecherche(id, quantite) {
     const empreinte = JSON.stringify(r.bannieres || {});
     if (empreinte === avant) return;
     avant = empreinte;
-    const groupes = RB.regrouper(r).slice(0, 8);
-    boite.innerHTML = htmlRechercheBannieres(r, groupes);
+    // v138 : seulement les produits qui parlent de ce que tu as écrit ; en tête, « toutes sortes » (le moins cher de chaque bannière)
+    const groupes = RB.choixPresentes(r, r.q).slice(0, 8);
+    const gen = groupes.length >= 2 ? RB.moinsCherParBanniere(r, r.q) : [];
+    boite.innerHTML = htmlRechercheBannieres(r, groupes, gen);
     $$('[data-rb]', boite).forEach((b) => b.onclick = () => { terminerSaisie(); ajouterDepuisBannieres(groupes[Number(b.dataset.rb)], quantite); });
+    const bg = $('[data-rbgen]', boite);
+    if (bg) bg.onclick = () => { terminerSaisie(); ajouterGeneriqueDepuisBannieres(r.q, gen, quantite); };
   };
   rechercheVue = { id, desabonner: S.abonner(dessiner) };
   dessiner();
@@ -1271,7 +1315,7 @@ function suivreRecherche(id, quantite) {
   setTimeout(() => { if (rechercheVue?.id === id) { avant = null; dessiner(); } }, 90000);
 }
 
-function htmlRechercheBannieres(r, groupes) {
+function htmlRechercheBannieres(r, groupes, gen = []) {
   const av = RB.avancement(r);
   const trouve = RB.ORDRE.filter((b) => av.etats[b] === 'fait').length;
   // Roue qui tourne : la recherche de cette bannière est en cours (ou attend l'ordinateur)
@@ -1283,6 +1327,11 @@ function htmlRechercheBannieres(r, groupes) {
   return `<div class="rb-titre"><span>Chez tes bannières · ton Chrome</span><span>${av.fait < av.total ? `${ROUE} recherche… ${av.fait} sur ${av.total}` : `${trouve} sur ${av.total}`}</span></div>
     <div class="rb-etats">${RB.ORDRE.map((b) => `<span class="rb-e ${av.etats[b]}" title="${esc(titres[av.etats[b]])}">${icones[av.etats[b]]} ${esc(nomBanniere(b))}</span>`).join('')}</div>
     ${silence ? '<div class="rb-note">Ton ordinateur n\'a pas encore répondu : la recherche se fera dès que Chrome y sera ouvert.</div>' : ''}
+    ${gen.length ? `<button class="sugg" data-rbgen="1"><span class="vignette petite" style="display:grid;place-items:center;font-size:20px">🛒</span>
+        <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(r.q.replace(/^./, (c) => c.toUpperCase()))} · toutes sortes</span>
+        <span class="doux une-ligne" style="display:block;font-size:12px">Le moins cher de chaque bannière · ${gen.length} bannière${gen.length > 1 ? 's' : ''}</span>
+        <span class="rb-chips">${gen.map((o) => chip(o)).join('')}</span></span>
+        <span class="rb-px">${esc(argent(gen[0].prix))}<small>${esc(nomBanniere(gen[0].banniere))}</small></span></button>` : ''}
     ${groupes.map((g, i) => {
       const m = g.meilleur;
       return `<button class="sugg" data-rb="${i}">${g.image ? `<img class="vignette petite" src="${esc(g.image)}" alt="">` : '<span class="vignette petite"></span>'}
@@ -1308,6 +1357,20 @@ function ajouterDepuisBannieres(g, quantite = 1) {
   S.maj((e) => e.prix.push(...prix));
   ajouterALaListe(a.id, quantite);
   toast(`${a.nom} ajouté · prix de ${prix.length} bannière${prix.length > 1 ? 's' : ''}`);
+  montrerAjout(a.id);
+}
+
+/** v138 — « Toutes sortes » : fiche à ton nom (sans marque ni format) + le moins cher de chaque bannière. */
+function ajouterGeneriqueDepuisBannieres(q, offres, quantite = 1) {
+  const a = assurerArticle(q, { uniteRef: RB.uniteGenerique(offres) });
+  const prix = RB.prixGenerique(offres, a.id, jourQuebec());
+  S.maj((e) => {
+    e.prix.push(...prix);
+    const ar = e.articles.find((x) => x.id === a.id);
+    if (ar) ar.prixVerifieLe = jourQuebec();
+  });
+  ajouterALaListe(a.id, quantite);
+  toast(`${a.nom} (toutes sortes) ajouté · le moins cher chez ${prix.length} bannière${prix.length > 1 ? 's' : ''}`);
   montrerAjout(a.id);
 }
 

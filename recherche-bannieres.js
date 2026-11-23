@@ -375,17 +375,38 @@ export function aAppliquer(recherches, maintenant = Date.now()) {
 /** Demandes « nom » terminées dont le choix n'est pas encore fait. */
 export const choixEnAttente = (recherches) => (recherches || []).filter((r) => r.but === 'nom' && r.articleId && r.etat === 'fait' && !r.choixLe);
 
-/** Décision automatique : { choix: 'aucun' } | { choix: 'auto', groupe } | { choix: 'fenetre', groupes }. */
+/**
+ * Décision automatique : { choix: 'aucun' } | { choix: 'auto', groupe } | { choix: 'generique', offres } | { choix: 'fenetre', groupes }.
+ * v138 (demande de Chris, « tourtière ») : le nom écrit est un nom GÉNÉRIQUE, plusieurs variantes sont possibles.
+ * - un seul produit pertinent → rattaché tel quel (auto) ;
+ * - plusieurs produits qui SONT ce générique (le mot en tête) → la fiche garde ton nom, et chaque bannière
+ *   donne son moins cher (au kg / L quand les formats le permettent) ;
+ * - seulement des produits qui le CONTIENNENT (« crème glacée à la fraise » pour « fraise ») → fenêtre de choix.
+ */
 export function decisionNom(r, nomFiche) {
-  const groupes = regrouper(r).slice(0, 8);
+  const groupes = choixPresentes(r, nomFiche);
   if (!groupes.length) return { choix: 'aucun' };
-  const voulus = [...mots(nomFiche)].sort().join(' ');
-  const exacts = groupes.filter((g) => {
-    const f = ficheDuGroupe(g);
-    return [...mots(`${f.marque} ${f.nom}`)].sort().join(' ') === voulus || [...mots(f.nom)].sort().join(' ') === voulus;
-  });
-  if (exacts.length === 1) return { choix: 'auto', groupe: exacts[0] };
-  return { choix: 'fenetre', groupes };
+  if (groupes.length === 1) return { choix: 'auto', groupe: groupes[0] };
+  const offres = moinsCherParBanniere(r, nomFiche);
+  if (offres.length) return { choix: 'generique', offres };
+  return { choix: 'fenetre', groupes: groupes.slice(0, 8) };
+}
+
+/** Prix d'une fiche générique : un par bannière, chacun avec le produit et le format vraiment vendus (ajout seulement). */
+export function prixGenerique(offres, articleId, jour = new Date().toISOString().slice(0, 10), nouvelId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`) {
+  return offres.map((o) => ({
+    id: nouvelId(o.banniere), articleId, banniere: o.banniere, offre: prixTexte(o.prix), prixNum: o.prix,
+    prixRegulier: o.regulier && o.regulier > o.prix ? o.regulier : null,
+    format: o.produit?.format ? formatLisible(o.produit.format) : null,
+    type: o.regulier && o.regulier > o.prix ? 'circulaire' : 'regulier', fin: null,
+    source: SOURCE, observeLe: jour, nomProduit: o.produit?.nom || '', url: o.produit?.url || null,
+  }));
+}
+
+/** Unité de comparaison d'une fiche générique : kg ou L si tous les produits retenus le permettent, sinon à l'unité. */
+export function uniteGenerique(offres) {
+  const bases = new Set(offres.map((o) => analyserFormat(o.produit?.format || '')?.base || 'unite'));
+  return bases.size === 1 ? [...bases][0] : 'unite';
 }
 
 /** Ce qui change dans ta fiche quand tu choisis un produit : nom, marque, format, photo… (le code-barres seulement s'il est sûr). */
