@@ -37,16 +37,16 @@ function prixAttendu(a, banniere, varianteId) {
   const offres = memes.length ? memes : toutes;
   const ici = offres.filter((o) => o.banniere === banniere).sort((x, y) => x.pu - y.pu)[0];
   const o = ici || offres[0];
-  return o ? { pu: o.pu, uniteRef: o.uniteRef, prixArticle: autreVariante ? null : o.prixArticle, banniere: o.banniere, offre: o.offre, type: o.type,
+  return o ? { pu: o.pu, uniteRef: o.uniteRef, prixArticle: autreVariante ? null : o.prixArticle, format: o.format || null, banniere: o.banniere, offre: o.offre, type: o.type,
     fin: o.fin || null, source: o.source, observeLe: o.observeLe || null, ailleurs: !ici, autreVariante, produitAffiche: o.produitOffre || '',
     preuve: preuveDe(o) } : null;
 }
 
 /** Ce qui permet de prouver le prix affiché à la caisse : où il a été vu, lien ou photo. */
 function preuveDe(o) {
-  return { prixId: o.id || null, source: o.source || null, type: o.type || null, fin: o.fin || null, observeLe: o.observeLe || null,
-    banniere: o.banniere, magasinNom: o.magasinNom || null, produit: o.produitOffre || o.nomProduit || null,
-    url: o.url || null, lienMarchand: o.lienMarchand || null, photoId: o.photoId || null, offre: o.offre || null };
+  return { prixId: o.id || null, source: o.source || null, type: o.type || null, debut: o.debut || null, fin: o.fin || null, observeLe: o.observeLe || null,
+    banniere: o.banniere, magasinNom: o.magasinNom || null, produit: o.produitOffre || o.nomProduit || null, format: o.format || null,
+    url: o.url || null, lienMarchand: o.lienMarchand || null, photoId: o.photoId || null, offre: o.offre || null, offreCirculaire: o.offreCirculaire || null };
 }
 
 /** « Prix affichés dans l'app » envoyés à l'IA pour qu'elle explique les écarts. */
@@ -65,6 +65,28 @@ export function attendusListe() {
   });
 }
 
+/** Prix au kg écrit dans un texte (« 4,39 $/kg », « 3,49 $/lb », « 0,77 $/100 g ») ; null s'il n'y en a pas. */
+export function auKg(texte) {
+  const m = /(\d+(?:[.,]\d+)?)\s*\$?\s*\/\s*(kg|lb|100\s*g)\b/i.exec(String(texte || ''));
+  if (!m) return null;
+  const v = Number(m[1].replace(',', '.')), u = m[2].toLowerCase().replace(/\s/g, '');
+  return u === 'kg' ? v : u === 'lb' ? v / 0.45359237 : v * 10;
+}
+
+/**
+ * Prix attendu AU KG pour un produit pesé : prix au kg / à la lb affiché, sinon prix d'un sac ÷ son poids (« 3,49 $ · 907 g »).
+ * null si le prix affiché n'a pas de poids : il n'est alors pas comparable à une pesée.
+ */
+export function attenduAuKg(att) {
+  if (!att) return null;
+  const k = auKg(att.offre);
+  if (k != null) return k;
+  if (att.uniteRef === 'kg' && att.pu != null) return att.pu;
+  const f = analyserFormat(att.format);
+  if (f?.base === 'kg' && f.total > 0 && att.prixArticle != null) return att.prixArticle / f.total;
+  return null;
+}
+
 /** Compare le prix payé (ligne de reçu) au prix affiché ; explique l'écart avec des règles simples + l'IA. */
 function comparerPrix(l, ar, att, r, mode = modeRabais(r)) {
   const offre = offreLigne(l, mode);
@@ -73,8 +95,18 @@ function comparerPrix(l, ar, att, r, mode = modeRabais(r)) {
   if (!offre) return { ...base, statut: 'inconnu' };
   const np = normaliser(offre, ar.format, ar.uniteRef);
   let paye = null, attendu = null, unite = '';
-  if (att && estPese(l) && np.prixUnitaire != null) {        // produit pesé : on compare au kg
-    paye = np.prixUnitaire; attendu = att.pu; unite = att.uniteRef === 'kg' ? '/kg' : att.uniteRef === 'l' ? '/L' : '';
+  if (att && estPese(l)) {
+    // Produit pesé : TOUJOURS au kg, quelle que soit l'unité de la fiche (« Poires » comptées à l'unité, 22 nov. 2026 :
+    // le total 5,07 $ pour 1,155 kg était comparé à 3,49 $ « l'article »). Pas de prix au poids affiché → pas comparable.
+    // Le vrac se compare au vrac : un prix au kg / à la lb de la même bannière passe avant un sac (« 3,49 $ · 907 g »).
+    const vrac = offresArticle(ar).filter((o) => o.source !== 'recu' && !o.perso && o.banniere === r.banniere && auKg(o.offre) != null)
+      .sort((x, y) => auKg(x.offre) - auKg(y.offre))[0];
+    if (vrac && auKg(att.offre) == null) {
+      att = { ...att, offre: vrac.offre, format: vrac.format || null, prixArticle: null, type: vrac.type, fin: vrac.fin || null,
+        source: vrac.source, observeLe: vrac.observeLe || null, ailleurs: false, preuve: preuveDe(vrac) };
+    }
+    const pk = auKg(offre), ak = attenduAuKg(att);
+    if (pk != null && ak != null) { paye = pk; attendu = ak; unite = '/kg'; }
   } else if (att && att.prixArticle != null) {               // à l'unité : prix d'un article
     paye = prixParArticle(l, mode); attendu = att.prixArticle;
   } else if (att && np.prixUnitaire != null) {               // sinon : au kg / L / unité
@@ -82,7 +114,10 @@ function comparerPrix(l, ar, att, r, mode = modeRabais(r)) {
   }
   if (paye == null) {
     const p = estPese(l) ? null : prixParArticle(l, mode);
-    return { ...base, statut: 'inconnu', paye: p, explication: ['Aucun prix n\'était affiché dans l\'app pour comparer.'] };
+    const pourquoi = att && estPese(l)
+      ? `Le prix affiché dans l'app (${att.offre || argent(att.prixArticle)}) n'indique pas de poids : il ne se compare pas à un produit pesé.`
+      : 'Aucun prix n\'était affiché dans l\'app pour comparer.';
+    return { ...base, statut: 'inconnu', paye: p, explication: [pourquoi] };
   }
   const ecart = paye - attendu;
   const statut = Math.abs(ecart) <= TOLERANCE ? 'ok' : ecart < 0 ? 'moins' : 'plus';
@@ -491,7 +526,9 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
       const ln = x.recus.find((y) => y.id === recuId)?.lignes?.[i];
       if (ln) {
         ln.articleId = ar.id; ln.lien = lien; if (va) ln.varianteId = va.id;
-        ln.verdict = { statut: verdict.statut, paye: verdict.paye ?? null, attendu: verdict.attendu ?? null, unite: verdict.unite || '' };
+        // v128 : la source du prix prévu est gardée (preuve en lien dans l'écran du reçu ; « chez cette bannière » ou « ailleurs »)
+        ln.verdict = { statut: verdict.statut, paye: verdict.paye ?? null, attendu: verdict.attendu ?? null, unite: verdict.unite || '',
+          banniere: verdict.banniereAffichee || null, explication: verdict.explication?.length ? verdict.explication : null, preuve: verdict.preuve || null };
       }
     });
     if (offre && r.banniere) bilan.prix++;
@@ -632,42 +669,146 @@ export function htmlDernierAchat(v, articleId) {
   </div>`;
 }
 
-/** Détail complet d'un reçu (en-tête, lignes, totaux, paiement, fidélité, autres infos). */
+// ---------------------------------------------------------------------
+// Écran du reçu (v128, maquette recu-v2 approuvée par Chris le 22 nov. 2026) :
+// la facture en un coup d'œil ; « payé plus que le prix affiché ICI » (à réclamer) séparé de
+// « moins cher ailleurs » (pour la prochaine fois) ; chaque prix prévu avec sa PREUVE en lien et sa date ;
+// le reste regroupé et replié. Les lignes restent touchables (data-ligne) : « C'est le bon produit » / « Changer ».
+// ---------------------------------------------------------------------
+
+/** Source du prix prévu d'une ligne : gardée dans le verdict (reçus récents), sinon retrouvée parmi les prix du produit. */
+function sourcePrevu(r, l) {
+  const vd = l.verdict;
+  if (!vd || vd.attendu == null) return null;
+  if (vd.preuve) return { ...vd.preuve, banniere: vd.banniere || vd.preuve.banniere };
+  const a = l.articleId && S.get().articles.find((x) => x.id === l.articleId);
+  if (!a) return null;
+  const valeur = (o) => (vd.unite === '/kg' ? auKg(o.offre) : (o.prixArticle ?? o.pu));
+  const cands = offresArticle(a).filter((o) => o.source !== 'recu' && !o.perso && valeur(o) != null && Math.abs(valeur(o) - vd.attendu) < 0.011);
+  const o = cands.find((x) => x.banniere === r.banniere) || cands[0];
+  return o ? { ...preuveDe(o), retrouvee: true } : null;
+}
+
+/** Liens de preuve (page de circulaire signée, site de la bannière, épiceries.ca) + date du prix. */
+function htmlPreuvePrevu(src, dateAchat) {
+  if (!src) return '<div class="rc-vu">Source du prix prévu introuvable.</div>';
+  const ban = esc(nomBanniere(src.banniere));
+  const lien = (url, texte, attrs = '') => `<a href="${esc(url)}" target="_blank" rel="noopener"${attrs}>${texte}</a>`;
+  const liens = [];
+  if (src.offreCirculaire) liens.push(lien(BANNIERES[src.banniere]?.circulaire || '#', `📄 Page de la circulaire ${ban}`, ` data-offrecirc="${esc(src.offreCirculaire)}"`));
+  else if (src.type === 'circulaire' && BANNIERES[src.banniere]?.circulaire && !src.url) liens.push(lien(BANNIERES[src.banniere].circulaire, `📄 Circulaire ${ban}`));
+  if (src.lienMarchand) liens.push(lien(src.lienMarchand, `🔗 Site de ${ban}`));
+  if (src.url) liens.push(lien(src.url, src.source === 'epiceries_ca' ? '🔗 épiceries.ca' : src.source === 'site_banniere' ? `🔗 Site de ${ban}` : '🔗 Source'));
+  if (src.source === 'photo') liens.push('<span class="rc-vu">📷 Photo de l\'étiquette</span>');
+  // Fraîcheur : en vigueur le jour de l'achat, sinon l'âge du relevé
+  let vu = '', vieux = false;
+  if (src.debut && src.fin && dateAchat && src.debut <= dateAchat && dateAchat <= src.fin) vu = `En vigueur le jour de l'achat (jusqu'au ${dateCourte(src.fin)})`;
+  else if (src.observeLe) {
+    const jours = dateAchat ? Math.round((Date.parse(dateAchat) - Date.parse(src.observeLe)) / 864e5) : 0;
+    vieux = jours > 14;
+    vu = `Prix vu le ${dateCourte(src.observeLe)}${jours > 60 ? ' — trop vieux pour s\'y fier' : vieux ? ' — à revérifier' : ''}`;
+  }
+  return `${liens.length ? `<div class="rc-preuve">${liens.join('')}</div>` : '<div class="rc-vu">Aucune preuve en ligne pour ce prix.</div>'}${vu ? `<div class="rc-vu${vieux ? ' vieux' : ''}">${esc(vu)}</div>` : ''}`;
+}
+
+/** Montant de l'écart sur la ligne entière (prix × quantité, ou × poids en kg). */
+function ecartLigne(l) {
+  const vd = l.verdict;
+  if (vd?.paye == null || vd.attendu == null) return 0;
+  const p = pesee(l);
+  const qte = vd.unite === '/kg' && p ? (p.unite === 'lb' ? p.qte * 0.45359237 : p.qte) : (Number(l.quantite) || 1);
+  return Math.round((vd.paye - vd.attendu) * qte * 100) / 100;
+}
+
 export function htmlDetail(r) {
-  const e = S.get();
   const champ = (lib, val) => (val != null && val !== '' ? `<tr><td class="doux">${esc(lib)}</td><td>${esc(String(val))}</td></tr>` : '');
   const v = r.statut === 'lu' ? verifierRecu(r) : null;
-  const mode = modeRabais(r);
   const cons = consignes(r.lignes || []);
   const NATURE = { consigne: '♻️ Consigne', coupon: '🎟️ Coupon', sac: '🛍️ Sac', frais: '🧾 Frais' };
-  const verdict = !v ? '<div class="alerte">⏳ Pas encore lu (en attente du réseau).</div>'
-    : v.ok ? `<div class="alerte vert">✅ Reçu complet et bien lu — ${esc(v.resume)}</div>`
-    : `<div class="alerte">⚠️ À vérifier : ${v.problemes.map(esc).join(' ')}${v.resume ? `<br><span class="doux">${esc(v.resume)}</span>` : ''}</div>`;
-  const ICONE = { ok: '<span class="rc-et ok" aria-label="associé">✓</span>', verifier: '<span class="rc-et ver" aria-label="à vérifier">!</span>',
-    aucun: '<span class="rc-et non" aria-label="aucune association">✗</span>', hors: '<span class="rc-et hors" aria-hidden="true">·</span>' };
-  const compte = { ok: 0, verifier: 0, aucun: 0, hors: 0 };
-  const lignes = (r.lignes || []).map((l, i) => {
-    const et = etatLigne(l);
-    compte[et]++;
-    const nat = natureLigne(l);
-    const nom = et === 'hors' && nat !== 'produit' ? `${NATURE[nat]} · ${l.libelle}` : (l.nomClair || l.nomEnLigne || l.libelle);
-    const extra = l.quantite > 1 && !pesee(l) ? ` ×${l.quantite}` : cons[i] ? ' ♻️' : '';
-    return `<li class="rc-l ${et}" data-ligne="${i}">${ICONE[et]}<span class="rc-nom">${esc(nom)}${extra}</span><span class="rc-px">${argent(l.prix)}</span></li>`;
-  }).join('');
-  return `${verdict}
-    ${r.bilan ? `<p class="doux">${esc(texteBilan(r.bilan))}</p>` : ''}
-    ${r.applique ? `<div class="alerte ${compte.verifier || compte.aucun ? 'ambre' : 'vert'}">Reconnaissance terminée : ✓ ${compte.ok} · ! ${compte.verifier} · ✗ ${compte.aucun}${compte.verifier || compte.aucun ? ' — touche les ! et ✗ pour les confirmer ou les corriger, ou scanne les produits en main.' : ' — tout est associé.'}</div>` : ''}
-    <h3>Produits (${(r.lignes || []).length}) <span class="doux" style="font-weight:400">· ✓ ${compte.ok} · ! ${compte.verifier} · ✗ ${compte.aucun}</span></h3>
-    <p class="doux" style="margin:0 0 4px">Touche une ligne pour la voir ou la corriger.</p>
-    ${lignes ? `<ul class="rc-liste">${lignes}</ul>` : '<p class="doux">Aucune ligne reconnue.</p>'}
-    <details id="rcEntierBloc" style="margin-top:10px"><summary><b>Reçu entier (photos)</b></summary><div id="rcEntier"></div></details>
-    <h3>Magasin</h3><table class="comp">${champ('Bannière', r.banniere && nomBanniere(r.banniere))}${champ('Succursale', r.magasin)}${champ('Adresse', r.adresse)}${champ('Téléphone', r.telephone)}
-      ${champ('Date', r.date)}${champ('Heure', r.heure)}${champ('Caisse', r.caisse)}${champ('Caissier', r.caissier)}${champ('Transaction', r.transaction)}</table>
-    <h3>Totaux</h3><table class="comp">${champ('Nombre d\'articles', r.nombreArticles)}${champ('Sous-total', r.sousTotal != null ? argent(r.sousTotal) : null)}
-      ${champ('TPS', r.tps != null ? argent(r.tps) : null)}${champ('TVQ', r.tvq != null ? argent(r.tvq) : null)}
-      ${r.total != null ? `<tr><td><b>Total</b></td><td><b>${argent(r.total)}</b></td></tr>` : ''}${champ('Économies', r.economies != null ? argent(r.economies) : null)}</table>
-    <h3>Paiement et fidélité</h3><table class="comp">${champ('Paiement', r.modePaiement)}${champ('Programme', r.programmeFidelite)}
-      ${champ('Points gagnés', r.pointsGagnes)}${champ('Solde de points', r.soldePoints)}</table>
-    ${r.autres?.length ? `<h3>Autres informations</h3><table class="comp">${r.autres.map((x) => champ(x.libelle, x.valeur)).join('')}</table>` : ''}
-    ${r.texte ? `<details style="margin-top:8px"><summary class="doux">Texte lu</summary><pre style="white-space:pre-wrap;font-size:12px">${esc(r.texte)}</pre></details>` : ''}`;
+  const ban = r.banniere ? nomBanniere(r.banniere) : 'ce magasin';
+  const pu = (x, u) => `${argent(x)}${u || ''}`;
+  const nomDe = (l, i) => {
+    const et = etatLigne(l), nat = natureLigne(l);
+    const n = et === 'hors' && nat !== 'produit' ? `${NATURE[nat]} · ${l.libelle}` : (l.nomClair || l.nomEnLigne || l.libelle);
+    return n + (l.quantite > 1 && !pesee(l) ? ` ×${l.quantite}` : cons[i] ? ' ♻️' : '');
+  };
+  const sousRabais = (l) => (l.rabais ? (soustrait(l) ? `rabais ${argent(l.rabais)}, dont −${argent(soustrait(l))} à la caisse` : `rabais ${argent(l.rabais)} déjà déduit`) : '');
+  const ligne = (l, i, sous = '', cls = '') => `<li class="rc-l ${etatLigne(l)} ${cls}" data-ligne="${i}"><span class="rc-nom">${esc(nomDe(l, i))}${sous ? `<span class="rc-sous">${sous}</span>` : ''}</span><span class="rc-px">${argent(l.prix)}</span></li>`;
+
+  // Tri des lignes
+  const L = r.lignes || [];
+  const G = { verifier: [], ici: [], ailleurs: [], ok: [], moins: [], sans: [], hors: [] };
+  L.forEach((l, i) => {
+    const et = etatLigne(l), st = l.verdict?.statut;
+    if (et === 'hors') G.hors.push(i);
+    else if (et === 'verifier' || et === 'aucun') G.verifier.push(i);
+    else if (st === 'plus') { const src = sourcePrevu(r, l); (src && r.banniere && src.banniere && src.banniere !== r.banniere ? G.ailleurs : G.ici).push(i); }
+    else if (st === 'ok') G.ok.push(i);
+    else if (st === 'moins') G.moins.push(i);
+    else G.sans.push(i);
+  });
+  const parEcart = (a, b) => ecartLigne(L[b]) - ecartLigne(L[a]);
+  G.ici.sort(parEcart); G.ailleurs.sort(parEcart);
+  const totIci = Math.round(G.ici.reduce((s, i) => s + ecartLigne(L[i]), 0) * 100) / 100;
+  const totAilleurs = Math.round(G.ailleurs.reduce((s, i) => s + ecartLigne(L[i]), 0) * 100) / 100;
+  const bansAilleurs = [...new Set(G.ailleurs.map((i) => sourcePrevu(r, L[i])?.banniere).filter(Boolean).map(nomBanniere))];
+
+  // Carte d'un écart (ici : à réclamer ; ailleurs : info pour la prochaine fois)
+  const carte = (i, ici) => {
+    const l = L[i], vd = l.verdict, src = sourcePrevu(r, l);
+    const raisons = (vd.explication || []).filter((x) => !/Politique d'exactitude/.test(x));
+    const memeTexte = (x, y) => String(x).replace(/\s/g, '') === String(y).replace(/\s/g, '');
+    const offreSrc = src?.offre && !memeTexte(src.offre, pu(vd.attendu, vd.unite)) ? ` · ${esc(src.offre)}${src.format ? ` ${esc(src.format)}` : ''}` : '';
+    return `<li class="rc-carte ${ici ? 'ici' : 'ailleurs'}" data-ligne="${i}">
+      <div class="rc-c1"><span>${esc(nomDe(l, i))}</span><span class="rc-ecart">${ici ? '+' : '−'}${argent(Math.abs(ecartLigne(l)))}</span></div>
+      <dl class="rc-comp">
+        <dt>Payé</dt><dd><b>${pu(vd.paye, vd.unite)}</b>${vd.unite || Number(l.quantite) > 1 ? ` <span class="doux">(${argent(l.prix)})</span>` : ''}</dd>
+        <dt>${ici ? 'Affiché' : 'Ailleurs'}</dt><dd>${pu(vd.attendu, vd.unite)} <span class="doux">· ${esc(nomBanniere(src?.banniere || vd.banniere || r.banniere))}${offreSrc}</span></dd>
+        ${l.rabais ? `<dt>Rabais</dt><dd>${esc(sousRabais(l))}</dd>` : ''}
+        <dt>Facture</dt><dd class="doux">${esc(l.libelle)}${l.poids ? ` · ${esc(l.poids)}` : ''}</dd>
+      </dl>
+      ${raisons.length ? `<div class="rc-pourquoi">${raisons.map(esc).join(' ')}</div>` : ''}
+      ${htmlPreuvePrevu(src, r.date)}
+      ${ici ? `<div class="rc-droit">Prix affiché par ${esc(ban)} plus bas que payé : Politique d'exactitude des prix — article gratuit jusqu'à 15 $. Montre la preuve et ton reçu au service à la clientèle.</div>` : ''}
+    </li>`;
+  };
+  const groupe = (titre, ids, sous) => (ids.length
+    ? `<details class="rc-groupe"><summary>${titre}<span class="rc-n">${ids.length}</span></summary><ul class="rc-liste">${ids.map((i) => ligne(L[i], i, sous(L[i]))).join('')}</ul></details>` : '');
+
+  const alerte = !v ? '<div class="alerte">⏳ Pas encore lu (en attente du réseau).</div>'
+    : v.ok ? '' : `<div class="alerte">⚠️ À vérifier : ${v.problemes.map(esc).join(' ')}</div>`;
+  const date = r.date ? new Date(`${r.date}T12:00`).toLocaleDateString('fr-CA', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const quand = [date, r.heure ? r.heure.replace(':', ' h ') : '', r.nombreArticles != null ? `${r.nombreArticles} articles` : '', r.modePaiement].filter(Boolean);
+  return `${alerte}
+    <div class="rc-tete">
+      <div class="rc-mag">${esc(r.magasin || ban)}</div>
+      <div class="rc-quand">${quand.map(esc).join(' · ')}</div>
+      <div class="rc-chiffres">
+        <div><b>${r.total != null ? argent(r.total) : '—'}</b><span>payé</span></div>
+        <div class="vert"><b>${r.economies != null ? argent(r.economies) : '—'}</b><span>économisé</span></div>
+        <div class="${totIci > 0 ? 'rouge' : 'vert'}"><b>${argent(totIci)}</b><span>${totIci > 0 ? `de plus qu'affiché chez ${esc(ban)}` : `de plus qu'affiché chez ${esc(ban)} : aucun écart`}</span></div>
+      </div>
+      ${totAilleurs > 0 ? `<div class="rc-ailleurs-tete">💡 ${argent(totAilleurs)} de moins ailleurs (${esc(bansAilleurs.join(', '))})</div>` : ''}
+    </div>
+    ${G.verifier.length ? `<h3 class="rc-h">À vérifier <span class="doux">touche une ligne pour confirmer ou changer le produit</span></h3>
+      <ul class="rc-liste">${G.verifier.map((i) => ligne(L[i], i, etatLigne(L[i]) === 'aucun' ? 'Aucun produit associé' : 'Produit à confirmer', 'a-voir')).join('')}</ul>` : ''}
+    ${G.ici.length ? `<h3 class="rc-h">Payé plus que le prix affiché chez ${esc(ban)} <span class="doux">à réclamer</span></h3><ul class="rc-liste rc-cartes">${G.ici.map((i) => carte(i, true)).join('')}</ul>` : ''}
+    ${G.ailleurs.length ? `<h3 class="rc-h">Moins cher ailleurs <span class="doux">pour la prochaine fois</span></h3><ul class="rc-liste rc-cartes">${G.ailleurs.map((i) => carte(i, false)).join('')}</ul>` : ''}
+    <h3 class="rc-h">Le reste du reçu</h3>
+    ${groupe('✓ Au bon prix', G.ok, (l) => sousRabais(l))}
+    ${groupe('↓ Moins cher que prévu', G.moins, (l) => `<span class="rc-vert">${argent(Math.abs(ecartLigne(l)))} de moins que prévu (${pu(l.verdict.attendu, l.verdict.unite)})</span>${l.rabais ? ` · ${sousRabais(l)}` : ''}`)}
+    ${groupe('Sans prix pour comparer', G.sans, () => 'Aucun prix connu avant l\'achat')}
+    ${groupe('Hors produits', G.hors, () => '')}
+    <details id="rcEntierBloc" class="rc-groupe"><summary>🧾 Photos du reçu</summary><div id="rcEntier"></div></details>
+    <details class="rc-groupe"><summary>Détails de la facture</summary><div class="rc-details">
+      <table class="comp">${champ('Bannière', r.banniere && nomBanniere(r.banniere))}${champ('Succursale', r.magasin)}${champ('Adresse', r.adresse)}${champ('Téléphone', r.telephone)}
+      ${champ('Date', r.date)}${champ('Heure', r.heure)}${champ('Caisse', r.caisse)}${champ('Caissier', r.caissier)}${champ('Transaction', r.transaction)}
+      ${champ('Nombre d\'articles', r.nombreArticles)}${champ('Sous-total', r.sousTotal != null ? argent(r.sousTotal) : null)}
+      ${champ('TPS', r.tps != null ? argent(r.tps) : null)}${champ('TVQ', r.tvq != null ? argent(r.tvq) : null)}${champ('Total', r.total != null ? argent(r.total) : null)}
+      ${champ('Économies', r.economies != null ? argent(r.economies) : null)}${champ('Paiement', r.modePaiement)}${champ('Programme', r.programmeFidelite)}
+      ${champ('Points gagnés', r.pointsGagnes)}${champ('Solde de points', r.soldePoints)}${(r.autres || []).map((x) => champ(x.libelle, x.valeur)).join('')}</table>
+      ${v?.resume ? `<p class="doux">${esc(v.resume)}</p>` : ''}
+      ${r.texte ? `<details style="margin-top:8px"><summary class="doux">Texte lu</summary><pre style="white-space:pre-wrap;font-size:12px">${esc(r.texte)}</pre></details>` : ''}</div></details>
+    <button class="btn rv-principal" id="rcTermine" style="margin-top:14px">✓ Terminé</button>
+    <div class="rv-note">Tes corrections sont déjà enregistrées.</div>`;
 }

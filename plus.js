@@ -826,18 +826,29 @@ export async function ouvrirDetailRecu(id) {
   if (!r) return;
   const v = r.statut === 'lu' ? R.verifierRecu(r) : null;
   const nbFiches = (await R.aCompleter(id)).length;
-  ouvrirModale('Reçu', `${r.statut === 'lu' && r.lignes?.length ? `<div class="carte" style="padding:10px;margin-bottom:10px">
-      <b>Tu as les produits en main ?</b>
-      <p class="doux" style="margin:2px 0 8px">Scanne leur code-barres ou prends-les en photo : je trouve la ligne du reçu, je l'associe et j'ajoute le code à la fiche.</p>
-      <div class="rang envelopper"><button class="btn" id="rcScan">📷 Scanner un code-barres</button><button class="btn sec" id="rcPhotoProd">🖼️ Photo du produit</button></div></div>` : ''}
-    <div class="rang envelopper" style="margin-bottom:10px">
-      ${r.statut === 'lu' && r.lignes?.length ? '<button class="btn" id="rcAssocier">🔗 Associer les produits à la main</button>' : ''}
-      ${nbFiches ? `<button class="btn sec" id="rcCompleter">🔎 Compléter ${nbFiches} fiche(s) : photo, format, prix</button>` : ''}
-      ${r.statut === 'lu' && !(r.applique && r.bilan?.relies) ? '<button class="btn" id="rcAppliquer">Remplir ma liste avec ce reçu</button>' : ''}
-      ${r.statut === 'lu' && (!r.verification || r.source !== 'ia' || (r.applique && !r.bilan?.relies)) ? '<button class="btn sec" id="rcRelire">🔄 Relire avec l\'IA</button>' : ''}
-      ${v && !v.ok ? '<button class="btn sec" id="rcRefaire">📷 Reprendre ce reçu</button>' : ''}</div>
+  // v128 (maquette recu-v2) : la facture d'abord ; les outils (scanner, associer, relire…) rangés dans « Outils du reçu »
+  const aVoir = (r.lignes || []).some((l) => ['verifier', 'aucun'].includes(etatLigne(l)));
+  const aAppliquer = r.statut === 'lu' && !(r.applique && r.bilan?.relies);
+  ouvrirModale('Reçu', `${aAppliquer ? '<button class="btn" id="rcAppliquer" style="width:100%;margin-bottom:10px">Remplir ma liste avec ce reçu</button>' : ''}
     ${R.htmlDetail(r)}
-    <button class="btn danger" id="supRecu" style="margin-top:14px">Supprimer ce reçu</button>`, (c) => {
+    ${r.statut === 'lu' && r.lignes?.length ? `<details class="rc-groupe"${aVoir ? ' open' : ''}><summary>🛠 Outils du reçu</summary><div class="rc-details">
+      <p class="doux" style="margin:0 0 8px">Produits en main ? Scanne leur code-barres ou prends-les en photo : je retrouve la ligne et je l'associe.</p>
+      <div class="rang envelopper">
+        <button class="btn sec" id="rcScan">📷 Scanner un code-barres</button><button class="btn sec" id="rcPhotoProd">🖼️ Photo du produit</button>
+        <button class="btn sec" id="rcAssocier">🔗 Associer à la main</button>
+        ${nbFiches ? `<button class="btn sec" id="rcCompleter">🔎 Compléter ${nbFiches} fiche(s)</button>` : ''}
+        ${!r.verification || r.source !== 'ia' || (r.applique && !r.bilan?.relies) ? '<button class="btn sec" id="rcRelire">🔄 Relire avec l\'IA</button>' : ''}
+        ${v && !v.ok ? '<button class="btn sec" id="rcRefaire">📷 Reprendre ce reçu</button>' : ''}</div>
+      <button class="btn danger" id="supRecu" style="margin-top:12px">Supprimer ce reçu</button></div></details>`
+    : '<button class="btn danger" id="supRecu" style="margin-top:14px">Supprimer ce reçu</button>'}`, (c) => {
+    $('#rcTermine', c)?.addEventListener('click', () => fermerModale());
+    // Preuves : la page de circulaire (image privée) s'ouvre par un lien signé ; un lien ne déplie pas la ligne
+    const liensCirc = $$('[data-offrecirc]', c);
+    if (liensCirc.length) Sync.pagesDesOffres(liensCirc.map((x) => x.dataset.offrecirc)).then((urls) => urls && liensCirc.forEach((x) => {
+      if (urls[x.dataset.offrecirc]) x.href = urls[x.dataset.offrecirc];
+      else x.textContent = '📄 Circulaire (page plus gardée)';
+    })).catch(() => {});
+    $$('.rc-preuve a', c).forEach((a) => a.addEventListener('click', (ev) => ev.stopPropagation()));
     const det = $('#rcEntierBloc', c);
     const montrer = () => { if (det.open && !$('#rcEntier', c).childElementCount) R.apercuEntier(r.photoIds || [r.photoId], $('#rcEntier', c)); };
     det.addEventListener('toggle', montrer);

@@ -104,6 +104,10 @@ let surFermeture = null;
 function apresFermeture() { document.documentElement.classList.remove('modale-ouverte'); const f = surFermeture; surFermeture = null; f?.(); }
 export function fermerModale() { if (dlg().open) dlg().close(); apresFermeture(); }
 export function quandFermee(fn) { surFermeture = fn; }
+// iPhone : le pincement passe outre touch-action ; on l'arrête par ses événements « gesture » tant qu'une fenêtre est ouverte
+// (demande de Chris : l'écran zoomait en confirmant les lignes d'un reçu). Ailleurs dans l'app, le zoom reste permis.
+const bloquerZoom = (ev) => { if (document.documentElement.classList.contains('modale-ouverte')) ev.preventDefault(); };
+for (const t of ['gesturestart', 'gesturechange']) document.addEventListener(t, bloquerZoom, { passive: false });
 document.addEventListener('DOMContentLoaded', () => {
   $('#modaleFermer').onclick = fermerModale;
   dlg().addEventListener('close', apresFermeture); // secours : certains navigateurs ne le déclenchent pas
