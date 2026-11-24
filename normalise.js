@@ -51,7 +51,23 @@ export function infoUnite(u) {
  */
 export function analyserFormat(txt) {
   if (!txt) return null;
-  const s = String(txt).toLowerCase().replace(/×/g, 'x').replace(/,/g, '.').trim();
+  const brut = String(txt).toLowerCase().replace(/×/g, 'x').replace(/,/g, '.').replace(/\s+/g, ' ').trim();
+  // v147 : « paquet de 6 », « caisse de 24 » → 6, 24 unités (avant : lu comme 1 unité, sans erreur)
+  const paquet = brut.match(/^(?:paquet|pqt|caisse|boîte|boite|bte|sac|emballage|format)\s+de\s+(\d+)$/);
+  if (paquet) return { quantite: +paquet[1], unite: 'un', base: 'unite', total: +paquet[1] };
+  const direct = analyserFormatSimple(brut);
+  if (direct) return direct;
+  // v147 : double affichage et mots devant : « 454 g (1 lb) », « 907 g / 2 lb », « bte 284 ml » → la 1re mesure lisible
+  const sans = brut.replace(/\(.*?\)/g, ' ').replace(/^[a-zéèêàç.]+\s+(?=\d)/, '').replace(/\s+/g, ' ').trim();
+  for (const morceau of [sans, ...sans.split('/')]) {
+    const f = analyserFormatSimple(morceau.trim());
+    if (f) return f;
+  }
+  return null;
+}
+
+function analyserFormatSimple(s) {
+  if (!s) return null;
   // Multipack : « 12 x 355 ml »
   let m = s.match(/^(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*([a-zéèœ.]+)$/i);
   if (m) {
@@ -97,6 +113,17 @@ export function analyserOffre(txt) {
 
   // « $X » (format anglais)
   m = s.match(/^\$\s*(\d+(?:[.,]\d+)?)$/);
+  if (m) return { prix: nombre(m[1]), quantite: 1 };
+
+  // v147 : « $1.29/100g », « $4.99/lb » (sites en anglais)
+  m = s.match(/^\$\s*(\d+(?:[.,]\d+)?)\s*\/\s*([0-9]*\s*[a-zéèœ.]+)$/);
+  if (m) {
+    const info = infoUnite(m[2]);
+    return info ? { prix: nombre(m[1]), quantite: 1, parUnite: info } : null;
+  }
+
+  // v147 : nombre seul « 4.99 » / « 4,99 »
+  m = s.match(/^(\d+(?:[.,]\d+)?)$/);
   if (m) return { prix: nombre(m[1]), quantite: 1 };
 
   return null;
@@ -146,6 +173,29 @@ export function normaliser(offre, format, uniteRef) {
 }
 
 function arrondi(x) { return Math.round(x * 10000) / 10000; }
+
+/**
+ * v147 (règle de Chris) — Offre « N pour X $ » : le prix réduit vaut aussi pour 1 article, SAUF si les
+ * conditions l'interdisent. Lit les conditions de la circulaire :
+ *  - « ou 4 $ l'unité », « ou 7,49 $ ch. », « sinon 25,99 $ ch. », « ou 3,67 $ l'un. » → minimum N, prixSeul = ce prix ;
+ *  - « min. 2 », « minimum 2 », « à l'achat de 2 » (pas des points bonis) → minimum N, prixSeul = régulier connu ou null ;
+ *  - rien de tout ça → null (aucun minimum).
+ * Rend { minimum, prixSeul } ou null. prixSeul = prix d'UN article quand on en prend moins que le minimum.
+ */
+export function minimumOffre(offre, conditions, prixRegulier = null) {
+  const o = typeof offre === 'number' ? null : analyserOffre(offre);
+  const n = o && !o.parUnite && o.quantite > 1 ? o.quantite : null;
+  const c = String(conditions || '').toLowerCase().replace(/ /g, ' ');
+  if (!c && !n) return null;
+  const achatDe = c.match(/(?:min(?:imum)?\.?|à l['’]achat de)\s*(\d+)/);
+  const seul = c.match(/(?:\bou\b|\bsinon\b)\s*(\d+(?:[.,]\d+)?)\s*\$\s*(?:l['’]un(?:ité|\.)?|ch\b\.?|chacun|l['’]unité|ea)/)
+    || c.match(/(?:\bou\b|\bsinon\b)\s*(\d+(?:[.,]\d+)?)\s*\$/);
+  if (seul) return { minimum: achatDe ? +achatDe[1] : n || 2, prixSeul: nombre(seul[1]) };
+  if (achatDe && !/\b(?:pts|points|milles|miles)\b/.test(c)) {
+    return { minimum: +achatDe[1], prixSeul: prixRegulier > 0 ? prixRegulier : null };
+  }
+  return null;
+}
 
 /**
  * Format lisible : « 54000 g » → « 54 kg », « 1500 mL » → « 1,5 L », « 0.5 kg » → « 500 g ».

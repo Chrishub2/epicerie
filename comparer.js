@@ -42,8 +42,15 @@ const banniereDeCle = (k) => {
 // ---------------------------------------------------------------------
 // Tableau des offres d'un article (fiche + vue détail)
 // ---------------------------------------------------------------------
+/** v147 : pastille d'un prix hors calcul (ancien ou à venir). */
+function pastilleEtat(l) {
+  if (l.etat === 'aVenir') return `<span class="pastille ambre">à venir · dès le ${esc(String(l.debut).slice(0, 10))}</span>`;
+  if (l.etat === 'ancien') return `<span class="pastille">${l.age != null ? `vu il y a ${l.age} j` : 'date inconnue'} · à revérifier</span>`;
+  return '';
+}
+
 export function tableauOffres(a, { avecManquants = false } = {}) {
-  const lignes = offresArticle(a);
+  const lignes = offresArticle(a, { avecAnciens: true });
   const presentes = new Set(lignes.map((l) => l.banniere));
   const manquantes = avecManquants ? BANNIERES_MAGASIN.filter((b) => !presentes.has(b) && banniereActive(b) && (!a.exclusif || a.exclusif === b)) : [];
   if (!lignes.length && !manquantes.length) return `<p class="doux">Aucun prix connu pour l'instant.</p>`;
@@ -52,7 +59,7 @@ export function tableauOffres(a, { avecManquants = false } = {}) {
       <td>${l.perso ? logoCleHtml(cleOffre(l)) : logoVille(l.banniere)}
         ${l.produitOffre ? `<div style="font-size:13px"><b>${esc(l.produitOffre)}</b></div>` : ''}
         <div class="doux">${esc(l.offre)}${l.economie ? ` <b style="color:var(--vert)">(−${argent(l.economie)})</b>` : ''}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
-        <div>${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.aVerifier ? '<span class="pastille ambre">lu sur photo : à vérifier</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'flipp' ? '<span class="pastille" title="Trouvé automatiquement dans la circulaire (Flipp) : vérifie le produit">📰 circulaire</span>' : ''}${l.source === 'circulaire' ? `<span class="pastille" title="Lu dans une circulaire que tu as envoyée">📰 circulaire</span>${l.conditions ? `<span class="pastille ambre">${esc(l.conditions)}</span>` : ''}` : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
+        <div>${pastilleEtat(l)}${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.aVerifier ? '<span class="pastille ambre">lu sur photo : à vérifier</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'flipp' ? '<span class="pastille" title="Trouvé automatiquement dans la circulaire (Flipp) : vérifie le produit">📰 circulaire</span>' : ''}${l.source === 'circulaire' ? `<span class="pastille" title="Lu dans une circulaire que tu as envoyée">📰 circulaire</span>${l.conditions ? `<span class="pastille ambre">${esc(l.conditions)}</span>` : ''}` : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
         ${l.erreur ? `<div class="doux" style="color:var(--rouge)">${esc(l.erreur)}</div>` : ''}
         ${htmlPreuveRabais(l)}
       </td>
@@ -61,7 +68,7 @@ export function tableauOffres(a, { avecManquants = false } = {}) {
     ${manquantes.map((b) => `<tr><td>${logoVille(b)}<div class="doux">Prix inconnu</div></td>
       <td class="pu"><button class="btn sec" data-ajprix="${b}" style="padding:4px 10px">+ prix</button></td></tr>`).join('')}
   </table>
-  <p class="doux">Vert = le moins cher · rouge = le plus cher · ambre = moins de 5 % d'écart. (−x $) = économie sur le prix régulier.</p>`;
+  <p class="doux">Vert = le moins cher · rouge = le plus cher · ambre = moins de 5 % d'écart. (−x $) = économie sur le prix régulier.${lignes.some((l) => l.etat && l.etat !== 'courant') ? ' Gris = prix vu il y a plus de 60 jours ou pas encore commencé : pas compté.' : ''}</p>`;
 }
 
 /**
@@ -101,14 +108,14 @@ function lignesListe() {
 /** Pour chaque ligne : coût par arrêt (prix unitaire × quantité voulue). */
 function options(cleAutorisee = () => true) {
   return lignesListe().map(({ l, a }) => {
-    const f = analyserFormat(a.format);
-    const besoin = f && f.base === a.uniteRef ? f.total * l.quantite : null;
+    const offres = offresArticle(a);
+    const besoin = besoinDe(a, l, offres);
     const parCle = {};
-    for (const o of offresArticle(a)) {
+    for (const o of offres) {
       if (o.pu == null) continue;
       const k = cleOffre(o);
       if (!cleAutorisee(k)) continue;
-      const cout = besoin != null ? o.pu * besoin : (o.prixArticle != null ? o.prixArticle * l.quantite : null);
+      const cout = coutOffre(o, l, besoin);
       if (cout == null) continue;
       if (!(k in parCle) || cout < parCle[k].cout) parCle[k] = { cout, offre: o };
     }
@@ -116,14 +123,37 @@ function options(cleAutorisee = () => true) {
   });
 }
 
+/**
+ * v147 — Quantité de produit voulue (dans l'unité de comparaison de la fiche) : format de la fiche, sinon de sa variante
+ * préférée, sinon celui de l'offre la mieux classée. Toutes les bannières sont ainsi chiffrées pour la même quantité
+ * (avant : une fiche sans format comparait des emballages de tailles différentes). null si rien n'est lisible.
+ */
+export function besoinDe(a, l, offres = offresArticle(a)) {
+  const pref = (a.variantes || []).find((v) => v.id === a.variantePreferee && !v.retiree);
+  for (const fmt of [a.format, pref?.format, offres.find((o) => o.pu != null && !o.douteux)?.format]) {
+    const f = analyserFormat(fmt);
+    if (f && f.base === a.uniteRef) return f.total * l.quantite;
+  }
+  return null;
+}
+
+/**
+ * Coût d'une offre pour une ligne de liste. v147 (règle de Chris) : « N pour X $ » vaut à l'unité, sauf condition
+ * « min. » / « ou X $ l'unité » : sous le minimum, prix d'un seul article (ou offre inaccessible si on ne le connaît pas).
+ */
+export function coutOffre(o, l, besoin) {
+  if (o.minimum && l.quantite < o.minimum) return o.prixSeul != null ? o.prixSeul * l.quantite : null;
+  return besoin != null ? o.pu * besoin : (o.prixArticle != null ? o.prixArticle * l.quantite : null);
+}
+
 /** Coût d'une ligne de liste dans un « arrêt » donné (bannière ou magasin à rabais perso). null si pas de prix. */
 export function coutPour(l, a, cle) {
-  const f = analyserFormat(a.format);
-  const besoin = f && f.base === a.uniteRef ? f.total * l.quantite : null;
+  const offres = offresArticle(a);
+  const besoin = besoinDe(a, l, offres);
   let min = null;
-  for (const o of offresArticle(a)) {
+  for (const o of offres) {
     if (o.pu == null || cleOffre(o) !== cle) continue;
-    const c = besoin != null ? o.pu * besoin : (o.prixArticle != null ? o.prixArticle * l.quantite : null);
+    const c = coutOffre(o, l, besoin);
     if (c != null && (min == null || c < min)) min = c;
   }
   return min;

@@ -102,3 +102,28 @@ export function remplacerPrixLus(prix, articleId, nouveaux) {
   }
   return { prix: [...prix.filter((p) => !visePar(p) || gardes.has(p)), ...ajouts], ajoutes: ajouts.length };
 }
+
+// ---------------------------------------------------------------------
+// v147 (audit du 2026-11-23, C2) — Deux téléphones changent le même objet presque en même temps.
+// Avant : l'objet reçu remplaçait le local (une modification pas encore envoyée était perdue) et l'envoi
+// remplaçait l'objet de la base au complet. Maintenant : fusion champ par champ à partir de la dernière
+// version commune (base) : un champ changé d'un seul côté garde ce changement ; changé des deux côtés,
+// la modification de CE téléphone gagne (elle est la plus récente de son point de vue) et c'est signalé.
+// ---------------------------------------------------------------------
+const pareil = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** Fusion à trois de deux objets plats (champs du 1er niveau). Rend { fusion, conflits: [champ…] }. */
+export function fusionner3(base, local, distant) {
+  if (!base) return { fusion: local, conflits: [] };
+  const fusion = {};
+  const conflits = [];
+  for (const k of new Set([...Object.keys(base), ...Object.keys(local || {}), ...Object.keys(distant || {})])) {
+    const b = base[k], l = local?.[k], d = distant?.[k];
+    let v;
+    if (pareil(l, b)) v = d;                 // changé seulement là-bas (ou nulle part)
+    else if (pareil(d, b) || pareil(l, d)) v = l;  // changé seulement ici, ou pareil des deux côtés
+    else { v = l; conflits.push(k); }        // changé des deux côtés : ce téléphone gagne
+    if (v !== undefined) fusion[k] = v;
+  }
+  return { fusion, conflits };
+}

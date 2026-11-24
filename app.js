@@ -750,7 +750,9 @@ function htmlPrixCase(o, u, { avecMax = true, vendu = false } = {}) {
     : `<span class="prg${o.pc != null ? ' pkg' : ''}">${o.pc != null ? puCourt(o.pc, o.pcUnite) : ''}</span>`;   // contenants de poids différents : prix au kg dessous (c'est lui qui compare)
   // v141 : prix démesuré par rapport aux autres bannières → ⚠ « à vérifier » (jamais retenu comme le moins cher)
   const doute = o.douteux ? `<span class="pdoute" title="Prix inhabituel : ${String(o.douteux).replace('.', ',')} fois la médiane des autres bannières. À vérifier (format mal lu ?)">⚠</span>` : '';
-  return `${doute}${max ? `<span class="pmax">${max} max</span>` : ''}<span class="pp ${promo ? 'promo' : ''}${o.douteux ? ' douteux' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}${
+  // v147 : « N pour X $ » avec minimum (« ou 4 $ l'unité ») → rappel « min N »
+  const mini = o.minimum ? `<span class="pmax" title="${o.prixSeul != null ? `Sous ${o.minimum} : ${argent(o.prixSeul)} l'unité` : `Seulement à l'achat de ${o.minimum}`}">min ${o.minimum}</span>` : '';
+  return `${doute}${max ? `<span class="pmax">${max} max</span>` : ''}${mini}<span class="pp ${promo ? 'promo' : ''}${o.douteux ? ' douteux' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}${
     fv ? `<span class="pfv">${esc(fv)}</span>` : ''}`;
 }
 
@@ -766,7 +768,8 @@ let bulleProduit = null;
 function fermerBulleProduit() { bulleProduit?.remove(); bulleProduit = null; }
 function ouvrirBulleProduit(btn, a, o) {
   fermerBulleProduit();
-  const photos = [o.image, photoListe(a)].filter(Boolean);   // photo du produit vendu, sinon celle de ta fiche
+  // photo du produit vendu, sinon celle de ta fiche ; v147 : jamais une icône du site (cœur .svg)
+  const photos = [o.image, photoListe(a)].filter((u) => u && !/\.svg(?:[?#]|$)/i.test(u));
   const nom = o.nomProduit || o.produitOffre || [a.marque, a.nom].filter(Boolean).join(' ');
   const b = document.createElement('div');
   b.className = 'bulle-produit';

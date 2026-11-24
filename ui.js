@@ -1,8 +1,8 @@
 // Outils partagés : échappement, fenêtre modale, calculs de prix.
-import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable, formatLisible, marquerDouteux } from './normalise.js';
+import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable, formatLisible, marquerDouteux, minimumOffre } from './normalise.js';
 import { get } from './store.js';
 import { BANNIERES } from './demo-data.js';
-import { prixEnVigueur } from './rabais.js';
+import { prixEnVigueur, etatPrix, agePrix, prixDuJour } from './rabais.js';
 import { jourQuebec } from './couverture-circulaires.js';
 import { trouveParNomOuMarque } from './noms.js';
 import { enfantsGenerique } from './arbre-recherche.js';
@@ -227,16 +227,21 @@ function rabaisPersoActifs() {
  * - ajoute une ligne « prix effectif » pour chaque magasin avec un rabais perso actif ;
  * - economie = prix régulier − prix courant quand le produit est en rabais.
  */
-export function offresArticle(article) {
+export function offresArticle(article, { avecAnciens = false } = {}) {
   const e = get();
   // Fiche générique (niveau 1 ou 2, recherche-niveaux-v2) : ses offres sont celles de ses fiches dessous,
   // comparées au kg / L, rabais inclus ; le produit exact derrière chaque prix est nommé.
   if (article?.estGenerique) {
-    const lignesGen = enfantsGenerique(article, e.articles, familleDe).flatMap((x) => offresArticle(x).map((l) => ({
-      ...l, articleEnfant: x.id, produitOffre: l.produitOffre || [[x.marque, x.nom].filter(Boolean).join(' '), formatLisible(l.format || x.format)].filter(Boolean).join(' · ') })));
+    const nommer = (x) => (l) => ({ ...l, articleEnfant: x.id, produitOffre: l.produitOffre || [[x.marque, x.nom].filter(Boolean).join(' '), formatLisible(l.format || x.format)].filter(Boolean).join(' · ') });
+    const enfants = enfantsGenerique(article, e.articles, familleDe);
+    const lignesGen = enfants.flatMap((x) => offresArticle(x).map(nommer(x)));
     // v140 : plus ses propres prix (son nom cherché chez les bannières : le moins cher de chacune, toutes sortes)
     const propres = offresArticle({ ...article, estGenerique: false }).map((l) => ({ ...l, produitOffre: l.produitOffre || l.nomProduit || '' }));
-    return classerLignes([...lignesGen, ...propres]);
+    const classees = classerLignes([...lignesGen, ...propres]);
+    if (!avecAnciens) return classees;
+    const extras = [...enfants.flatMap((x) => offresArticle(x, { avecAnciens: true }).filter((l) => l.etat !== 'courant').map(nommer(x))),
+      ...offresArticle({ ...article, estGenerique: false }, { avecAnciens: true }).filter((l) => l.etat !== 'courant')];
+    return [...classees, ...extras];
   }
   const lignes = [];
   // Toutes les marques/formats du produit sont comparées au kg / L ; une variante retirée ne compte plus
@@ -263,9 +268,28 @@ export function offresArticle(article) {
       n = { prixUnitaire: p.uniteSource.pu, uniteRef: article.uniteRef, prixArticle: null };
     }
     const economie = p.prixRegulier && p.prixNum && p.prixRegulier > p.prixNum + 0.004 ? p.prixRegulier - p.prixNum : null;
+    // v147 : démo jamais compté ; « à venir » et « ancien » (> 60 j ou sans date) hors calcul
+    const etat = etatPrix(p, auj);
+    if (etat === 'demo') continue;
     lignes.push({ ...p, pu: n.prixUnitaire ?? null, prixArticle: n.prixArticle ?? null, uniteRef: n.uniteRef || article.uniteRef, erreur: n.erreur, economie,
-      contenu, produitOffre: produitDeLOffre(article, p, v), formatVendu: fmt || '' });
+      contenu, produitOffre: produitDeLOffre(article, p, v), formatVendu: fmt || '', etat, age: agePrix(p, auj),
+      ...(minimumOffre(p.offre, p.conditions, p.prixRegulier) || {}) });
   }
+  // v147 (règle de Chris) : par bannière et variante, seulement le prix d'aujourd'hui (le plus récent ;
+  // un rabais encore valide plus bas passe devant). Les autres restent dans l'historique et le record.
+  const courantes = lignes.filter((l) => l.etat === 'courant');
+  comparerParPoids(courantes);
+  const plusieursVariantes = (article.variantes || []).filter((x) => !x.retiree).length > 1;
+  const cleGroupe = (l) => `${l.banniere}|${plusieursVariantes ? l.varianteId || '' : ''}`;
+  const groupes = new Map();
+  for (const l of courantes) (groupes.get(cleGroupe(l)) || groupes.set(cleGroupe(l), []).get(cleGroupe(l))).push(l);
+  const gardees = [...groupes.values()].map((g) => prixDuJour(g, prixComparable));
+  // Prix sans aucun équivalent courant (même bannière et variante) : montrés en gris dans la fiche, jamais comptés
+  const extras = avecAnciens ? lignes.filter((l) => l.etat === 'aVenir' || (l.etat === 'ancien' && !groupes.has(cleGroupe(l))))
+    .map((l) => ({ ...l, classe: l.etat === 'aVenir' ? 'avenir' : 'ancien' })) : [];
+  lignes.length = 0;
+  for (const l of gardees) { delete l.pc; delete l.pcUnite; }   // recalculé sur les prix gardés seulement
+  lignes.push(...gardees);
   // Contenants de poids différents : on compare au kg (ou au L), l'affichage reste à l'unité
   comparerParPoids(lignes);
   const cmp = (l) => prixComparable(l) ?? Infinity;
@@ -279,7 +303,8 @@ export function offresArticle(article) {
       ...(base.pc !== undefined ? { pc: base.pc == null ? null : base.pc * k } : {}),
       rabaisTexte: `−${r.pct} % perso${r.plafond ? ` (sur ${r.plafond} $)` : ''}` });
   }
-  return classerLignes(lignes);
+  const classees = classerLignes(lignes);
+  return extras.length ? [...classees, ...extras] : classees;
 }
 
 /** Trie les offres du moins cher au plus cher (prix comparable) et les colore (vert = meilleur, rouge = le plus cher). */

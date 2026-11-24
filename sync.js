@@ -11,7 +11,8 @@
 import * as S from './store.js';
 import { toast } from './ui.js';
 import { SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, SUPABASE_JS } from './config.js';
-import { envoyerParPaquets, lireParPaquets, filtreApres, clePrix, SOURCES_RAFRAICHIES } from './envoi.js';
+import { versionActuelle } from './maj.js';
+import { envoyerParPaquets, lireParPaquets, filtreApres, clePrix, SOURCES_RAFRAICHIES, fusionner3 } from './envoi.js';
 
 // type d'objet en base → collection de l'état local
 const COLLECTIONS = {
@@ -23,8 +24,26 @@ const COLLECTIONS = {
 };
 const cleDe = (type, o) => (type === 'cp' ? o.code : o.id);
 // Réglages partagés du foyer (un seul objet)
-const REGLAGES = ['ordreRayons', 'rayonsJoints', 'optim'];
-const META = 'epicerie-sync'; // { foyerId, empreintes: { 'type:id': empreinte courte du json } }
+const REGLAGES = ['ordreRayons', 'rayonsJoints', 'optim', 'versionAppMin'];
+// v147 (leçon du 2026-11-23) : avant une correction de données, Claude met `versionAppMin` (ex. « v147 ») dans les
+// réglages du foyer ; une fenêtre plus vieille arrête d'envoyer au lieu de réécrire la correction 2 s plus tard.
+const numeroVersion = (v) => Number(String(v || '').match(/(\d+)/)?.[1] || 0);
+async function versionTropVieille() {
+  const min = numeroVersion(S.get().versionAppMin);
+  if (!min) return false;
+  const ici = numeroVersion(await versionActuelle().catch(() => null));
+  return ici > 0 && ici < min;   // version inconnue (aperçu sans service worker) : pas bloquée
+}
+const META = 'epicerie-sync';
+// v147 (C2) : objets que les 2 téléphones modifient souvent ; on garde leur dernière version commune
+// (meta.bases) pour fusionner champ par champ au lieu d'écraser. Pas les prix (ajout seulement, trop nombreux).
+const TYPES_FUSION = new Set(['liste', 'article', 'recette', 'magasin', 'rayon', 'rabais', 'carte', 'cp']);
+const copie = (o) => JSON.parse(JSON.stringify(o));
+function retenirBase(k, type, data) {
+  if (!TYPES_FUSION.has(type)) return;
+  meta.bases ||= {};
+  if (data == null) delete meta.bases[k]; else meta.bases[k] = copie(data);
+} // { foyerId, empreintes: { 'type:id': empreinte courte du json } }
 
 /** Empreinte courte d'un texte (cyrb53 + longueur). v133 : remplace la copie complète de chaque objet,
  *  qui doublait les données dans la mémoire du navigateur et la remplissait (« Mémoire du téléphone pleine », 23 nov. 2026). */
@@ -209,6 +228,10 @@ export async function pousser() {
   if (!estPret() || !navigator.onLine || enEnvoi) return;
   enEnvoi = true;
   try {
+    if (await versionTropVieille()) {
+      meta.erreurEnvoi = `Mise à jour requise (version ${S.get().versionAppMin} ou plus) : rien n'est envoyé tant que l'app n'est pas à jour.`;
+      ecrireMeta(); signaler(); return;
+    }
     const locaux = objetsLocaux();
     const vus = new Set();
     const lignes = [];
@@ -236,7 +259,7 @@ export async function pousser() {
         const { error } = await sb.from('objets').update({ supprime: true }).eq('foyer_id', foyer.id).eq('type', l.type).eq('id', l.id);
         if (error) return error;
       }
-      lot.forEach((l) => { if (l._emp == null) delete meta.empreintes[l._k]; else meta.empreintes[l._k] = l._emp; });
+      lot.forEach((l) => { if (l._emp == null) delete meta.empreintes[l._k]; else meta.empreintes[l._k] = l._emp; retenirBase(l._k, l.type, l.supprime ? null : l.data); });
       ecrireMeta();
       return null;
     };
@@ -332,6 +355,7 @@ function rattraper(lignes) {
       ici(l.type, coll).add(l.id);
       e[coll].push(l.data);
       meta.empreintes[k] = empreinte(JSON.stringify(l.data));
+      retenirBase(k, l.type, l.data);
       n++;
     }
   });
@@ -347,9 +371,17 @@ function appliquer(lignes) {
       if (!coll) continue;
       e[coll] ||= [];
       const i = e[coll].findIndex((o) => String(cleDe(l.type, o)) === l.id);
-      if (l.supprime) { if (i >= 0) e[coll].splice(i, 1); delete meta.empreintes[k]; continue; }
-      if (i >= 0) e[coll][i] = l.data; else e[coll].push(l.data);
-      meta.empreintes[k] = empreinte(JSON.stringify(l.data));
+      if (l.supprime) { if (i >= 0) e[coll].splice(i, 1); delete meta.empreintes[k]; retenirBase(k, l.type, null); continue; }
+      // v147 (C2) : modification locale pas encore envoyée → fusion champ par champ (rien de perdu d'un côté ni de l'autre)
+      const enAttente = i >= 0 && meta.empreintes[k] && empreinte(JSON.stringify(e[coll][i])) !== meta.empreintes[k];
+      const base = meta.bases?.[k];
+      if (enAttente && base && TYPES_FUSION.has(l.type)) {
+        const { fusion, conflits } = fusionner3(base, e[coll][i], l.data);
+        e[coll][i] = fusion;
+        if (conflits.length) console.info(`Synchro : ${k} changé sur les 2 téléphones (${conflits.join(', ')}) — ce téléphone garde sa version`);
+      } else if (i >= 0) e[coll][i] = l.data; else e[coll].push(l.data);
+      meta.empreintes[k] = empreinte(JSON.stringify(l.data));   // version de la base ; la fusion, si elle diffère, repartira
+      retenirBase(k, l.type, l.data);
     }
   });
   ecrireMeta();
