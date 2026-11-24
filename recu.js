@@ -545,7 +545,9 @@ export async function appliquerRecu(recuId, etat = () => {}, opts = {}) {
           const id = S.uid('p');
           gardes.add(id);
           x.prix.push({ id, articleId: ar.id, varianteId: va?.id, banniere: r.banniere, magasinId: mag?.id, offre, format: va?.format || ar.format,
-            type: l.rabais ? 'circulaire' : 'regulier', fin: null, source: 'recu', recuId, observeLe: date });
+            type: l.rabais ? 'circulaire' : 'regulier', fin: null, source: 'recu', recuId, observeLe: date,
+            // v149 (audit D6) : prix payé pour 1 article en nombre (pas pour un prix au kg), comme les autres sources
+            ...(/^\d+,\d{2} \$$/.test(offre) ? { prixNum: Number(offre.slice(0, -2).replace(',', '.')) } : {}) });
         }
       }
       // Cocher l'article acheté : seulement sans lien choisi (panier : déjà coché ; autre achat : liste intacte)

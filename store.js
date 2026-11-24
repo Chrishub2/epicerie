@@ -145,7 +145,12 @@ function preparer(brut) {
 export function get() { return etat || charger(); }
 
 
+// v149 : numéro qui change à chaque sauvegarde (sert aux index en mémoire, ex. prix par produit dans ui.js)
+let generationEtat = 0;
+export function generation() { return generationEtat; }
+
 export function sauver() {
+  generationEtat++;
   // Garde la structure produit → variantes cohérente après chaque modification,
   // une synchro (téléphone encore en v30), un import ou une réinitialisation.
   try { normaliserProduits(etat); } catch (e) { console.warn('Variantes', e); }

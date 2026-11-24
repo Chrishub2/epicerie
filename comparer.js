@@ -7,7 +7,7 @@ import * as S from './store.js';
 import { $, $$, esc, argent, offresArticle, libelleUnitaire, libelleFin, joursRestants, nomBanniere, nomBanniereVille,
   banniereActive, nomOffre, puce, toast, logo, logoVille, logoMagasin } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
-import { analyserFormat, formatLisible, prixComparable } from './normalise.js';
+import { analyserFormat, formatLisible, prixComparable, surplusPlafond } from './normalise.js';
 import { photoDe } from './visuels.js';
 
 let vue = 'tableau';      // 'tableau' | 'details' | 'online' | 'econo'
@@ -189,6 +189,11 @@ export function optimiser(max, { forcees = [], ignorees = [], cleAutorisee } = {
       }
       // Un arrêt choisi librement mais inutile ne compte pas (un arrêt forcé, lui, est gardé).
       const utilises = new Set(affect.map((x) => x.choix.cle));
+      // v149 : plafond du rabais perso suivi sur le total de l'arrêt
+      for (const c of utilises) {
+        const ici = affect.filter((x) => x.choix.cle === c);
+        total += sousTotalArret(ici) - ici.reduce((t, x) => t + x.choix.cout, 0);
+      }
       if (reste.some((c) => !utilises.has(c))) continue;
       if (!meilleur || manquants < meilleur.manquants || (manquants === meilleur.manquants && total < meilleur.total - 1e-9)) {
         meilleur = { arrets: k, combo, total, manquants, affect };
@@ -215,6 +220,13 @@ function appliquer(res) {
 /** Petite photo du produit (ou un emplacement vide pour garder l'alignement). */
 const vignette = (a) => (photoDe(a) ? `<img class="vignette mini" src="${esc(photoDe(a))}" alt="">` : '<span class="vignette mini"></span>');
 
+/** Total d'un arrêt, plafond du rabais perso compris (v149). */
+function sousTotalArret(xs) {
+  const somme = xs.reduce((t, x) => t + x.choix.cout, 0);
+  const r = xs.find((x) => x.choix.offre?.persoPlafond)?.choix.offre;
+  return somme + (r ? surplusPlafond(somme, r.persoPct, r.persoPlafond) : 0);
+}
+
 function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
   const eco = un && r !== un ? un.total - r.total : 0;
   const parMag = {};
@@ -223,7 +235,7 @@ function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
     <div class="total"><span>${r.arrets} arrêt${r.arrets > 1 ? 's' : ''}</span><span>${argent(r.total)}</span></div>
     ${eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
     ${r.manquants ? `<div class="doux" style="color:var(--ambre)">${r.manquants} article(s) sans prix dans ces magasins</div>` : ''}
-    ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:8px">${logoCleHtml(k)} — <b>${argent(xs.reduce((t, x) => t + x.choix.cout, 0))}</b>
+    ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:8px">${logoCleHtml(k)} — <b>${argent(sousTotalArret(xs))}</b>
       <ul class="liste-arret">${xs.map((x) => `<li><span class="rang" style="gap:6px">${vignette(x.a)}${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
         <span class="doux">${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
     ${avecBouton ? `<button class="btn" ${attr}="${r.arrets}" style="margin-top:8px">Utiliser cette répartition</button>` : ''}</div>`;
@@ -279,7 +291,7 @@ export function vueComparaison(v, rendre) {
       ${opt.resultats.length ? opt.resultats.map((r) => blocResultat(r, opt.resultats[0], true)).join('')
         : '<p class="doux">Aucune combinaison possible avec ces choix (trop de magasins forcés pour le nombre d\'arrêts ?).</p>'}
       ${opt.sansPrix.length ? `<p class="doux">Sans prix connu : ${opt.sansPrix.map((o) => esc(o.a.nom)).join(', ')}. Touche l'article dans la liste pour trouver ses prix.</p>` : ''}
-      <p class="doux">Coût = prix unitaire × ta quantité habituelle (les gros formats Costco sont ramenés à ton format), avant taxes. Le plafond du rabais perso n'est pas suivi article par article.</p>`;
+      <p class="doux">Coût = prix unitaire × ta quantité habituelle (les gros formats Costco sont ramenés à ton format), avant taxes. Le plafond du rabais perso (ex. 10 % sur les premiers 150 $) est appliqué au total du magasin.</p>`;
   }
 
   if (vue === 'online') html += lignesListe().length ? blocEnLigne() : `<div class="vide">Ta liste est vide.</div>`;

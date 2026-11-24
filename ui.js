@@ -1,6 +1,6 @@
 // Outils partagés : échappement, fenêtre modale, calculs de prix.
 import { normaliser, libelleUnitaire, classer, analyserFormat, comparerParPoids, prixComparable, formatLisible, marquerDouteux, minimumOffre } from './normalise.js';
-import { get } from './store.js';
+import { get, generation } from './store.js';
 import { BANNIERES } from './demo-data.js';
 import { prixEnVigueur, etatPrix, agePrix, prixDuJour } from './rabais.js';
 import { jourQuebec } from './couverture-circulaires.js';
@@ -227,6 +227,19 @@ function rabaisPersoActifs() {
  * - ajoute une ligne « prix effectif » pour chaque magasin avec un rabais perso actif ;
  * - economie = prix régulier − prix courant quand le produit est en rabais.
  */
+// v149 (audit R1) : prix rangés par produit une seule fois par état, au lieu de parcourir tous les prix
+// pour chaque produit affiché. Refait si l'état est sauvegardé, ou si le tableau des prix change.
+let indexPrix = { gen: -1, ref: null, n: -1, parArticle: new Map() };
+function prixDeLArticle(e, id) {
+  const gen = generation();
+  if (indexPrix.gen !== gen || indexPrix.ref !== e.prix || indexPrix.n !== e.prix.length) {
+    const parArticle = new Map();
+    for (const p of e.prix) (parArticle.get(p.articleId) || parArticle.set(p.articleId, []).get(p.articleId)).push(p);
+    indexPrix = { gen, ref: e.prix, n: e.prix.length, parArticle };
+  }
+  return indexPrix.parArticle.get(id) || [];
+}
+
 export function offresArticle(article, { avecAnciens = false } = {}) {
   const e = get();
   // Fiche générique (niveau 1 ou 2, recherche-niveaux-v2) : ses offres sont celles de ses fiches dessous,
@@ -247,7 +260,7 @@ export function offresArticle(article, { avecAnciens = false } = {}) {
   // Toutes les marques/formats du produit sont comparées au kg / L ; une variante retirée ne compte plus
   const variantes = new Map((article.variantes || []).map((v) => [v.id, v]));
   const auj = jourQuebec();
-  for (const p0 of e.prix.filter((x) => x.articleId === article.id)) {
+  for (const p0 of prixDeLArticle(e, article.id)) {
     // Rabais fini (date de fin passée, ou 7 jours après avoir été vu) : prix régulier s'il est connu, sinon l'offre ne compte plus
     const p = prixEnVigueur(p0, auj);
     if (!p) continue;
@@ -301,6 +314,7 @@ export function offresArticle(article, { avecAnciens = false } = {}) {
     const k = 1 - r.pct / 100;
     lignes.push({ ...base, perso: true, magasinNom: m.nom, pu: base.pu * k, prixArticle: base.prixArticle == null ? null : base.prixArticle * k,
       ...(base.pc !== undefined ? { pc: base.pc == null ? null : base.pc * k } : {}),
+      persoPct: r.pct, persoPlafond: Number(r.plafond) || null,
       rabaisTexte: `−${r.pct} % perso${r.plafond ? ` (sur ${r.plafond} $)` : ''}` });
   }
   const classees = classerLignes(lignes);

@@ -311,6 +311,17 @@ export function rabaisPerso(totalPanier, pct, plafond) {
 }
 
 /**
+ * v149 (audit R4) : plafond d'un rabais perso dans un total déjà réduit (« 10 % sur les premiers 150 $ »).
+ * somme = total des articles de l'arrêt, chacun déjà réduit de pct. Au-delà du plafond, la réduction ne vaut plus :
+ * retourne ce qui a été retiré en trop (0 si le plafond n'est pas atteint).
+ */
+export function surplusPlafond(somme, pct, plafond) {
+  if (!plafond || !pct || pct >= 100 || !(somme > 0)) return 0;
+  const k = pct / 100, base = somme / (1 - k);
+  return base > plafond ? (base - plafond) * k : 0;
+}
+
+/**
  * Contenants « à l'unité » de poids différents (casseau de tomates cerises 255 g, 341 g, 680 g…) :
  * le prix reste affiché à l'unité (pu), mais la comparaison se fait au kg (ou au L) — pc / pcUnite.
  * lignes : offres d'un produit compté à l'unité, chacune avec contenu = { base: 'kg'|'l', total } ou null.
