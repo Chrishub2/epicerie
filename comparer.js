@@ -4,10 +4,10 @@
 // forcées ou ignorées) et préparation des paniers en ligne.
 // =====================================================================
 import * as S from './store.js';
-import { $, $$, esc, argent, offresArticle, libelleUnitaire, libelleFin, joursRestants, nomBanniere, nomBanniereVille,
+import { $, $$, esc, argent, texteOffre, offresArticle, libelleUnitaire, libelleFin, joursRestants, nomBanniere, nomBanniereVille,
   banniereActive, nomOffre, puce, toast, logo, logoVille, logoMagasin } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
-import { analyserFormat, formatLisible, prixComparable, surplusPlafond } from './normalise.js';
+import { analyserFormat, formatLisible, prixComparable, surplusPlafond, besoinPour, coutOffreQuantite } from './normalise.js';
 import { photoDe } from './visuels.js';
 
 let vue = 'tableau';      // 'tableau' | 'details' | 'online' | 'econo'
@@ -58,7 +58,7 @@ export function tableauOffres(a, { avecManquants = false } = {}) {
     <tr class="${l.classe}">
       <td>${l.perso ? logoCleHtml(cleOffre(l)) : logoVille(l.banniere)}
         ${l.produitOffre ? `<div style="font-size:13px"><b>${esc(l.produitOffre)}</b></div>` : ''}
-        <div class="doux">${esc(l.offre)}${l.economie ? ` <b style="color:var(--vert)">(−${argent(l.economie)})</b>` : ''}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
+        <div class="doux">${esc(texteOffre(l.offre))}${l.economie ? ` <b style="color:var(--vert)">(−${argent(l.economie)})</b>` : ''}${l.format ? ` · ${esc(formatLisible(l.format))}` : ''}</div>
         <div>${pastilleEtat(l)}${l.type === 'circulaire' ? '<span class="pastille ambre">rabais</span>' : ''}${l.prixRegulier ? `<span class="pastille">rég. ${argent(l.prixRegulier)}</span>` : ''}${l.type === 'fidelite' ? '<span class="pastille vert">fidélité</span>' : ''}${l.bonus ? `<span class="pastille vert">${esc(l.bonus)}</span>` : ''}${l.perso ? `<span class="pastille vert">${esc(l.rabaisTexte)}</span>` : ''}${l.fin ? `<span class="pastille ${joursRestants(l.fin) <= 2 ? 'ambre' : ''}">${libelleFin(l.fin)}</span>` : ''}${l.source === 'photo' ? '<span class="pastille">📷 vu en magasin</span>' : ''}${l.aVerifier ? '<span class="pastille ambre">lu sur photo : à vérifier</span>' : ''}${l.source === 'manuel' ? '<span class="pastille">saisi</span>' : ''}${l.source === 'flipp' ? '<span class="pastille" title="Trouvé automatiquement dans la circulaire (Flipp) : vérifie le produit">📰 circulaire</span>' : ''}${l.source === 'circulaire' ? `<span class="pastille" title="Lu dans une circulaire que tu as envoyée">📰 circulaire</span>${l.conditions ? `<span class="pastille ambre">${esc(l.conditions)}</span>` : ''}` : ''}${l.source === 'demo' ? '<span class="pastille">démo</span>' : ''}</div>
         ${l.erreur ? `<div class="doux" style="color:var(--rouge)">${esc(l.erreur)}</div>` : ''}
         ${htmlPreuveRabais(l)}
@@ -111,8 +111,11 @@ function options(cleAutorisee = () => true) {
     const offres = offresArticle(a);
     const besoin = besoinDe(a, l, offres);
     const parCle = {};
+    // v150 : un prix ⚠ (démesuré ou « à vérifier ») n'est jamais choisi s'il existe un autre prix pour cet article
+    const fiables = offres.some((o) => o.pu != null && !o.douteux && !o.aVerifier);
     for (const o of offres) {
       if (o.pu == null) continue;
+      if (fiables && (o.douteux || o.aVerifier)) continue;
       const k = cleOffre(o);
       if (!cleAutorisee(k)) continue;
       const cout = coutOffre(o, l, besoin);
@@ -130,11 +133,7 @@ function options(cleAutorisee = () => true) {
  */
 export function besoinDe(a, l, offres = offresArticle(a)) {
   const pref = (a.variantes || []).find((v) => v.id === a.variantePreferee && !v.retiree);
-  for (const fmt of [a.format, pref?.format, offres.find((o) => o.pu != null && !o.douteux)?.format]) {
-    const f = analyserFormat(fmt);
-    if (f && f.base === a.uniteRef) return f.total * l.quantite;
-  }
-  return null;
+  return besoinPour({ format: a.format, formatPref: pref?.format, uniteRef: a.uniteRef }, offres, l.quantite);
 }
 
 /**
@@ -142,8 +141,7 @@ export function besoinDe(a, l, offres = offresArticle(a)) {
  * « min. » / « ou X $ l'unité » : sous le minimum, prix d'un seul article (ou offre inaccessible si on ne le connaît pas).
  */
 export function coutOffre(o, l, besoin) {
-  if (o.minimum && l.quantite < o.minimum) return o.prixSeul != null ? o.prixSeul * l.quantite : null;
-  return besoin != null ? o.pu * besoin : (o.prixArticle != null ? o.prixArticle * l.quantite : null);
+  return coutOffreQuantite(o, l.quantite, besoin);
 }
 
 /** Coût d'une ligne de liste dans un « arrêt » donné (bannière ou magasin à rabais perso). null si pas de prix. */
@@ -233,11 +231,14 @@ function blocResultat(r, un, avecBouton, attr = 'data-appliquer') {
   r.affect.forEach((x) => (parMag[x.choix.cle] ??= []).push(x));
   return `<div class="carte" style="margin:10px 0 0;background:var(--gris-fond)">
     <div class="total"><span>${r.arrets} arrêt${r.arrets > 1 ? 's' : ''}</span><span>${argent(r.total)}</span></div>
-    ${eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
+    ${un && r !== un && r.manquants < un.manquants
+      // v150 : totaux pas comparables (1 arrêt laisse des articles sans prix) → le dire, au lieu d'un total qui paraît plus cher
+      ? `<div class="doux">Trouve <b>${un.manquants - r.manquants} article${un.manquants - r.manquants > 1 ? 's' : ''} de plus</b> qu'en 1 arrêt (le total de 1 arrêt ne les compte pas)</div>`
+      : eco > 0.005 ? `<div class="doux">Économie de <b>${argent(eco)}</b> par rapport à 1 arrêt</div>` : ''}
     ${r.manquants ? `<div class="doux" style="color:var(--ambre)">${r.manquants} article(s) sans prix dans ces magasins</div>` : ''}
     ${Object.entries(parMag).map(([k, xs]) => `<div style="margin-top:8px">${logoCleHtml(k)} — <b>${argent(sousTotalArret(xs))}</b>
       <ul class="liste-arret">${xs.map((x) => `<li><span class="rang" style="gap:6px">${vignette(x.a)}${x.l.quantite > 1 ? `${x.l.quantite} × ` : ''}${esc(x.a.nom)}</span>
-        <span class="doux">${esc(x.choix.offre.offre)}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
+        <span class="doux">${esc(texteOffre(x.choix.offre.offre))}${x.choix.offre.perso ? ' −' + esc(x.choix.offre.rabaisTexte.replace(/^−/, '').split(' (')[0]) : ''}</span></li>`).join('')}</ul></div>`).join('')}
     ${avecBouton ? `<button class="btn" ${attr}="${r.arrets}" style="margin-top:8px">Utiliser cette répartition</button>` : ''}</div>`;
 }
 
@@ -351,7 +352,7 @@ function matrice(articles) {
         const o = parCle[k];
         if (!o) return '<td class="vide-cel"><div class="cel-pu">—</div></td>';
         // Toujours les mêmes 3 lignes, dans le même ordre : ① prix comparable (au kg/L/unité) ② prix payé · format ③ rabais / fin
-        const affiche = o.perso && o.prixArticle != null ? argent(o.prixArticle) : o.offre;
+        const affiche = o.perso && o.prixArticle != null ? argent(o.prixArticle) : texteOffre(o.offre);
         const note = [o.economie ? `−${argent(o.economie)}` : '', o.perso ? o.rabaisTexte.split(' (')[0] : '', o.fin ? libelleFin(o.fin) : ''].filter(Boolean).join(' · ');
         return `<td class="${o.classe}"><div class="cel-pu">${esc(libelleUnitaire(o.pu, o.uniteRef).split(' · ')[0])}</div>
           <div class="cel-prix">${esc(affiche)}${o.format ? ` · ${esc(formatLisible(o.format))}` : ''}</div>

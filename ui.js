@@ -4,7 +4,7 @@ import { get, generation } from './store.js';
 import { BANNIERES } from './demo-data.js';
 import { prixEnVigueur, etatPrix, agePrix, prixDuJour } from './rabais.js';
 import { jourQuebec } from './couverture-circulaires.js';
-import { trouveParNomOuMarque } from './noms.js';
+import { trouveParNomOuMarque, estNomBio } from './noms.js';
 import { enfantsGenerique } from './arbre-recherche.js';
 import { familleDe } from './visuels.js';
 
@@ -17,6 +17,8 @@ export function esc(v) {
 
 export const argent = (x) => x == null || !isFinite(x) ? '—'
   : x.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD' });
+/** v150 : texte d'une offre pour l'affichage ; une offre enregistrée en nombre seul (« 13.29 », sites anglais) → « 13,29 $ ». */
+export const texteOffre = (offre) => (/^\s*\d+(?:[.,]\d+)?\s*$/.test(String(offre ?? '')) ? argent(Number(String(offre).replace(',', '.'))) : (offre ?? ''));
 
 export function aujourdhui() { return new Date().toISOString().slice(0, 10); }
 
@@ -268,6 +270,9 @@ export function offresArticle(article, { avecAnciens = false } = {}) {
     if (p.annule) continue;    // prix d'une association de reçu corrigée
     if (!banniereActive(p.banniere)) continue;
     if (article.exclusif && p.banniere !== article.exclusif) continue;
+    // v150 (spec S14, validation du 2026-11-24) : le bio est un produit à part — un prix nommé « … biologique » ne compte
+    // pas pour une fiche non bio (vu : « Oignons jaunes biologiques » d'IGA comparés aux oignons jaunes)
+    if (!article.bio && estNomBio(p.nomProduit)) continue;
     const v = variantes.get(p.varianteId);
     if (v?.retiree) continue;
     // Format du prix, sinon celui de SA variante (pas celui de la fiche : 2 kg ≠ 900 g)
@@ -282,8 +287,10 @@ export function offresArticle(article, { avecAnciens = false } = {}) {
     }
     const economie = p.prixRegulier && p.prixNum && p.prixRegulier > p.prixNum + 0.004 ? p.prixRegulier - p.prixNum : null;
     // v147 : démo jamais compté ; « à venir » et « ancien » (> 60 j ou sans date) hors calcul
-    const etat = etatPrix(p, auj);
-    if (etat === 'demo') continue;
+    let etat = etatPrix(p, auj);
+    // v150 : en mode découverte (pas encore de foyer), les prix d'exemple sont les seuls prix : on les montre (pastille
+    // « démo ») pour que la 1re ouverture donne un vrai résultat. Dans un foyer réel, ils ne comptent jamais (v147).
+    if (etat === 'demo') { if (e.demo !== true) continue; etat = 'courant'; }
     lignes.push({ ...p, pu: n.prixUnitaire ?? null, prixArticle: n.prixArticle ?? null, uniteRef: n.uniteRef || article.uniteRef, erreur: n.erreur, economie,
       contenu, produitOffre: produitDeLOffre(article, p, v), formatVendu: fmt || '', etat, age: agePrix(p, auj),
       ...(minimumOffre(p.offre, p.conditions, p.prixRegulier) || {}) });
@@ -325,16 +332,18 @@ export function offresArticle(article, { avecAnciens = false } = {}) {
 function classerLignes(lignes) {
   marquerDouteux(lignes);
   const cmp = (l) => prixComparable(l) ?? Infinity;
-  // Les prix douteux passent après tous les autres : ils ne sont jamais « le moins cher »
-  lignes.sort((a, b) => (a.douteux ? 1 : 0) - (b.douteux ? 1 : 0) || cmp(a) - cmp(b) || (a.pu ?? Infinity) - (b.pu ?? Infinity));
-  const avecPrix = lignes.filter((l) => prixComparable(l) != null && !l.douteux);
+  // Les prix douteux passent après tous les autres : ils ne sont jamais « le moins cher ».
+  // v150 (validation du 2026-11-24) : pareil pour un prix marqué « à vérifier » (essuie-tout à 9,99 $ « 1,24 L » recommandé).
+  const suspect = (l) => (l.douteux || l.aVerifier ? 1 : 0);
+  lignes.sort((a, b) => suspect(a) - suspect(b) || cmp(a) - cmp(b) || (a.pu ?? Infinity) - (b.pu ?? Infinity));
+  const avecPrix = lignes.filter((l) => prixComparable(l) != null && !suspect(l));
   const meilleur = avecPrix.length ? prixComparable(avecPrix[0]) : null;
   const pire = avecPrix.length > 1 ? prixComparable(avecPrix[avecPrix.length - 1]) : null;
   lignes.forEach((l) => {
     const c = prixComparable(l);
     l.classe = classer(c, meilleur);
     if (pire != null && c === pire && pire > meilleur) l.classe = 'cher'; // rouge = le plus cher
-    if (l.douteux) l.classe = 'douteux';
+    if (suspect(l)) l.classe = 'douteux';
   });
   return lignes;
 }

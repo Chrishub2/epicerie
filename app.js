@@ -4,7 +4,7 @@
 import { estFsa, secteurDe, memeVille, enSecteur } from './secteurs.js';
 import { appliquerRegistre } from './bannieres-registre.js';
 import * as S from './store.js';
-import { $, $$, esc, argent, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
+import { $, $$, esc, argent, texteOffre, ouvrirModale, fermerModale, offresArticle, meilleureOffre, libelleUnitaire,
   libelleFin, joursRestants, nomBanniere, puce, toast, nomOffre, villeMagasin, logo, logoVille, logoMagasin, brancherSelecteurRayon, banniereActive, magasinsActifs, villesColonne } from './ui.js';
 import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserOffre, analyserFormat, formatLisible, gtinVariantes, normaliser, prixComparable } from './normalise.js';
@@ -749,18 +749,21 @@ function htmlPrixCase(o, u, { avecMax = true, vendu = false } = {}) {
     : o.economie && o.prixNum ? `<span class="prg">${argent(o.pu * o.prixRegulier / o.prixNum)}</span>`
     : `<span class="prg${o.pc != null ? ' pkg' : ''}">${o.pc != null ? puCourt(o.pc, o.pcUnite) : ''}</span>`;   // contenants de poids différents : prix au kg dessous (c'est lui qui compare)
   // v141 : prix démesuré par rapport aux autres bannières → ⚠ « à vérifier » (jamais retenu comme le moins cher)
-  const doute = o.douteux ? `<span class="pdoute" title="Prix inhabituel : ${String(o.douteux).replace('.', ',')} fois la médiane des autres bannières. À vérifier (format mal lu ?)">⚠</span>` : '';
+  const doute = o.douteux ? `<span class="pdoute" title="Prix inhabituel : ${String(o.douteux).replace('.', ',')} fois la médiane des autres bannières. À vérifier (format mal lu ?)">⚠</span>`
+    : o.aVerifier ? '<span class="pdoute" title="Prix marqué « à vérifier » (lecture incertaine) : jamais retenu comme le moins cher">⚠</span>' : '';   // v150
   // v147 : « N pour X $ » avec minimum (« ou 4 $ l'unité ») → rappel « min N »
   const mini = o.minimum ? `<span class="pmax" title="${o.prixSeul != null ? `Sous ${o.minimum} : ${argent(o.prixSeul)} l'unité` : `Seulement à l'achat de ${o.minimum}`}">min ${o.minimum}</span>` : '';
-  return `${doute}${max ? `<span class="pmax">${max} max</span>` : ''}${mini}<span class="pp ${promo ? 'promo' : ''}${o.douteux ? ' douteux' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}${
+  return `${doute}${max ? `<span class="pmax">${max} max</span>` : ''}${mini}<span class="pp ${promo ? 'promo' : ''}${o.douteux || o.aVerifier ? ' douteux' : ''}">${puCourt(o.pu, o.uniteRef || u)}</span>${dessous}${
     fv ? `<span class="pfv">${esc(fv)}</span>` : ''}`;
 }
 
 /** « 6,49 $ · 585 g » ; un prix déjà au poids (« 0,69 $/lb ») reste seul : le format de la fiche n'y ajouterait que de la confusion. */
 function prixFormatVendu(o) {
-  if (!o?.offre) return '';
+  if (o?.offre == null || o.offre === '') return '';
   if (/\/\s*(?:lb|kg|100\s*g|g|l|ml)\b/i.test(o.offre)) return o.offre;
-  return [o.offre, o.formatVendu ? formatLisible(o.formatVendu) : ''].filter(Boolean).join(' · ');
+  // v150 : offre enregistrée en nombre seul (« 13.29 », sites en anglais) → « 13,29 $ » comme les autres
+  const offre = texteOffre(o.offre);
+  return [offre, o.formatVendu ? formatLisible(o.formatVendu) : ''].filter(Boolean).join(' · ');
 }
 
 // v139 — Fenêtre photo : toucher une case de bannière la choisit et montre le produit vendu ; toucher à côté la ferme
@@ -796,7 +799,7 @@ function ouvrirBulleProduit(btn, a, o) {
         if (p) { p.annule = true; p.annuleRaison = 'retiré à la main (prix faux)'; p.annuleLe = new Date().toISOString(); }
       });
       fermerBulleProduit();
-      toast(`Prix retiré : ${o.offre || ''} chez ${nomBanniere(o.banniere)}`);
+      toast(`Prix retiré : ${texteOffre(o.offre)} chez ${nomBanniere(o.banniere)}`);
     };
   };
   if (photos.length) {
@@ -874,7 +877,7 @@ function etatRecord(r) {
 function htmlRangeeListe(r, { groupe, rec }) {
   const { l, a, offre: o } = r;
   const sous = [formatLisible(o?.format || a.format), a.marque].filter(Boolean);
-  const etiquette = o ? (o.offre || (o.prixArticle != null ? argent(o.prixArticle) : '')) : '';
+  const etiquette = o ? (texteOffre(o.offre) || (o.prixArticle != null ? argent(o.prixArticle) : '')) : '';
   const cout = o ? coutPour(l, a, cleOffre(o)) : null;
   const ch = [];
   if (rec?.top) ch.push(['rec top', '★ Meilleur prix jamais vu']);
@@ -1156,7 +1159,9 @@ function vueListe(v) {
   });
   $('#btnDeal', v)?.addEventListener('click', () => {
     // Meilleur prix parmi les bannières affichées (r.offre sans choix = la moins chère d'entre elles)
-    const cles = Object.fromEntries(rangees.map((r) => { const m = Object.values(r.parBan).sort((x, y) => (prixComparable(x) ?? Infinity) - (prixComparable(y) ?? Infinity))[0]; return [r.l.id, m ? cleOffre(m) : null]; }));
+    // v150 : un prix ⚠ (démesuré ou « à vérifier ») passe après les autres, comme partout ailleurs
+    const suspect = (x) => (x.douteux || x.aVerifier ? 1 : 0);
+    const cles = Object.fromEntries(rangees.map((r) => { const m = Object.values(r.parBan).sort((x, y) => suspect(x) - suspect(y) || (prixComparable(x) ?? Infinity) - (prixComparable(y) ?? Infinity))[0]; return [r.l.id, m ? cleOffre(m) : null]; }));
     S.maj((x) => x.liste.forEach((li) => { if (cles[li.id]) li.magasinCible = cles[li.id]; }));
     toast('Tout au meilleur prix');
   });

@@ -60,6 +60,12 @@ export function analyserFormat(txt) {
   // « 12/355 ml », « 6/113 g » : multipack écrit avec une barre (trouvé en simulant les circulaires réelles) → 12 × 355 ml
   const barre = brut.match(/^(\d+)\s*\/\s*(\d+(?:\.\d+)?\s*[a-zéèœ.]+)$/);
   if (barre) return analyserFormatSimple(`${barre[1]} x ${barre[2]}`);
+  // v150 : consigne collée au format : « 2l.cons.0.10$/emb. », « 2 L + dépôt » → 2 L
+  const sansConsigne = brut.replace(/\s*\+?\s*\.?\s*(?:cons(?:igne)?|dépôt|depot).*$/, '').replace(/\.$/, '').trim();
+  if (sansConsigne && sansConsigne !== brut) { const f = analyserFormat(sansConsigne); if (f) return f; }
+  // v150 : nombre d'unités + poids total : « 18un.630g », « 18 un. 630 g » → 630 g en 18 unités (pas 18 × 630 g)
+  const unitesPoids = brut.match(/^(\d+)\s*(?:un|unités?|mcx|morceaux)\.?\s*(\d+(?:\.\d+)?\s*[a-zéèœ]+\.?)$/);
+  if (unitesPoids) { const f = analyserFormatSimple(unitesPoids[2].replace(/\.$/, '')); if (f && f.base !== 'unite') return { ...f, nbUnites: +unitesPoids[1] }; }
   // v147 : double affichage et mots devant : « 454 g (1 lb) », « 907 g / 2 lb », « bte 284 ml » → la 1re mesure lisible
   const sans = brut.replace(/\(.*?\)/g, ' ').replace(/^[a-zéèêàç.]+\s+(?=\d)/, '').replace(/\s+/g, ' ').trim();
   for (const morceau of [sans, ...sans.split('/')]) {
@@ -308,6 +314,44 @@ export function libelleUnitaire(pu, uniteRef) {
 export function rabaisPerso(totalPanier, pct, plafond) {
   const base = plafond ? Math.min(totalPanier, plafond) : totalPanier;
   return Math.round(base * pct) / 100;
+}
+
+/**
+ * Quantité voulue pour une ligne de liste, dans l'unité de comparaison de la fiche : format de la fiche, sinon de sa
+ * variante préférée, sinon le format vendu de l'offre la mieux classée (v147, v150). null si rien n'est lisible.
+ * v150 (validation du 2026-11-24) : fiche comptée à l'unité, sans format, dont les contenants de poids différents sont
+ * comparés au kg (pc) → besoin en poids { poids, base } : 3 × « fromage 340 g » ne se compare plus à 3 × « 250 g ».
+ */
+export function besoinPour({ format, formatPref, uniteRef }, offres, quantite) {
+  const ref = offres.find((o) => o.pu != null && !o.douteux);
+  for (const fmt of [format, formatPref, ref?.formatVendu || ref?.format]) {
+    const f = analyserFormat(fmt);
+    if (f && f.base === uniteRef) return f.total * quantite;
+  }
+  if (uniteRef === 'unite') {
+    const refPoids = offres.find((o) => o.pc != null && !o.douteux && o.contenu?.total > 0);
+    if (refPoids) {
+      const base = refPoids.pcUnite;
+      for (const fmt of [format, formatPref]) {
+        const f = analyserFormat(fmt);
+        if (f && f.base === base) return { poids: f.total * quantite, base };
+      }
+      return { poids: refPoids.contenu.total * quantite, base };
+    }
+  }
+  return null;
+}
+
+/**
+ * Coût d'une offre pour une quantité. v147 (règle de Chris) : « N pour X $ » vaut à l'unité, sauf condition « min. » /
+ * « ou X $ l'unité » : sous le minimum, prix d'un seul article (ou offre inaccessible si on ne le connaît pas).
+ * Besoin en poids (v150) : prix au kg/L × poids voulu ; une offre sans poids connu n'est pas chiffrée (null).
+ */
+export function coutOffreQuantite(o, quantite, besoin) {
+  if (o.minimum && quantite < o.minimum) return o.prixSeul != null ? o.prixSeul * quantite : null;
+  // Besoin en poids : une offre dont le poids est inconnu n'est pas comparable (boîte de 18,79 $ contre paquets de 4 × 90 g)
+  if (besoin && typeof besoin === 'object') return o.pc != null ? o.pc * besoin.poids : null;
+  return besoin != null ? o.pu * besoin : (o.prixArticle != null ? o.prixArticle * quantite : null);
 }
 
 /**

@@ -128,3 +128,8 @@ export function ajouterNomsAlt(liste, texte, generique, langue = 'fr') {
   }
   return out;
 }
+
+/** Nom de produit qui dit « bio » (biologique, organic) : sert à ne jamais comparer le bio au non bio (spec S14). */
+export function estNomBio(nom) {
+  return /(^|[\s,·(\-])(bio|biologiques?|organic|organique)(?=$|[\s,·)\-])/i.test(String(nom || ''));
+}
