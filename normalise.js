@@ -57,6 +57,9 @@ export function analyserFormat(txt) {
   if (paquet) return { quantite: +paquet[1], unite: 'un', base: 'unite', total: +paquet[1] };
   const direct = analyserFormatSimple(brut);
   if (direct) return direct;
+  // « 12/355 ml », « 6/113 g » : multipack écrit avec une barre (trouvé en simulant les circulaires réelles) → 12 × 355 ml
+  const barre = brut.match(/^(\d+)\s*\/\s*(\d+(?:\.\d+)?\s*[a-zéèœ.]+)$/);
+  if (barre) return analyserFormatSimple(`${barre[1]} x ${barre[2]}`);
   // v147 : double affichage et mots devant : « 454 g (1 lb) », « 907 g / 2 lb », « bte 284 ml » → la 1re mesure lisible
   const sans = brut.replace(/\(.*?\)/g, ' ').replace(/^[a-zéèêàç.]+\s+(?=\d)/, '').replace(/\s+/g, ' ').trim();
   for (const morceau of [sans, ...sans.split('/')]) {

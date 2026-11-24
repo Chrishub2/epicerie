@@ -39,6 +39,10 @@ const META = 'epicerie-sync';
 // (meta.bases) pour fusionner champ par champ au lieu d'écraser. Pas les prix (ajout seulement, trop nombreux).
 const TYPES_FUSION = new Set(['liste', 'article', 'recette', 'magasin', 'rayon', 'rabais', 'carte', 'cp']);
 const copie = (o) => JSON.parse(JSON.stringify(o));
+function retenirVersion(k, version) {
+  meta.versions ||= {};
+  if (version == null) delete meta.versions[k]; else meta.versions[k] = version;
+}
 function retenirBase(k, type, data) {
   if (!TYPES_FUSION.has(type)) return;
   meta.bases ||= {};
@@ -121,6 +125,7 @@ async function demarrer() {
   await chargerMembres();
   S.maj((e) => { e.utilisateur = m[0].nom_affiche; e.demo = false; });
   await tirer();
+  await lireVersions();
   await pousser();
   ecouterTempsReel();
   if (!abonne) { S.abonner(() => planifierEnvoi()); abonne = true; }
@@ -247,6 +252,12 @@ export async function pousser() {
       if (type === 'prix') { delete meta.empreintes[k]; continue; }
       lignes.push({ foyer_id: foyer.id, type, id, supprime: true, _k: k, _emp: null });
     }
+    // v147 (C2, vu en simulant 2 téléphones sur un réseau lent) : un objet déjà connu de la base est écrit avec sa
+    // version (ecrire_objet). Si l'autre téléphone l'a changé entre-temps : conflit → on relit, on fusionne, on renverra.
+    // Avant : l'envoi remplaçait l'objet entier et effaçait un changement que ce téléphone n'avait pas encore reçu.
+    const versionnees = lignes.filter((l) => !l.supprime && TYPES_FUSION.has(l.type) && meta.versions?.[l._k] != null);
+    for (const l of versionnees) await ecrireVersionnee(l);
+    lignes.splice(0, lignes.length, ...lignes.filter((l) => !versionnees.includes(l)));
     // Un élément refusé par la base ne doit JAMAIS bloquer les autres (incident du 2026-11-16 :
     // un seul prix refusé faisait échouer tout le paquet de 200, plus rien ne passait).
     const envoyer = async (lot) => {
@@ -292,6 +303,30 @@ export async function pousser() {
   } finally { enEnvoi = false; }
 }
 
+/** Écriture avec contrôle de version ; conflit (40001) → version de la base relue et fusionnée (appliquer). */
+async function ecrireVersionnee(l) {
+  const { data: v, error } = await sb.rpc('ecrire_objet', { p_foyer: foyer.id, p_type: l.type, p_id: l.id, p_data: l.data,
+    p_version: meta.versions[l._k], p_supprime: false, p_source: 'telephone' });
+  if (!error) { retenirVersion(l._k, v); meta.empreintes[l._k] = l._emp; retenirBase(l._k, l.type, l.data); ecrireMeta(); return; }
+  if (error.code !== '40001') { console.warn('Synchronisation : écriture refusée', l._k, error.message); return; }
+  const { data: rows } = await sb.from('objets').select('type,id,data,supprime,maj,version').eq('foyer_id', foyer.id)
+    .eq('type', l.type).eq('id', l.id).limit(1);
+  if (rows?.length) appliquer(rows);   // la modification locale en attente est fusionnée, puis renvoyée avec la nouvelle version
+}
+
+/** Une seule fois par téléphone : la version de chaque objet fusionnable (les objets jamais relus n'en avaient pas). */
+async function lireVersions() {
+  if (meta.versionsLues) return;
+  for (let de = 0; ; de += 1000) {
+    const { data, error } = await sb.from('objets').select('type,id,version').eq('foyer_id', foyer.id).in('type', [...TYPES_FUSION])
+      .order('type', { ascending: true }).order('id', { ascending: true }).range(de, de + 999);
+    if (error) return;
+    for (const r of data || []) if (meta.versions?.[`${r.type}:${r.id}`] == null) retenirVersion(`${r.type}:${r.id}`, r.version);
+    if (!data || data.length < 1000) break;
+  }
+  meta.versionsLues = true; ecrireMeta();
+}
+
 /** Taille d'un paquet tiré (Supabase plafonne souvent à 1000 lignes par requête). */
 const PAQUET_TIRE = 1000;
 /** v145 : rattrapage unique des objets sautés par l'ancienne synchro (paquets coupés au milieu d'objets à la même heure). */
@@ -300,7 +335,7 @@ const VERSION_TIRAGE = 2;
 /** Lit tout ce qui suit le curseur, paquet par paquet, sans rien sauter quand plusieurs objets partagent la même heure. */
 function lirePaquets(curseur, surPaquet) {
   const lire = async (c, taille) => {
-    let q = sb.from('objets').select('type,id,data,supprime,maj').eq('foyer_id', foyer.id)
+    let q = sb.from('objets').select('type,id,data,supprime,maj,version').eq('foyer_id', foyer.id)
       .order('maj', { ascending: true }).order('type', { ascending: true }).order('id', { ascending: true }).limit(taille);
     if (c) q = q.or(filtreApres(c));
     const r = await q;
@@ -356,6 +391,7 @@ function rattraper(lignes) {
       e[coll].push(l.data);
       meta.empreintes[k] = empreinte(JSON.stringify(l.data));
       retenirBase(k, l.type, l.data);
+      retenirVersion(k, l.version);
       n++;
     }
   });
@@ -371,7 +407,7 @@ function appliquer(lignes) {
       if (!coll) continue;
       e[coll] ||= [];
       const i = e[coll].findIndex((o) => String(cleDe(l.type, o)) === l.id);
-      if (l.supprime) { if (i >= 0) e[coll].splice(i, 1); delete meta.empreintes[k]; retenirBase(k, l.type, null); continue; }
+      if (l.supprime) { if (i >= 0) e[coll].splice(i, 1); delete meta.empreintes[k]; retenirBase(k, l.type, null); retenirVersion(k, null); continue; }
       // v147 (C2) : modification locale pas encore envoyée → fusion champ par champ (rien de perdu d'un côté ni de l'autre)
       const enAttente = i >= 0 && meta.empreintes[k] && empreinte(JSON.stringify(e[coll][i])) !== meta.empreintes[k];
       const base = meta.bases?.[k];
@@ -382,6 +418,7 @@ function appliquer(lignes) {
       } else if (i >= 0) e[coll][i] = l.data; else e[coll].push(l.data);
       meta.empreintes[k] = empreinte(JSON.stringify(l.data));   // version de la base ; la fusion, si elle diffère, repartira
       retenirBase(k, l.type, l.data);
+      retenirVersion(k, l.version);
     }
   });
   ecrireMeta();
