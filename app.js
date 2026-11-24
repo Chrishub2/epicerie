@@ -14,7 +14,8 @@ import { memeNom, pertinenceNoms } from './noms.js';
 import { calendrierHtml } from './calendrier.js';
 import { REMPLACEMENTS, REMPLACEMENT_DEFAUT, remplacementDe, definirRemplacement, meilleursChoix, DICO_ATTRIBUTS, attributDe, caracteristiques, definirCaracteristique, retirerCaracteristique } from './choix.js';
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
-import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre } from './comparer.js';
+import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre, optimiser, besoinDe } from './comparer.js';
+import { resumePlan, aRacheter, nombreEmballages } from './plan.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 import * as RB from './recherche-bannieres.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
@@ -550,7 +551,7 @@ function htmlItem(l, a) {
   const m = (k && offresArticle(a).find((o) => o.pu != null && !o.perso && cleOffre(o) === k))
     || offresArticle(a).find((o) => o.pu != null && !o.perso) || meilleureOffre(a);
   // Prix tel qu'affiché sur l'étagère (« 3,99 $ », « 2/5,00 $ ») pour comparer d'un coup d'œil
-  const etiquette = m ? (m.offre || (m.prixArticle != null ? argent(m.prixArticle) : '')) : '';
+  const etiquette = m ? (texteOffre(m.offre) || (m.prixArticle != null ? argent(m.prixArticle) : '')) : '';
   const promo = m && (m.economie || m.perso || (m.type && m.type !== 'regulier'));
   const prix = m
     ? `<b class="ep-pp ${promo ? 'promo' : ''}">${esc(etiquette) || '?'}</b>${m.economie && m.prixRegulier ? ` <s class="doux">${argent(m.prixRegulier)}</s>` : ''}`
@@ -565,7 +566,14 @@ function htmlItem(l, a) {
   if (verdict) notes.push(verdict.replace('<div class="item-recu', '<span class="item-recu').replace(/<\/div>$/, '</span>'));
   if (a.rappel) notes.push('<span class="ep-alerte">⚠️ Rappel ou avis sur ce produit</span>');
   if (l.note) notes.push(`<span>📝 ${esc(l.note)}</span>`);
-  if (m?.produitOffre) notes.push(`<span>Prendre : <b>${esc(m.produitOffre)}</b></span>`);
+  // v151 (maquette plan-achats-v1, écran ②) : combien d'emballages prendre quand le format vendu diffère
+  const emb = m ? nombreEmballages(besoinDe(a, l), m, a.uniteRef) : null;
+  const fmtVoulu = formatLisible(a.format);
+  const memeFormat = (() => { const x = analyserFormat(emb?.format), y = analyserFormat(a.format); return !!(x && y && x.base === y.base && Math.abs(x.total - y.total) < 1e-9); })();
+  const embTexte = emb && (emb.n !== (l.quantite || 1) || (fmtVoulu && !memeFormat))
+    ? `${emb.n} × ${formatLisible(emb.format) || emb.format}` : '';
+  if (m?.produitOffre || embTexte) notes.push(`<span>Prendre : <b>${esc([embTexte, m?.produitOffre].filter(Boolean).join(' · '))}</b>${
+    embTexte && fmtVoulu ? ` <span class="doux">(tu veux ${l.quantite > 1 ? `${l.quantite} × ` : ''}${esc(fmtVoulu)})</span>` : ''}</span>`);
   if (m?.perso) notes.push(`<span class="ep-promo">${esc(m.rabaisTexte || 'rabais perso')}</span>`);
   const max = m ? maxParClient(m) : null;
   if (max) notes.push(`<span class="ep-alerte">${max} max par client</span>`);
@@ -916,6 +924,106 @@ function htmlRangeeListe(r, { groupe, rec }) {
   </div></td></tr>`;
 }
 
+// ---------------------------------------------------------------------
+// v151 — Carte « Ton plan » en haut de Prépa (maquette journal/maquettes/plan-achats-v1.html, écran ①) :
+// où aller, combien, en 1, 2 ou 3 magasins (parmi les bannières affichées), articles sans prix, fraîcheur des prix,
+// économie, et « à racheter » tiré des reçus (hypothèse avec n ≥ 3). « Utiliser ce plan » place chaque article.
+// ---------------------------------------------------------------------
+const PREF_PLAN_ARRETS = 'plan.arrets';   // 1, 2 ou 3 (ce téléphone)
+const PREF_PLAN_REPLIE = 'plan.replie';   // carte réduite à une ligne (ce téléphone)
+const PREF_RACHAT_PLUS_TARD = 'plan.rachat.plusTard';   // jour où « Plus tard » a été touché
+let planCourant = null;   // dernier plan affiché (pour « Utiliser ce plan »)
+
+function arretsVoulus() {
+  try { const n = Number(localStorage.getItem(PREF_PLAN_ARRETS)); return [1, 2, 3].includes(n) ? n : 2; } catch { return 2; }
+}
+
+function htmlPlan(cols, rangees) {
+  planCourant = null;
+  if (!rangees.length || !cols.length) return '';
+  const e = S.get();
+  const auj = jourQuebec();
+  const voulu = arretsVoulus();
+  const opt = optimiser(Math.min(3, cols.length), { cleAutorisee: (k) => cols.includes(k) });
+  const r = opt.resultats.find((x) => x.arrets === voulu) || opt.resultats.at(-1) || null;
+  const lignes = rangees.map(({ l, a }) => ({ l, a }));   // mêmes lignes que l'optimiseur (non cochées)
+  const plan = resumePlan(r, lignes, auj);
+  // Rachats : produits revenus dans au moins 3 reçus (jours différents), pas déjà sur la liste
+  let plusTard = null;
+  try { plusTard = localStorage.getItem(PREF_RACHAT_PLUS_TARD); } catch { /* navigation privée */ }
+  const rachats = (plusTard === auj ? [] : aRacheter(e.recus, e.liste, auj))
+    .map((x) => ({ ...x, a: e.articles.find((a) => a.id === x.articleId) })).filter((x) => x.a).slice(0, 3);
+  if (!plan && !rachats.length) return '';
+  planCourant = r;
+  let replie = false;
+  try { replie = localStorage.getItem(PREF_PLAN_REPLIE) === '1'; } catch { /* navigation privée */ }
+  const utilise = !!r && r.affect.length > 0 && r.affect.every((x) => x.l.magasinCible === x.choix.cle);
+  const nArrets = r ? new Set(r.affect.map((x) => x.choix.cle)).size : 0;
+  if (replie) {
+    return `<div class="plan plan-replie"><button type="button" class="plan-ouvrir" id="planOuvrir">${plan
+      ? `<span>Ton plan : <b>${argent(plan.total)}</b> en ${nArrets} magasin${nArrets > 1 ? 's' : ''}${utilise ? ' · ✓ utilisé' : ''}</span>` : '<span>Ton plan</span>'}<span class="doux">▾</span></button></div>`;
+  }
+  // Prix ⚠ écartés parmi les articles de la liste (démesurés ou « à vérifier »), dans les bannières affichées
+  const suspects = lignes.reduce((t, { a }) => t + offresArticle(a).filter((o) => cols.includes(o.banniere) && (o.douteux || o.aVerifier)).length, 0);
+  let h = '<div class="plan">';
+  if (plan) {
+    const choix = [1, 2, 3].filter((n) => n <= cols.length)
+      .map((n) => `<button type="button" data-plan-arrets="${n}" class="${n === voulu ? 'on' : ''}">${n} magasin${n > 1 ? 's' : ''}</button>`).join('');
+    // Articles hors du plan : vendus ailleurs (dans une autre bannière affichée), ou sans aucun prix connu
+    const vendusAilleurs = (a) => offresArticle(a).some((o) => o.pu != null && cols.includes(o.banniere));
+    const ailleurs = plan.sansPrix.filter(vendusAilleurs), aucun = plan.sansPrix.filter((a) => !vendusAilleurs(a));
+    // Ce que coûteraient ces articles au moins cher dans les autres bannières affichées (le total du haut les compte)
+    const coutAilleurs = rangees.filter((x) => ailleurs.includes(x.a)).reduce((t, { l, a }) => {
+      const c = cols.map((b) => coutPour(l, a, b)).filter((x) => x != null).sort((x, y) => x - y)[0];
+      return t + (c || 0);
+    }, 0);
+    const listeNoms = (as) => (as.length ? esc(as.slice(0, 3).map((a) => a.nom).join(', ')) + (as.length > 3 ? ` et ${as.length - 3} autre${as.length > 4 ? 's' : ''}` : '') : '');
+    h += `<div class="plan-tete"><span class="doux">Ton plan le moins cher</span><button type="button" class="plan-replier" id="planReplier" aria-label="Réduire la carte">▴</button></div>
+      <div class="plan-choix">${choix}</div>
+      <div class="plan-total">${argent(plan.total)}</div>
+      <div class="doux">${plan.avecPrix} article${plan.avecPrix > 1 ? 's' : ''} sur ${plan.nbLignes} dans ce${nArrets > 1 ? 's' : ''} magasin${nArrets > 1 ? 's' : ''} · avant taxes</div>
+      ${plan.magasins.map((m) => `<div class="plan-l"><span>${logo(m.cle)} <span class="doux">${m.n} article${m.n > 1 ? 's' : ''}</span></span><b>${argent(m.total)}</b></div>`).join('')}
+      ${listeNoms(ailleurs) ? `<div class="plan-l plan-wa"><span>${nArrets === 1 && plan.magasins[0] ? `Pas chez ${esc(nomBanniere(plan.magasins[0].cle))}` : "Pas dans ces magasins"} : ${listeNoms(ailleurs)}</span>${coutAilleurs > 0 ? `<span>≈ ${argent(coutAilleurs)} ailleurs</span>` : ''}</div>` : ''}
+      ${listeNoms(aucun) ? `<div class="plan-l plan-wa"><span>Sans prix connu : ${listeNoms(aucun)}</span></div>` : ''}
+      <div class="plan-pills">${plan.recents ? `<span class="pill v">✓ ${plan.recents} prix de moins de 14 j</span>` : ''}${plan.moyens ? `<span class="pill">${plan.moyens} prix de 15 à 60 j</span>` : ''}${suspects ? `<span class="pill a">⚠ ${suspects} prix douteux écarté${suspects > 1 ? 's' : ''}</span>` : ''}</div>
+      ${plan.economie > 0.004 ? `<div class="plan-l plan-eco"><span>Économie avec ce plan<br><span class="doux">sur les prix réguliers${plan.finBientot ? ` · ${plan.finBientot} rabais fini${plan.finBientot > 1 ? 'ssent' : 't'} d'ici demain` : ''}</span></span><b>−${argent(plan.economie)}</b></div>` : ''}
+      ${utilise ? '<div class="plan-ok">✓ Plan utilisé : chaque article est placé dans son magasin</div>' : '<button type="button" class="btn plan-utiliser" id="planUtiliser">Utiliser ce plan</button>'}`;
+  }
+  if (rachats.length) {
+    h += `<div class="plan-rachat"><div class="doux">À racheter bientôt (d'après tes reçus)</div>
+      ${rachats.map((x) => `<div class="plan-l"><span>${esc(x.a.nom)}</span><span class="doux">tous les ${x.intervalle} j environ (n = ${x.n})</span></div>`).join('')}
+      <div class="plan-btns"><button type="button" class="btn sec" id="planRacheter" data-ids="${esc(rachats.map((x) => x.a.id).join(','))}">+ Ajouter ${rachats.length > 1 ? `les ${rachats.length}` : 'à la liste'}</button><button type="button" class="btn sec" id="planPlusTard">Plus tard</button></div></div>`;
+  }
+  return h + '</div>';
+}
+
+function brancherPlan(v) {
+  $$('[data-plan-arrets]', v).forEach((b) => b.onclick = () => {
+    try { localStorage.setItem(PREF_PLAN_ARRETS, b.dataset.planArrets); } catch { /* navigation privée */ }
+    rendre();
+  });
+  const replier = (oui) => { try { localStorage.setItem(PREF_PLAN_REPLIE, oui ? '1' : '0'); } catch { /* navigation privée */ } rendre(); };
+  $('#planReplier', v)?.addEventListener('click', () => replier(true));
+  $('#planOuvrir', v)?.addEventListener('click', () => replier(false));
+  $('#planUtiliser', v)?.addEventListener('click', () => {
+    const r = planCourant;
+    if (!r) return;
+    const cles = new Map(r.affect.map((x) => [x.l.id, x.choix.cle]));
+    S.maj((x) => x.liste.forEach((li) => { if (cles.has(li.id)) li.magasinCible = cles.get(li.id); }));
+    const n = new Set(cles.values()).size;
+    toast(`Plan utilisé : ${n} magasin${n > 1 ? 's' : ''}, ${argent(r.total)}`);
+  });
+  $('#planRacheter', v)?.addEventListener('click', (ev) => {
+    const ids = ev.currentTarget.dataset.ids.split(',').filter(Boolean);
+    ids.forEach((id) => ajouterALaListe(id));
+    toast(`${ids.length} produit${ids.length > 1 ? 's' : ''} ajouté${ids.length > 1 ? 's' : ''} à la liste`);
+  });
+  $('#planPlusTard', v)?.addEventListener('click', () => {
+    try { localStorage.setItem(PREF_RACHAT_PLUS_TARD, jourQuebec()); } catch { /* navigation privée */ }
+    rendre();
+  });
+}
+
 /** Bilan en haut du mode Liste : arrêts, total, économie, coût d'un seul arrêt, records. */
 function htmlBilanListe(rangees, { total, ecoTot, recs }) {
   const avecPrix = rangees.filter((r) => r.offre && !r.l.indisponible);
@@ -1089,7 +1197,7 @@ function vueListe(v) {
   // le corps défile dessous ; leurs défilements horizontaux restent synchronisés.
   const ouvrirTable = () => `<table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>${seule ? ''
     : `<colgroup><col style="width:${photo ? 52 : 184}px"><col style="width:72px">${cols.map(() => `<col style="width:${LC}px">`).join('')}<col style="width:40px"></colgroup>`}`;
-  let h = `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
+  let h = htmlPlan(cols, rangees) + `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
   // Les deux interrupteurs restent toujours à leur place (Photo s'applique quand Liste est désactivée)
   // À droite des interrupteurs : nombre d'articles sur la liste (Prépa. = ceux qui restent à acheter)
   const nb = `<div class="p-nb" title="${rangees.length} article(s) sur la liste"><b>${rangees.length}</b><span>article${rangees.length > 1 ? 's' : ''}</span></div>`;
@@ -1166,6 +1274,7 @@ function vueListe(v) {
     toast('Tout au meilleur prix');
   });
   $('#btnAjBan', v)?.addEventListener('click', () => allerOnglet('magasins'));
+  brancherPlan(v);
   $$('[data-reorg]', v).forEach((b) => b.onclick = () => ouvrirReorg('defaut'));
   $$('[data-classer]', v).forEach((b) => b.onclick = () => classerSansRayon());
 
