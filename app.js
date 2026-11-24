@@ -16,6 +16,7 @@ import { REMPLACEMENTS, REMPLACEMENT_DEFAUT, remplacementDe, definirRemplacement
 import { vuePlus, afficherPhoto, allerASection, nouveauRecu, ouvrirReleve, ouvrirDetailRecu } from './plus.js';
 import { vueComparaison, tableauOffres, nomCle, coutPour, cleOffre, optimiser, besoinDe } from './comparer.js';
 import { resumePlan, aRacheter, nombreEmballages } from './plan.js';
+import { lignesAchat, derniereVisite, bilanVisite, economiesMois } from './bilan.js';
 import { ouvrirLiaison, actualiserArticle, actualiserTout, afficherHistorique } from './epiceries.js';
 import * as RB from './recherche-bannieres.js';
 import { lirePrixPhoto, brancherIA } from './ocr.js';
@@ -925,6 +926,62 @@ function htmlRangeeListe(r, { groupe, rec }) {
 }
 
 // ---------------------------------------------------------------------
+// v152 — Bilan après l'achat (maquette plan-achats-v1, écran ③) : en haut de Prépa pendant 7 jours après une visite
+// (« Retirer les achetés » en mode Magasin) : prévu ↔ payé (reçu), économisé, articles pas achetés, économies du mois.
+// ---------------------------------------------------------------------
+const PREF_BILAN_FERME = 'bilan.ferme';   // visite dont le bilan a été fermé (ce téléphone)
+const dateCourte = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' });
+const nomMois = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('fr-CA', { month: 'long' });
+
+/** Économies du mois en cours (réelles d'après les reçus ; visites sans reçu : estimées à part). Ligne ou ''. */
+function htmlEconomiesMois() {
+  const e = S.get();
+  const auj = jourQuebec();
+  const m = economiesMois(e.recus, e.achats, auj.slice(0, 7));
+  if (!(m.reel > 0.004) && !(m.estime > 0.004)) return '';
+  const mois = nomMois(auj);
+  return `<div class="plan-l plan-mois"><span>${mois.charAt(0).toUpperCase() + mois.slice(1)} : <b class="plan-vert">−${argent(m.reel)}</b> économisés<br><span class="doux">d'après ${m.nRecus} reçu${m.nRecus > 1 ? 's' : ''}${m.parBanniere.length > 1 ? ` · ${m.parBanniere.map((x) => `${esc(nomBanniere(x.banniere))} −${argent(x.total)}`).join(' · ')}` : ''}${
+    m.estime > 0.004 ? ` · + environ −${argent(m.estime)} estimés (${m.nVisitesEstimees} visite${m.nVisitesEstimees > 1 ? 's' : ''} sans reçu)` : ''}</span></span></div>`;
+}
+
+function htmlBilanVisite() {
+  const e = S.get();
+  const v = derniereVisite(e.achats);
+  if (!v) return '';
+  const auj = jourQuebec();
+  const age = Math.round((Date.parse(`${auj}T12:00:00Z`) - Date.parse(`${v.date}T12:00:00Z`)) / 86400000);
+  let ferme = null;
+  try { ferme = localStorage.getItem(PREF_BILAN_FERME); } catch { /* navigation privée */ }
+  if (age > 7 || ferme === v.visite) return '';
+  const b = bilanVisite(e.achats, e.recus, e.liste, v);
+  const noms = (ids) => ids.map((id) => e.articles.find((a) => a.id === id)?.nom).filter(Boolean);
+  const restants = noms(b.restants);
+  const ecart = b.recu?.paye != null && b.prevu > 0 ? b.recu.paye - b.prevu : null;
+  return `<div class="plan plan-bilan">
+    <div class="plan-tete"><span><b>Bilan · ${esc(nomBanniere(b.banniere))} ${esc(dateCourte(b.date))}</b></span><button type="button" class="plan-replier" id="bilanFermer" aria-label="Fermer le bilan">✕</button></div>
+    <div class="plan-l"><span>Prévu (ta liste, ${b.n} article${b.n > 1 ? 's' : ''}${b.sansPrix ? `, dont ${b.sansPrix} sans prix` : ''})</span><b>${argent(b.prevu)}</b></div>
+    ${b.recu ? `<div class="plan-l"><span>Payé <span class="doux">(reçu du ${esc(dateCourte(b.recu.date))}, tout compris)</span></span><b>${argent(b.recu.paye)}</b></div>
+      ${b.recu.economise > 0.004 ? `<div class="plan-l"><span>Économisé <span class="doux">(rabais du reçu)</span></span><b class="plan-vert">−${argent(b.recu.economise)}</b></div>` : ''}
+      ${ecart != null && ecart > 0.5 ? `<div class="doux">Le reçu compte ${argent(ecart)} de plus que ta liste (articles hors liste, taxes, consignes).</div>` : ''}
+      <button type="button" class="btn sec plan-utiliser-sec" id="bilanRecu" data-recu="${esc(b.recu.id)}">Voir le reçu et sa vérification</button>`
+    : `${b.economiePrevue > 0.004 ? `<div class="plan-l"><span>Économie prévue <span class="doux">(rabais de ta liste)</span></span><b class="plan-vert">−${argent(b.economiePrevue)}</b></div>` : ''}
+      <button type="button" class="btn sec plan-utiliser-sec" id="bilanPhoto" data-ban="${esc(b.banniere)}">📷 Photographier le reçu</button><div class="doux">pour voir le payé et l'économisé réels</div>`}
+    ${restants.length ? `<div class="plan-l plan-wa"><span>Pas achetés chez ${esc(nomBanniere(b.banniere))} : ${esc(restants.slice(0, 3).join(', '))}${restants.length > 3 ? ` et ${restants.length - 3} autre${restants.length > 4 ? 's' : ''}` : ''}<br><span class="doux">gardés sur ta liste pour la prochaine fois</span></span></div>` : ''}
+    ${htmlEconomiesMois()}
+  </div>`;
+}
+
+function brancherBilan(v) {
+  $('#bilanFermer', v)?.addEventListener('click', () => {
+    const d = derniereVisite(S.get().achats);
+    try { if (d) localStorage.setItem(PREF_BILAN_FERME, d.visite); } catch { /* navigation privée */ }
+    rendre();
+  });
+  $('#bilanRecu', v)?.addEventListener('click', (ev) => ouvrirDetailRecu(ev.currentTarget.dataset.recu));
+  $('#bilanPhoto', v)?.addEventListener('click', (ev) => nouveauRecu({ banniere: ev.currentTarget.dataset.ban }));
+}
+
+// ---------------------------------------------------------------------
 // v151 — Carte « Ton plan » en haut de Prépa (maquette journal/maquettes/plan-achats-v1.html, écran ①) :
 // où aller, combien, en 1, 2 ou 3 magasins (parmi les bannières affichées), articles sans prix, fraîcheur des prix,
 // économie, et « à racheter » tiré des reçus (hypothèse avec n ≥ 3). « Utiliser ce plan » place chaque article.
@@ -951,7 +1008,7 @@ function htmlPlan(cols, rangees) {
   // Rachats : produits revenus dans au moins 3 reçus (jours différents), pas déjà sur la liste
   let plusTard = null;
   try { plusTard = localStorage.getItem(PREF_RACHAT_PLUS_TARD); } catch { /* navigation privée */ }
-  const rachats = (plusTard === auj ? [] : aRacheter(e.recus, e.liste, auj))
+  const rachats = (plusTard === auj ? [] : aRacheter(e.recus, e.liste, auj, { achats: e.achats }))
     .map((x) => ({ ...x, a: e.articles.find((a) => a.id === x.articleId) })).filter((x) => x.a).slice(0, 3);
   if (!plan && !rachats.length) return '';
   planCourant = r;
@@ -989,6 +1046,7 @@ function htmlPlan(cols, rangees) {
       ${plan.economie > 0.004 ? `<div class="plan-l plan-eco"><span>Économie avec ce plan<br><span class="doux">sur les prix réguliers${plan.finBientot ? ` · ${plan.finBientot} rabais fini${plan.finBientot > 1 ? 'ssent' : 't'} d'ici demain` : ''}</span></span><b>−${argent(plan.economie)}</b></div>` : ''}
       ${utilise ? '<div class="plan-ok">✓ Plan utilisé : chaque article est placé dans son magasin</div>' : '<button type="button" class="btn plan-utiliser" id="planUtiliser">Utiliser ce plan</button>'}`;
   }
+  if (!htmlBilanVisite()) h += htmlEconomiesMois();   // v152 : sinon, elles sont dans le bilan
   if (rachats.length) {
     h += `<div class="plan-rachat"><div class="doux">À racheter bientôt (d'après tes reçus)</div>
       ${rachats.map((x) => `<div class="plan-l"><span>${esc(x.a.nom)}</span><span class="doux">tous les ${x.intervalle} j environ (n = ${x.n})</span></div>`).join('')}
@@ -1126,7 +1184,15 @@ function vueEpicerie(v, b, toutes) {
   v.innerHTML = h;
 
   const ids = new Set(panier.map((r) => r.l.id));
-  $('#btnVider', v)?.addEventListener('click', () => S.maj((x) => { x.liste = x.liste.filter((l) => !ids.has(l.id)); }));
+  // v152 : les articles retirés vont dans l'historique des achats (bilan, économies du mois, « à racheter »)
+  $('#btnVider', v)?.addEventListener('click', () => {
+    const lignes = panier.map((r) => ({ l: r.l, a: r.a, cout: r.offre ? coutPour(r.l, r.a, cleOffre(r.offre)) : null,
+      economie: r.offre?.economie ? r.offre.economie * (r.l.quantite || 1) : 0 }));
+    const achats = lignesAchat(lignes, b, jourQuebec(), () => S.uid('ac'));
+    S.maj((x) => { (x.achats ||= []).push(...achats); x.liste = x.liste.filter((l) => !ids.has(l.id)); });
+    try { localStorage.removeItem(PREF_BILAN_FERME); } catch { /* navigation privée */ }
+    toast(`Visite chez ${nomBanniere(b)} enregistrée (${achats.length} article${achats.length > 1 ? 's' : ''}) : ton bilan est en haut de Prépa.`);
+  });
   // v120 : le reçu photographié ici ne parle que des produits cochés chez CETTE bannière
   $('#btnRecu', v).onclick = () => nouveauRecu({ banniere: b, ids: panier.map((r) => r.l.id) });
   $$('.item-liste', v).forEach((el) => brancherAppuiLong(el, () => optionsArticleListe(el.dataset.id)));
@@ -1183,7 +1249,8 @@ function vueListe(v) {
   if (mode !== 'prep') { montrerPuces(); vueEpicerie(v, mode, toutes); return; }
 
   if (!rangees.length) {
-    v.innerHTML = '<div class="vide">Ta liste est vide. Ajoute un produit en haut à droite ou scanne un code-barres.</div>';
+    v.innerHTML = htmlBilanVisite() + '<div class="vide">Ta liste est vide. Ajoute un produit en haut à droite ou scanne un code-barres.</div>';
+    brancherBilan(v);
     return;
   }
 
@@ -1197,7 +1264,7 @@ function vueListe(v) {
   // le corps défile dessous ; leurs défilements horizontaux restent synchronisés.
   const ouvrirTable = () => `<table class="prep-t"${seule ? '' : ` style="width:${largeur}px"`}>${seule ? ''
     : `<colgroup><col style="width:${photo ? 52 : 184}px"><col style="width:72px">${cols.map(() => `<col style="width:${LC}px">`).join('')}<col style="width:40px"></colgroup>`}`;
-  let h = htmlPlan(cols, rangees) + `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
+  let h = htmlBilanVisite() + htmlPlan(cols, rangees) + `<div class="prep ${photo ? 'photo' : ''} ${seule ? 'seule' : ''}"><div class="prep-tete">${ouvrirTable()}`;
   // Les deux interrupteurs restent toujours à leur place (Photo s'applique quand Liste est désactivée)
   // À droite des interrupteurs : nombre d'articles sur la liste (Prépa. = ceux qui restent à acheter)
   const nb = `<div class="p-nb" title="${rangees.length} article(s) sur la liste"><b>${rangees.length}</b><span>article${rangees.length > 1 ? 's' : ''}</span></div>`;
@@ -1275,6 +1342,7 @@ function vueListe(v) {
   });
   $('#btnAjBan', v)?.addEventListener('click', () => allerOnglet('magasins'));
   brancherPlan(v);
+  brancherBilan(v);
   $$('[data-reorg]', v).forEach((b) => b.onclick = () => ouvrirReorg('defaut'));
   $$('[data-classer]', v).forEach((b) => b.onclick = () => classerSansRayon());
 

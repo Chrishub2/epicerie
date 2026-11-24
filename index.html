@@ -222,7 +222,14 @@ table.prep-t { border-collapse: separate; border-spacing: 0; table-layout: fixed
 .plan-tete { display: flex; justify-content: space-between; align-items: center; }
 .plan-replier, .plan-ouvrir { border: 0; background: transparent; color: var(--doux); font: inherit; cursor: pointer; padding: 2px 4px; }
 .plan-replie { padding: 0; }
-.plan + .prep { margin-top: 0; }   /* .prep remonte de 12 px sous l'en-tête : pas sous la carte */
+.plan + .prep { margin-top: 0; }
+.plan-bilan { border-color: var(--vert); }
+.plan + .plan { margin-top: 0; }
+.plan-vert { color: var(--vert); }
+.plan-mois { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ligne); }
+.plan-utiliser-sec { width: 100%; margin-top: 8px; white-space: normal; }
+.plan-utiliser-sec + .doux { text-align: center; margin-top: 3px; }
+.plan + .vide { margin-top: 0; }   /* .prep remonte de 12 px sous l'en-tête : pas sous la carte */
 .plan-ouvrir { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 9px 12px; color: var(--texte); font-size: 13px; text-align: left; }
 .plan-choix { display: flex; gap: 6px; margin: 8px 0; }
 .plan-choix button { flex: 1; border: 1px solid var(--ligne); border-radius: 999px; padding: 6px 0; background: transparent; color: var(--doux); font: inherit; font-size: 12.5px; cursor: pointer; }

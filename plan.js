@@ -41,17 +41,22 @@ export function resumePlan(r, lignes, auj) {
 }
 
 /**
- * Produits à racheter bientôt, d'après les reçus : au moins `min` jours d'achat différents (règle du projet :
+ * Produits à racheter bientôt, d'après les reçus et l'historique des achats (v152) : au moins `min` jours d'achat différents (règle du projet :
  * une prédiction est une hypothèse avec n, jamais avant 3 observations). Intervalle = médiane des écarts.
  * Retenu si le prochain achat probable tombe d'ici `horizon` jours et que le produit n'est pas déjà sur la liste.
  * → [{ articleId, n, intervalle, dernier, prochain }] du plus pressé au moins pressé.
  */
-export function aRacheter(recus, liste, auj, { min = 3, horizon = 2 } = {}) {
+export function aRacheter(recus, liste, auj, { min = 3, horizon = 2, achats = [] } = {}) {
   const dates = new Map();
   for (const r of recus || []) {
     const d = String(r.date || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
     for (const l of r.lignes || []) if (l.articleId) (dates.get(l.articleId) || dates.set(l.articleId, new Set()).get(l.articleId)).add(d);
+  }
+  // v152 : l'historique des achats (« Retirer les achetés ») compte aussi ; même jour qu'un reçu = un seul achat
+  for (const x of achats || []) {
+    const d = String(x.date || '').slice(0, 10);
+    if (x.articleId && /^\d{4}-\d{2}-\d{2}$/.test(d)) (dates.get(x.articleId) || dates.set(x.articleId, new Set()).get(x.articleId)).add(d);
   }
   const surListe = new Set((liste || []).filter((l) => !l.coche).map((l) => l.articleId));
   const out = [];
