@@ -11,7 +11,7 @@
 import * as S from './store.js';
 import { toast } from './ui.js';
 import { SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, SUPABASE_JS } from './config.js';
-import { envoyerParPaquets } from './envoi.js';
+import { envoyerParPaquets, lireParPaquets, filtreApres } from './envoi.js';
 
 // type d'objet en base → collection de l'état local
 const COLLECTIONS = {
@@ -269,17 +269,65 @@ export async function pousser() {
   } finally { enEnvoi = false; }
 }
 
+/** Taille d'un paquet tiré (Supabase plafonne souvent à 1000 lignes par requête). */
+const PAQUET_TIRE = 1000;
+/** v145 : rattrapage unique des objets sautés par l'ancienne synchro (paquets coupés au milieu d'objets à la même heure). */
+const VERSION_TIRAGE = 2;
+
+/** Lit tout ce qui suit le curseur, paquet par paquet, sans rien sauter quand plusieurs objets partagent la même heure. */
+function lirePaquets(curseur, surPaquet) {
+  const lire = async (c, taille) => {
+    let q = sb.from('objets').select('type,id,data,supprime,maj').eq('foyer_id', foyer.id)
+      .order('maj', { ascending: true }).order('type', { ascending: true }).order('id', { ascending: true }).limit(taille);
+    if (c) q = q.or(filtreApres(c));
+    const r = await q;
+    if (r.error) console.warn(r.error);
+    return r;
+  };
+  return lireParPaquets(lire, curseur, (lignes, c) => {
+    surPaquet(lignes);
+    meta.curseurTire = c; meta.dernierTire = c.maj; ecrireMeta();
+  }, PAQUET_TIRE);
+}
+
 /** Récupère ce que l'autre téléphone a changé. */
 export async function tirer() {
   if (!estPret() || !navigator.onLine) return;
-  let q = sb.from('objets').select('type,id,data,supprime,maj').eq('foyer_id', foyer.id).order('maj', { ascending: true }).limit(5000);
-  if (meta.dernierTire) q = q.gt('maj', meta.dernierTire);
-  const { data, error } = await q;
-  if (error) { console.warn(error); return; }
-  if (data.length) {
-    appliquer(data);
-    meta.dernierTire = data[data.length - 1].maj; ecrireMeta();
+  // Ancien curseur (heure seule) : reprendre au début de cette heure, c'est sans danger (appliquer est idempotent)
+  const curseurActuel = () => meta.curseurTire || (meta.dernierTire ? { maj: meta.dernierTire, type: '', id: '' } : null);
+  if ((meta.versionTirage || 1) < VERSION_TIRAGE) {
+    // Rattrapage : relire toute la base, n'ajouter que ce qui manque ici (jamais écraser une modif locale pas encore envoyée)
+    const avant = curseurActuel();
+    let n = 0;
+    const ok = await lirePaquets(null, (lignes) => { n += rattraper(lignes); });
+    meta.curseurTire = avant; meta.dernierTire = avant?.maj; // la suite normale reprend où elle était (modifs et suppressions)
+    if (!ok) { ecrireMeta(); return; }
+    meta.versionTirage = VERSION_TIRAGE; ecrireMeta();
+    if (n) console.info(`Synchro : ${n} objet(s) manquant(s) récupéré(s)`);
   }
+  await lirePaquets(curseurActuel(), appliquer);
+}
+
+/** Ajoute seulement les objets absents d'ici (et jamais connus ici : une suppression locale pas encore envoyée reste supprimée). */
+function rattraper(lignes) {
+  let n = 0;
+  S.maj((e) => {
+    const presents = new Map(); // type → ids déjà ici
+    const ici = (type, coll) => presents.get(type) || presents.set(type, new Set((e[coll] || []).map((o) => String(cleDe(type, o))))).get(type);
+    for (const l of lignes) {
+      if (l.supprime || l.type === 'reglages') continue;
+      const coll = COLLECTIONS[l.type];
+      const k = `${l.type}:${l.id}`;
+      if (!coll || meta.empreintes[k]) continue;
+      e[coll] ||= [];
+      if (ici(l.type, coll).has(l.id)) continue;
+      ici(l.type, coll).add(l.id);
+      e[coll].push(l.data);
+      meta.empreintes[k] = empreinte(JSON.stringify(l.data));
+      n++;
+    }
+  });
+  return n;
 }
 
 function appliquer(lignes) {
@@ -303,8 +351,7 @@ function ecouterTempsReel() {
   canal = sb.channel(`foyer-${foyer.id}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'objets', filter: `foyer_id=eq.${foyer.id}` }, (p) => {
       if (!p.new?.type) return;
-      appliquer([p.new]);
-      if (p.new.maj > (meta.dernierTire || '')) { meta.dernierTire = p.new.maj; ecrireMeta(); }
+      appliquer([p.new]); // v145 : le temps réel n'avance plus le curseur (sinon un objet manqué ne serait jamais relu)
     })
     .subscribe();
 }

@@ -31,3 +31,41 @@ export async function envoyerParPaquets(lignes, envoyer, dejaRefuses = new Set()
   }
   return refuses;
 }
+
+// ---------------------------------------------------------------------
+// Lecture par paquets (v145). Incident du 2026-11-23 : l'extension écrit souvent des dizaines de prix à la
+// MÊME heure ; l'ancienne synchro reprenait « après la dernière heure reçue », donc un paquet coupé au milieu
+// d'un tel groupe faisait sauter le reste pour toujours. On reprend maintenant après (heure, type, id).
+// ---------------------------------------------------------------------
+
+/** Filtre PostgREST « après le curseur » : heure plus récente, ou même heure et (type, id) plus loin. */
+export function filtreApres(c) {
+  const q = (v) => `"${String(v ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  return `maj.gt.${q(c.maj)},and(maj.eq.${q(c.maj)},type.gt.${q(c.type)}),and(maj.eq.${q(c.maj)},type.eq.${q(c.type)},id.gt.${q(c.id)})`;
+}
+
+/** Même ordre que la base : heure, puis type, puis id. */
+export function apresCurseur(l, c) {
+  if (!c) return true;
+  if (l.maj !== c.maj) return l.maj > c.maj;
+  if (l.type !== c.type) return l.type > c.type;
+  return l.id > c.id;
+}
+
+/**
+ * Lit tout ce qui suit `curseur`, paquet par paquet. `lire(curseur, taille)` fait l'appel réseau et
+ * retourne { data, error } (lignes triées par heure, type, id). `surPaquet(lignes, curseur)` reçoit chaque paquet
+ * et le curseur atteint. Retourne false si une lecture échoue (le curseur reste au dernier paquet réussi).
+ */
+export async function lireParPaquets(lire, curseur, surPaquet, taille = 1000) {
+  let c = curseur;
+  for (;;) {
+    const { data, error } = await lire(c, taille);
+    if (error) return false;
+    if (!data?.length) return true;
+    const d = data[data.length - 1];
+    c = { maj: d.maj, type: d.type, id: d.id };
+    surPaquet(data, c);
+    if (data.length < taille) return true;
+  }
+}
