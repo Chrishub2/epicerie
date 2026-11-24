@@ -11,7 +11,7 @@
 import * as S from './store.js';
 import { toast } from './ui.js';
 import { SUPABASE_URL, SUPABASE_CLE_PUBLIQUE, SUPABASE_JS } from './config.js';
-import { envoyerParPaquets, lireParPaquets, filtreApres } from './envoi.js';
+import { envoyerParPaquets, lireParPaquets, filtreApres, clePrix, SOURCES_RAFRAICHIES } from './envoi.js';
 
 // type d'objet en base → collection de l'état local
 const COLLECTIONS = {
@@ -314,8 +314,16 @@ function rattraper(lignes) {
   S.maj((e) => {
     const presents = new Map(); // type → ids déjà ici
     const ici = (type, coll) => presents.get(type) || presents.set(type, new Set((e[coll] || []).map((o) => String(cleDe(type, o))))).get(type);
+    // v146 : jamais ramener les copies de prix (épiceries.ca et démo sont rafraîchis ici ; un prix identique déjà là suffit)
+    const clesPrix = new Set((e.prix || []).filter((p) => !p.annule).map(clePrix));
     for (const l of lignes) {
       if (l.supprime || l.type === 'reglages') continue;
+      if (l.type === 'prix') {
+        if (l.data?.annule || SOURCES_RAFRAICHIES.has(l.data?.source)) continue;
+        const cp = clePrix(l.data || {});
+        if (clesPrix.has(cp)) continue;
+        clesPrix.add(cp);
+      }
       const coll = COLLECTIONS[l.type];
       const k = `${l.type}:${l.id}`;
       if (!coll || meta.empreintes[k]) continue;

@@ -8,6 +8,7 @@
 import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, toast, nomBanniere, puce } from './ui.js';
 import { normaliser, analyserFormat, formatLisible } from './normalise.js';
+import { remplacerPrixLus } from './envoi.js';
 
 const API = 'https://epiceries.ca/api';
 export const MAGASINS_EC = { maxi: 'maxi', iga: 'iga', superc: 'super_c', metro: 'metro', provigo: 'provigo', walmart: 'walmart' };
@@ -162,9 +163,8 @@ export async function actualiserArticle(articleId, { force = false } = {}) {
   S.maj((e) => {
     const ar = e.articles.find((x) => x.id === articleId);
     if (!ar) return;
-    const liensOk = new Set(nouveaux.map((n) => n.lienId));
-    e.prix = e.prix.filter((p) => !(p.articleId === articleId && (p.source === 'demo' || (p.source === 'epiceries_ca' && liensOk.has(p.lienId)))));
-    e.prix.push(...nouveaux);
+    // v146 : un prix identique déjà là est gardé tel quel (plus de copie envoyée à la base à chaque actualisation)
+    e.prix = remplacerPrixLus(e.prix, articleId, nouveaux).prix;
     ar.majPrix = new Date().toISOString();
     if (image && !ar.imageUrl) ar.imageUrl = image;
     if (rayonAuto && !ar.rayonManuel) ar.rayonId = rayonAuto; // un rayon choisi à la main n'est jamais modifié

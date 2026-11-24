@@ -69,3 +69,36 @@ export async function lireParPaquets(lire, curseur, surPaquet, taille = 1000) {
     if (data.length < taille) return true;
   }
 }
+
+// ---------------------------------------------------------------------
+// Prix en double (v146). Constat du 2026-11-23 : 3 388 prix épiceries.ca actifs dans la base pour 358 différents.
+// Chaque actualisation (12 h) remplaçait ses prix sur le téléphone, mais la base garde tout (ajout seulement) :
+// l'ancienne copie y restait et une nouvelle, souvent identique, s'ajoutait.
+// ---------------------------------------------------------------------
+
+/** Ce qui fait qu'un prix est « le même » : produit, magasin, source, lien, prix affiché, jour de lecture, type. */
+export function clePrix(p) {
+  return [p.articleId, p.banniere, p.source, p.lienId || '', p.offre, p.observeLe || '', p.type || ''].join('|');
+}
+
+/** Sources rafraîchies sur le téléphone même (pas besoin de les rattraper depuis la base, qui en garde l'historique). */
+export const SOURCES_RAFRAICHIES = new Set(['epiceries_ca', 'demo']);
+
+/**
+ * Remplace les prix épiceries.ca d'un article par ceux qui viennent d'être lus, SANS recréer une copie
+ * d'un prix identique déjà présent (on garde l'ancien objet : rien de nouveau n'est envoyé à la base).
+ * Retourne { prix, ajoutes } : la nouvelle liste et le nombre de prix réellement nouveaux.
+ */
+export function remplacerPrixLus(prix, articleId, nouveaux) {
+  const liensOk = new Set(nouveaux.map((n) => n.lienId));
+  const visePar = (p) => p.articleId === articleId && (p.source === 'demo' || (p.source === 'epiceries_ca' && liensOk.has(p.lienId)));
+  const existants = new Map();
+  for (const p of prix) if (visePar(p) && p.source === 'epiceries_ca' && !p.annule) existants.set(clePrix(p), p);
+  const gardes = new Set();
+  const ajouts = [];
+  for (const n of nouveaux) {
+    const deja = existants.get(clePrix(n));
+    if (deja) gardes.add(deja); else ajouts.push(n);
+  }
+  return { prix: [...prix.filter((p) => !visePar(p) || gardes.has(p)), ...ajouts], ajoutes: ajouts.length };
+}
