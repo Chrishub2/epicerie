@@ -128,7 +128,7 @@ export function rendre() {
 }
 
 // Bandeau « rabais de circulaire à valider » : retiré le 2026-11-17 (Chris ne valide pas à la main).
-// Les rabais sûrs s'enregistrent seuls ; les incertains restent facultatifs dans Plus → Circulaires.
+// Les rabais sûrs s'enregistrent seuls ; les incertains ne sont plus montrés au téléphone (v155), seulement dans la console.
 function majBandeauCirc() {
   const z = $('#bandeauCirc');
   if (z) z.innerHTML = '';

@@ -140,14 +140,20 @@ export function texteDejaDansBase(lignes) {
 async function offresDates(sb, foyer) {
   const [a, m, j] = jourQuebec().split('-').map(Number);
   const hier = new Date(Date.UTC(a, m - 1, j - 1)).toISOString().slice(0, 10);
-  const out = [];
-  for (let debut = 0; ; debut += 1000) {
-    const { data, error } = await sb.from('offres_circulaires').select('source,debut,fin').eq('foyer_id', foyer)
-      .not('debut', 'is', null).gte('fin', hier).order('id').range(debut, debut + 999);
-    if (error) throw new Error(error.message);
-    out.push(...(data || []));
-    if (!data || data.length < 1000) return out;
+  // v155 : la 1re page donne le total ; les suivantes partent toutes en même temps (≈ 5 000 lignes : 1 aller-retour au lieu de 6).
+  const requete = (debut, compte) => sb.from('offres_circulaires').select('source,debut,fin', compte ? { count: 'exact' } : undefined)
+    .eq('foyer_id', foyer).not('debut', 'is', null).gte('fin', hier).order('id').range(debut, debut + 999);
+  const premiere = await requete(0, true);
+  if (premiere.error) throw new Error(premiere.error.message);
+  const out = [...(premiere.data || [])];
+  const total = premiere.count ?? out.length;
+  const suite = [];
+  for (let debut = 1000; debut < total; debut += 1000) suite.push(requete(debut, false));
+  for (const r of await Promise.all(suite)) {
+    if (r.error) throw new Error(r.error.message);
+    out.push(...(r.data || []));
   }
+  return out;
 }
 
 async function brouillon(sb, foyer) {
@@ -313,6 +319,9 @@ export function monterCirculaires(conteneur, opts) {
     const st = document.createElement('style'); st.id = 'circ-css'; st.textContent = CSS; document.head.appendChild(st);
   }
   const { sb, foyer, hote = 'app', source = 'telephone' } = opts;
+  // v155 (Chris, 2026-11-24) : au téléphone, aucune liste de rabais (incertains, liens appris, autres rabais vus) :
+  // la base gère tout et les corrections ne se font pas au téléphone. La console garde ces listes.
+  const listes = hote !== 'app';
   const message = opts.message || toastSimple;
   const articles = () => (opts.articles?.() || []).filter((a) => !a.supprime);
   const etat = { lot: null, pages: [], urls: new Map(), lots: [], aValider: [], autres: [], filtreAutres: '', minuterie: null, occupe: '', offresDates: null, couvOuverte: true, liens: null, liensOuverts: true, liensTraites: new Set(), offresTraitees: new Set() };
@@ -324,30 +333,40 @@ export function monterCirculaires(conteneur, opts) {
   }
   let arrete = false;
 
+  // v155 (Chris, 2026-11-24 : « beaucoup trop long ») : l'essentiel d'abord (brouillon, pages, envois), affiché tout de suite ;
+  // la couverture arrive ensuite et n'est relue qu'aux 5 min (ou après un envoi) ; au téléphone, aucune liste de rabais n'est lue.
+  let datesLe = 0, datesEnCours = null;
+  function chargerDates(forcer = false) {
+    if (datesEnCours || (!forcer && etat.offresDates && Date.now() - datesLe < 300000)) return;
+    datesEnCours = offresDates(sb, foyer).then((d) => {
+      etat.offresDates = d; datesLe = Date.now();
+      if (!arrete && racine.isConnected && !etat.occupe && !etat.avertir) rendre();
+    }).catch(() => {}).finally(() => { datesEnCours = null; });   // couverture : facultative
+  }
+
   async function charger() {
     try {
+      chargerDates();
       etat.lot = await brouillon(sb, foyer);
-      const [pages, lots, aval, dates, liens] = await Promise.all([
+      const [pages, lots, aval, liens] = await Promise.all([
         sb.from('pages_circulaires').select('*').eq('lot_id', etat.lot.id).order('source').order('circulaire').order('ordre'),
         sb.from('lots_circulaires').select('*').eq('foyer_id', foyer).neq('statut', 'brouillon').order('cree_le', { ascending: false }).limit(6),
-        sb.from('offres_circulaires').select('*').eq('foyer_id', foyer).eq('statut', 'a_valider').order('cree_le').limit(300),
-        offresDates(sb, foyer).catch(() => null),   // couverture : facultative, n'empêche pas le reste
-        chargerLiens(),                              // liens appris : facultatifs (null si la base n'est pas prête)
+        listes ? sb.from('offres_circulaires').select('*').eq('foyer_id', foyer).eq('statut', 'a_valider').order('cree_le').limit(300) : null,
+        listes ? chargerLiens() : null,              // liens appris : facultatifs (null si la base n'est pas prête)
       ]);
-      etat.offresDates = dates;
       etat.liens = liens && liens.filter((l) => !etat.liensTraites.has(cleLien(l)));   // clic pendant ce chargement
       etat.pages = pages.data || [];
       etat.lots = lots.data || [];
-      etat.aValider = (aval.data || []).filter((o) => !etat.offresTraitees.has(o.id));   // clic pendant ce chargement
-      const derniers = etat.lots.filter((l) => l.statut === 'termine').slice(0, 2).map((l) => l.id);
-      etat.autres = derniers.length
-        ? ((await sb.from('offres_circulaires').select('*').in('lot_id', derniers).eq('statut', 'autre').order('nom').limit(800)).data || []).filter((o) => !etat.offresTraitees.has(o.id)) : [];
-      // Avancement des lots en cours
-      for (const l of etat.lots.filter((x) => x.statut === 'envoye')) {
-        const { data } = await sb.from('pages_circulaires').select('statut').eq('lot_id', l.id);
-        l._pages = data || [];
-      }
-      await vignettes();
+      etat.aValider = ((aval && aval.data) || []).filter((o) => !etat.offresTraitees.has(o.id));   // clic pendant ce chargement
+      const derniers = listes ? etat.lots.filter((l) => l.statut === 'termine').slice(0, 2).map((l) => l.id) : [];
+      // Avancement des lots en cours, autres rabais vus (console) et vignettes : en même temps
+      const enCours = etat.lots.filter((x) => x.statut === 'envoye');
+      const [autres] = await Promise.all([
+        derniers.length ? sb.from('offres_circulaires').select('*').in('lot_id', derniers).eq('statut', 'autre').order('nom').limit(800) : null,
+        ...enCours.map(async (l) => { const { data } = await sb.from('pages_circulaires').select('statut').eq('lot_id', l.id); l._pages = data || []; }),
+        vignettes(),
+      ]);
+      etat.autres = ((autres && autres.data) || []).filter((o) => !etat.offresTraitees.has(o.id));
     } catch (err) { message(`Circulaires : ${err.message}`); }
     if (!arrete) rendre();
     planifier();
@@ -402,10 +421,10 @@ export function monterCirculaires(conteneur, opts) {
         ${blocCouverture()}
         <div class="c-sources">${SOURCES_CIRC.map(carteSource).join('')}</div>
       </div>
-      ${blocAValider()}
-      ${blocLiens()}
+      ${listes ? blocAValider() : ''}
+      ${listes ? blocLiens() : ''}
       ${blocLots()}
-      ${blocAutres()}`;
+      ${listes ? blocAutres() : ''}`;
     brancher();
   }
 
@@ -652,6 +671,7 @@ export function monterCirculaires(conteneur, opts) {
     if (error) { message(`Envoi refusé : ${error.message}`); rendre(); return; }
     message(`Envoyé : ${data} page(s). Elles seront lues quand tu diras « lis mes circulaires » à Claude sur le PC.`);
     etat.pages = []; etat.urls.clear();
+    chargerDates(true);   // la couverture change après un envoi
     Object.keys(etat).filter((k) => k.startsWith('plus_')).forEach((k) => delete etat[k]);
     await charger();
   }
