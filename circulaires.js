@@ -7,7 +7,7 @@
 // Aucune écriture directe : envoi, décisions et annulations passent par les fonctions de la base
 // (envoyer_lot, decider_offre, annuler_offre, annuler_lot) — mêmes règles pour le téléphone et la console.
 // =====================================================================
-import { couverture, tableauHtml, jourQuebec } from './couverture-circulaires.js';
+import { couverture, tableauHtml, jourQuebec, periode } from './couverture-circulaires.js';
 import { raisonLien } from './choix.js';
 import { trouveParNomOuMarque } from './noms.js';
 
@@ -109,6 +109,24 @@ export async function compterAValider(sb, foyer) {
   if (!sb || !foyer) return 0;
   const { count } = await sb.from('offres_circulaires').select('id', { count: 'exact', head: true }).eq('foyer_id', foyer).eq('statut', 'a_valider');
   return count || 0;
+}
+
+/**
+ * Avant l'envoi (Chris, 2026-11-24) : une photo n'a pas de numéro de circulaire, alors on se fie aux dates déjà dans ta base.
+ * pages : [{ source }] du brouillon ; offres : lignes { source, debut, fin } (offresDates) ou null (inconnu : aucun avertissement).
+ * → [{ id, nom, courante, suivante }] des bannières du brouillon qui ont déjà une circulaire courante ou suivante dans ta base.
+ */
+export function dejaDansBase(pages, offres, sources, aujourdhui) {
+  if (!offres) return [];
+  const ids = new Set((pages || []).map((p) => p.source));
+  return couverture(offres, (sources || []).filter((s) => ids.has(s.id)), aujourdhui).filter((l) => l.courante || l.suivante);
+}
+
+/** « IGA : courante 20 au 26 nov. (312 rabais) » — une ligne par bannière de dejaDansBase. */
+export function texteDejaDansBase(lignes) {
+  const morceau = (type, c) => `${type} ${periode(c.debut, c.fin)} (${c.rabais} rabais)`;
+  return (lignes || []).map((l) => `${l.nom} : ${[l.courante && morceau('courante', l.courante), l.suivante && morceau('suivante', l.suivante)]
+    .filter(Boolean).join(' · ')}`);
 }
 
 /** Offres de circulaires encore utiles (fin ≥ hier, heure du Québec) : lignes { source, debut, fin }, par pages de 1 000. */
@@ -372,6 +390,7 @@ export function monterCirculaires(conteneur, opts) {
           <button class="c-btn p" data-envoyer ${n && !etat.occupe ? '' : 'disabled'}>Envoyer ${n ? `(${n} page${n > 1 ? 's' : ''})` : ''}</button></div>
         <p class="c-doux">Charge tes captures d'écran, PDF ou photos de circulaires, bannière par bannière, puis touche <b>Envoyer</b>.
           La lecture se fait quand tu le demandes à Claude sur le PC (« lis mes circulaires »). Le brouillon est partagé : tu peux commencer sur le téléphone et finir à l'ordinateur. « auto » : la bannière a aussi des prix automatiques (épiceries.ca).</p>
+        ${blocAvertir()}
         ${etat.occupe ? `<p class="c-doux">⏳ ${esc(etat.occupe)}</p>` : ''}
         ${blocCouverture()}
         <div class="c-sources">${SOURCES_CIRC.map(carteSource).join('')}</div>
@@ -517,7 +536,9 @@ export function monterCirculaires(conteneur, opts) {
       const s = b.dataset.autre, max = Math.max(1, ...etat.pages.filter((p) => p.source === s).map((p) => p.circulaire), etat[`plus_${s}`] || 1);
       etat[`plus_${s}`] = max + 1; rendre();
     });
-    racine.querySelector('[data-envoyer]')?.addEventListener('click', envoyer);
+    racine.querySelector('[data-envoyer]')?.addEventListener('click', avantEnvoi);
+    racine.querySelector('[data-avertir-non]')?.addEventListener('click', () => { etat.avertir = null; rendre(); });
+    racine.querySelector('[data-avertir-oui]')?.addEventListener('click', () => { etat.avertir = null; envoyer(); });
     racine.querySelector('[data-valider-sel]')?.addEventListener('click', validerSelection);
     racine.querySelectorAll('.c-offre').forEach((carte) => {
       const sel = carte.querySelector('[data-produit]');
@@ -594,10 +615,30 @@ export function monterCirculaires(conteneur, opts) {
     if (error) { message(`Impossible de retirer : ${error.message}`); return; }
     if (p.chemin) await sb.storage.from(BUCKET).remove([p.chemin]);
     etat.pages = etat.pages.filter((x) => x.id !== id);
+    etat.avertir = null;   // le brouillon a changé : la vérification sera refaite au prochain Envoyer
     rendre();
   }
 
+  // Avertissement avant l'envoi : ta base a déjà une circulaire de ces bannières (Non par défaut : rien n'est envoyé).
+  // L'avertissement est un état (etat.avertir) : il survit aux rafraîchissements automatiques de l'écran.
+  function avantEnvoi() {
+    const lignes = dejaDansBase(etat.pages, etat.offresDates, SOURCES_CIRC, jourQuebec());
+    if (!lignes.length) { envoyer(); return; }
+    etat.avertir = lignes; rendre();
+    racine.querySelector('[data-avertir-non]')?.focus();
+  }
+
+  function blocAvertir() {
+    if (!etat.avertir) return '';
+    return `<div class="c-confirmer" role="alertdialog" aria-label="Déjà dans ta base">
+      <span>🛑 <b>Déjà dans ta base</b> — vérifie que ce n'est pas la même circulaire :</span>
+      <ul style="margin:0;padding-left:18px">${texteDejaDansBase(etat.avertir).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+      <span class="c-doux">Les prix déjà enregistrés ne seront pas écrits deux fois, mais la circulaire sera relue au complet.</span>
+      <div class="c-rang"><button class="c-btn p" data-avertir-non>Non</button><button class="c-btn" data-avertir-oui>Envoyer quand même</button></div></div>`;
+  }
+
   async function envoyer() {
+    etat.avertir = null;
     etat.occupe = 'Envoi…'; rendre();
     const { data, error } = await sb.rpc('envoyer_lot', { p_lot: etat.lot.id, p_attendre: true });
     etat.occupe = '';

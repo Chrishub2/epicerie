@@ -47,7 +47,7 @@ export function couverture(offres, sources, aujourdhui) {
 }
 
 /** « 19 au 25 nov. » ou « 29 oct. au 4 nov. ». */
-function periode(debut, fin) {
+export function periode(debut, fin) {
   const [, m1, j1] = debut.split('-').map(Number);
   const [, m2, j2] = fin.split('-').map(Number);
   return m1 === m2 ? `${j1} au ${j2} ${MOIS[m2 - 1]}` : `${j1} ${MOIS[m1 - 1]} au ${j2} ${MOIS[m2 - 1]}`;
