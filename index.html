@@ -409,6 +409,9 @@ h3 { font-size: 15px; margin: 0 0 6px; }
 input, select, textarea { font: inherit; color: var(--texte); background: var(--carte); border: 1px solid var(--ligne);
   border-radius: 8px; padding: 8px 10px; width: 100%; }
 textarea { min-height: 120px; }
+/* iPhone : un champ à moins de 16 px fait zoomer la page quand on le touche (ex. « Associer » d'une ligne de reçu).
+   Dans les fenêtres, les champs gardent au moins 16 px : plus de zoom pendant la saisie ou le choix. */
+dialog input, dialog select, dialog textarea, .selFiltre { font-size: max(16px, 1em); }
 /* Cases et boutons radio : jamais pleine largeur (sinon ils écrasent le texte, surtout sur iPhone) */
 input[type=checkbox], input[type=radio] { width: auto; flex: none; padding: 0; }
 .item input[type=radio] { width: 22px; height: 22px; accent-color: var(--accent); }
@@ -494,6 +497,11 @@ button.btn.rv-second { width: 100%; }
 .rc-groupe .rc-liste { padding: 0 10px; }
 .rc-details { padding: 0 12px 12px; }
 .rc-nom .rc-sous { display: block; font-size: 12px; color: var(--doux); white-space: normal; }
+/* Deux notes sous chaque ligne du reçu : 📦 fiche produit reliée, 🛒 article de la liste */
+.rc-notes { display: block; font-size: 11.5px; line-height: 1.35; color: var(--doux); font-weight: 400; white-space: normal; margin-top: 2px; }
+.rc-notes > span { display: block; }
+.rc-notes .rc-ok { color: var(--vert); font-weight: 700; }
+.rc-notes .rc-non { color: var(--rouge); font-weight: 700; }
 .rc-vert { color: var(--vert); }
 .rc-l.a-voir .rc-sous { color: var(--ambre); }
 .rc-det { list-style: none; padding: 8px 4px 12px 32px; font-size: 13px; border-bottom: 1px solid var(--ligne); }

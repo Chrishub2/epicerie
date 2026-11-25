@@ -20,6 +20,33 @@ function ligneCouvre(etat, ligne, articleId) {
   const g = etat.articles.find((a) => a.id === ligne.articleId);
   return !!g?.estGenerique && enfantsGenerique(g, etat.articles, familleDe).some((a) => a.id === articleId);
 }
+/**
+ * Deux notes d'une ligne du reçu (demande de Chris, 25 nov. 2026) :
+ * fiche = la fiche produit reliée (ou null) ; liste = 'coche' (article de ta liste coché par ce reçu),
+ * 'achete' (article de ta liste déjà retiré comme acheté chez cette bannière, à ±1 jour), 'non' (pas sur ta liste).
+ */
+export function notesLigne(etat, r, l) {
+  const fiche = l?.articleId ? etat.articles.find((a) => a.id === l.articleId) || null : null;
+  if (!fiche) return { fiche: null, liste: 'non' };
+  const coche = (etat.liste || []).some((y) => y.recu?.recuId === r.id && !y.recu.absent && ligneCouvre(etat, y, fiche.id));
+  if (coche) return { fiche, liste: 'coche' };
+  const jour = (d) => (d ? Date.parse(`${String(d).slice(0, 10)}T12:00Z`) / 864e5 : NaN);
+  const dR = jour(r.date || r.cree);
+  const achete = (etat.achats || []).some((ac) => (!r.banniere || ac.banniere === r.banniere)
+    && Math.abs(jour(ac.date) - dR) <= 1 && ligneCouvre(etat, ac, fiche.id));
+  return { fiche, liste: achete ? 'achete' : 'non' };
+}
+
+/** HTML des deux notes (📦 Fiche, 🛒 Liste) sous une ligne du reçu. */
+export function htmlNotesLigne(etat, r, l) {
+  const { fiche, liste } = notesLigne(etat, r, l);
+  const f = fiche ? `<span class="rc-ok">✓</span> ${esc(fiche.nom)}${fiche.marque ? ` · ${esc(fiche.marque)}` : ''}` : '<span class="rc-non">✗</span> aucune fiche';
+  const li = liste === 'coche' ? '<span class="rc-ok">✓</span> coché sur ta liste'
+    : liste === 'achete' ? '<span class="rc-ok">✓</span> acheté (retiré de ta liste)'
+    : fiche ? '— pas sur ta liste' : '<span class="rc-non">✗</span> rien de coché';
+  return `<span class="rc-notes"><span>📦 Fiche : ${f}</span><span>🛒 Liste : ${li}</span></span>`;
+}
+
 import { modeRabais, prixParArticle, offreLigne, estPese, pesee, nbArticles, cibleLignes, natureLigne, consignes, reporterAssociations, etatLigne,
   texteFiche, indexBase, achatsDuProduit, resumeAchats, soustrait, scoresAssociation, decisionAssociation } from './lignes-recu.js';
 
@@ -801,7 +828,9 @@ export function htmlDetail(r) {
     return n + (l.quantite > 1 && !pesee(l) ? ` ×${l.quantite}` : cons[i] ? ' ♻️' : '');
   };
   const sousRabais = (l) => (l.rabais ? (soustrait(l) ? `rabais ${argent(l.rabais)}, dont −${argent(soustrait(l))} à la caisse` : `rabais ${argent(l.rabais)} déjà déduit`) : '');
-  const ligne = (l, i, sous = '', cls = '') => `<li class="rc-l ${etatLigne(l)} ${cls}" data-ligne="${i}"><span class="rc-nom">${esc(nomDe(l, i))}${sous ? `<span class="rc-sous">${sous}</span>` : ''}</span><span class="rc-px">${argent(l.prix)}</span></li>`;
+  const etat = S.get();
+  const notes = (l) => (etatLigne(l) === 'hors' && !l.articleId ? '' : htmlNotesLigne(etat, r, l));   // sac, consigne… : pas de notes
+  const ligne = (l, i, sous = '', cls = '') => `<li class="rc-l ${etatLigne(l)} ${cls}" data-ligne="${i}"><span class="rc-nom">${esc(nomDe(l, i))}${sous ? `<span class="rc-sous">${sous}</span>` : ''}${notes(l)}</span><span class="rc-px">${argent(l.prix)}</span></li>`;
 
   // Tri des lignes
   const L = r.lignes || [];
@@ -837,7 +866,7 @@ export function htmlDetail(r) {
     const memeTexte = (x, y) => String(x).replace(/\s/g, '') === String(y).replace(/\s/g, '');
     const offreSrc = src?.offre && !memeTexte(src.offre, pu(vd.attendu, vd.unite)) ? ` · ${esc(src.offre)}${src.format ? ` ${esc(src.format)}` : ''}` : '';
     return `<li class="rc-carte ${genre}" data-ligne="${i}">
-      <div class="rc-c1"><span>${esc(nomDe(l, i))}</span><span class="rc-ecart">${ici ? '+' : '−'}${argent(Math.abs(ecartLigne(l)))}</span></div>
+      <div class="rc-c1"><span>${esc(nomDe(l, i))}${notes(l)}</span><span class="rc-ecart">${ici ? '+' : '−'}${argent(Math.abs(ecartLigne(l)))}</span></div>
       <dl class="rc-comp">
         <dt>Payé</dt><dd><b>${pu(vd.paye, vd.unite)}</b>${vd.unite || Number(l.quantite) > 1 ? ` <span class="doux">(${argent(l.prix)})</span>` : ''}</dd>
         <dt>${ici ? 'Affiché' : 'Ailleurs'}</dt><dd>${pu(vd.attendu, vd.unite)} <span class="doux">· ${esc(nomBanniere(src?.banniere || vd.banniere || r.banniere))}${offreSrc}</span></dd>
