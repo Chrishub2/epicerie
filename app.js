@@ -198,7 +198,9 @@ function lancerVerifications(articleId, { forcer = false } = {}) {
   const jour = jourQuebec();
   const essai = forcer || modeEssai();   // v163 : « 🔎 Chercher chez les bannières » de la fiche force la recherche
   const a = e.articles.find((x) => x.id === articleId);
-  const aFaire = (x) => (essai || !RB.verifieCetteSemaine(x, jour)) && !RB.verificationOuverte(e.recherches, x.id);
+  // v163 : forcée, seule une recherche qui tourne vraiment bloque (une recherche « nom » finie restait « ouverte » 24 h)
+  const aFaire = (x) => (essai || !RB.verifieCetteSemaine(x, jour))
+    && !(forcer ? RB.rechercheEnCours(e.recherches, x.id) : RB.verificationOuverte(e.recherches, x.id));
   const nouvelles = fichesAVerifier(a).filter(aFaire)
     .map((x) => ({ ...RB.nouvelleRecherche(RB.requeteFiche(x), S.uid('rch')), articleId: x.id, but: 'verif' }))
     .filter((r) => r.q.length >= 2);
@@ -226,7 +228,7 @@ function chercherMaintenant(articleId) {
   const a = e.articles.find((x) => x.id === articleId);
   if (!a) return;
   if (!Sync.estPret()) { toast('Recherche impossible : le téléphone n\'est pas relié à ton foyer.'); return; }
-  if (RB.verificationOuverte(e.recherches, a.id)) { toast(`Recherche déjà en cours pour « ${a.nom} »`); return; }
+  if (RB.rechercheEnCours(e.recherches, a.id)) { toast(`Recherche déjà en cours pour « ${a.nom} »`); return; }
   const parNom = !a.estGenerique && !P.codesDe(a).length && !e.prix.some((p) => p.articleId === a.id);
   const n = parNom ? (rechercherNouvelle(a) ? 1 : 0) : lancerVerifications(a.id, { forcer: true });
   toast(n ? `Je cherche « ${a.nom} » chez les bannières` : `Rien à chercher pour « ${a.nom} »`);

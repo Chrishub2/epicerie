@@ -404,6 +404,12 @@ export function verificationOuverte(recherches, articleId, maintenant = Date.now
     && maintenant - Date.parse(r.le) < 24 * 3600000);
 }
 
+/** v163 — Une recherche de cette fiche tourne VRAIMENT encore (pas finie, pas appliquée ni choisie, moins de 24 h). */
+export function rechercheEnCours(recherches, articleId, maintenant = Date.now()) {
+  return (recherches || []).some((r) => r.articleId === articleId && r.etat !== 'fait' && r.etat !== 'annule'
+    && !r.appliqueLe && !r.choixLe && maintenant - Date.parse(r.le) < 24 * 3600000);
+}
+
 /** Demandes terminées (ou de plus de 24 h) à appliquer à leur fiche. */
 export function aAppliquer(recherches, maintenant = Date.now()) {
   return (recherches || []).filter((r) => r.but === 'verif' && r.articleId && !r.appliqueLe
