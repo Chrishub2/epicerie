@@ -21,6 +21,7 @@ const COLLECTIONS = {
   photo: 'photos', recu: 'recus', releve: 'releves', cp: 'codesPostaux', alerte: 'alertes',
   banniere: 'bannieres',   // registre de bannières (extension Flipp 1.5), lu seulement
   achat: 'achats',         // v152 : historique des achats (une ligne par article retiré après une visite), ajout seulement
+  lecon: 'lecons',         // v159 : corrections de noms d'ingrédients, redonnées à l'IA des recettes
   recherche: 'recherches', // demandes de recherche chez les bannières (extension 1.13 : l'ordinateur y écrit les résultats)
 };
 const cleDe = (type, o) => (type === 'cp' ? o.code : o.id);

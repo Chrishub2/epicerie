@@ -90,8 +90,9 @@ export async function lireListeIA(blob, etat) {
 }
 
 /** Recette → { titre, portions, lignes:[texte] } ou null si l'IA n'est pas disponible. */
-export async function lireRecetteIA(blob, etat) {
-  const r = await essayerIA('recette', [blob], etat);
+export async function lireRecetteIA(blob, etat, lecons = []) {
+  // v159 : tes corrections passées (« ligne imprimée → bon nom ») accompagnent la photo
+  const r = await essayerIA('recette', [blob], etat, lecons.length ? { lecons } : undefined);
   // v157 : on garde aussi ce que l'IA a compris (nom à acheter, quantité, unité, facultatif, format du magasin)
   return r ? { titre: r.titre, portions: r.portions, lignes: r.ingredients.map((i) => i.texte), ingredients: r.ingredients } : null;
 }

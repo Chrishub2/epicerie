@@ -7,10 +7,10 @@
 // - Oui → l'app envoie « ACTIVER » → la nouvelle version prend le relais → rechargement.
 // À CHAQUE PUBLICATION : changer le numéro de CACHE (sinon aucune mise à jour n'est proposée).
 // =====================================================================
-const CACHE = 'epicerie-v158';
+const CACHE = 'epicerie-v159';
 const FICHIERS = ['./', 'index.html', 'app.js', 'normalise.js', 'store.js', 'produits.js', 'marques.js', 'recherche-bannieres.js', 'arbre-recherche.js', 'couverture.js', 'couverture-circulaires.js', 'demo-data.js',
   'ui.js', 'rabais.js', 'noms.js', 'calendrier.js', 'choix.js', 'comparer.js', 'circulaires.js', 'epiceries.js', 'ocr.js', 'camera.js', 'recu.js', 'lignes-recu.js', 'plu.js', 'plu.json', 'attente.js', 'manuscrit.js', 'sync.js', 'config.js',
-  'retouche.js', 'maj.js', 'secteurs.js', 'bannieres-registre.js', 'scan.js', 'recettes.js', 'ingredients.js', 'plus.js', 'envoi.js', 'manifest.webmanifest', 'icone.svg',
+  'retouche.js', 'maj.js', 'secteurs.js', 'bannieres-registre.js', 'scan.js', 'recettes.js', 'ingredients.js', 'lecons.js', 'plus.js', 'envoi.js', 'manifest.webmanifest', 'icone.svg',
   'visuels.js', 'visuels/index.json', 'visuels/correspondance.json', 'visuels/referentiel.json', 'visuels/noms-alternatifs.json', 'rattacher.js', 'visuels/rayons-par-defaut.json', 'rayons-defaut.js', 'position-aide.js', 'accents.js', 'plan.js', 'bilan.js',
   'icone-192.png', 'icone-512.png', 'apple-touch-icon.png',
   // Skins (même liste que FICHIERS_SKINS dans skins/skins.js)

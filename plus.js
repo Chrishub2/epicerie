@@ -34,6 +34,7 @@ export function vuePlus(v) {
   if (section === 'apparence') return vueApparence(v);
   if (section === 'foyer') return vueFoyer(v);
   if (section === 'circulaires') return vueCirculaires(v);
+  if (section === 'lecons') return vueLecons(v);
   const e = S.get();
   const st = Sync.etatSync();
   const menu = [
@@ -45,6 +46,7 @@ export function vuePlus(v) {
     ['rabais', '🏷️', 'Mes rabais personnels', `${e.rabaisPerso.filter((r) => r.actif).length} actif(s)`],
     ['catalogue', '📚', 'Catalogue de mes articles', `${e.articles.length} articles`],
     ['photos', '🖼️', 'Photos', `${e.photos.length} photo(s)`],
+    ['lecons', '🎓', 'Ce que l\'IA a appris', `${(e.lecons || []).length} leçon(s) · tes corrections de noms d'ingrédients`],
     ['apparence', '🎨', 'Apparence (skins)', `${SKINS.find((s) => s.id === skinActuel())?.nom || 'Classique'} · ${{ auto: 'selon le téléphone', clair: 'clair', sombre: 'sombre' }[themeActuel()]}`],
     ['sauvegarde', '💾', 'Sauvegarde et mode démo', 'Exporter, importer, réinitialiser'],
   ];
@@ -72,6 +74,29 @@ function vueCirculaires(v) {
     succursale: (b) => S.get().magasins.some((m) => m.banniere === b && m.actif !== false),
   });
 }
+// --- v159 : Ce que l'IA a appris (maquette apprentissage-recettes-v1, écran ②) ---
+function vueLecons(v) {
+  const e = S.get();
+  const lecons = [...(e.lecons || [])].sort((a, b) => String(b.creeLe).localeCompare(String(a.creeLe)));
+  const utilisees = lecons.reduce((s, l) => s + (l.utilisee || 0), 0);
+  const mois = new Date().toISOString().slice(0, 7);
+  const recettesMois = (e.recettes || []).filter((r) => String(r.creeLe || '').startsWith(mois)).length;
+  const case_ = (n, lib) => `<div style="flex:1;background:rgba(127,127,127,.12);border-radius:10px;padding:8px;text-align:center"><b style="display:block;font-size:20px">${n}</b><span class="doux">${lib}</span></div>`;
+  v.innerHTML = retour() + `<div class="carte"><h2>🎓 Ce que l'IA a appris</h2>
+    <p class="doux">Tes corrections, redonnées à l'IA comme exemples à chaque lecture de recette.</p>
+    <div style="display:flex;gap:10px;margin:8px 0 10px">${case_(lecons.length, 'leçons')}${case_(utilisees, 'utilisées')}${case_(recettesMois, 'recette(s) ce mois')}</div>
+    ${lecons.length ? lecons.map((l) => `<div class="rang" style="padding:8px 0;border-bottom:1px solid var(--ligne)">
+      <div class="grandir" style="min-width:0"><div class="doux une-ligne" style="font-size:12px">${esc(l.imprime)}</div><b>→ ${esc(l.bon)}</b></div>
+      <button class="btn sec" data-sup-lecon="${esc(l.id)}" title="Retirer" aria-label="Retirer cette leçon" style="padding:4px 10px">🗑</button></div>`).join('')
+      : '<p class="doux">Aucune leçon pour l\'instant. Dans une recette, touche ✏️ à côté d\'un nom d\'ingrédient pour le corriger.</p>'}
+    <p class="doux" style="font-size:12px;margin-top:10px">🗑 retire une leçon (elle ne sera plus donnée à l'IA). Les 40 plus récentes accompagnent chaque photo de recette.</p></div>`;
+  brancherRetour(v);
+  $$('[data-sup-lecon]', v).forEach((b) => b.onclick = () => {
+    S.maj((x) => { x.lecons = (x.lecons || []).filter((l) => l.id !== b.dataset.supLecon); });
+    vueLecons(v);
+  });
+}
+
 function brancherRetour(v) { $('#retour', v).onclick = () => { section = null; vuePlus(v); }; }
 
 // --- Cartes fidélité --------------------------------------------------

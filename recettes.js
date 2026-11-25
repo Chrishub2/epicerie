@@ -9,6 +9,7 @@ import { prendrePhoto, lireTexte, lireRecetteIA, lireTitreLivre } from './ocr.js
 import { retoucher } from './retouche.js';
 import { trouverArticle, assurerArticle, ajouterALaListe, sansAccents, rechercherNouvelle } from './app.js';
 import { analyserIngredient, ligneIngredient, lisible, ingredientsDuTexte } from './ingredients.js';
+import { ajouterLecon, appliquerLecons, leconsPourIA } from './lecons.js';
 import { afficherPhoto } from './plus.js';
 
 const GARDE_MANGER = ['sel', 'poivre', 'eau', 'huile', "huile d'olive", 'sucre', 'farine', 'bicarbonate', 'poudre a pate', 'epices'];
@@ -141,7 +142,7 @@ function editeur(existante = null) {
     $('#rPhotoIngr', c).onclick = async () => {
       const blob = await prendrePhoto(); if (!blob) return;
       // ① l'IA (Claude) si le foyer est connecté : comprend les pages en 2 colonnes
-      const ia = navigator.onLine ? await lireRecetteIA(blob, (m) => { $('#rEtat', c).textContent = m; }) : null;
+      const ia = navigator.onLine ? await lireRecetteIA(blob, (m) => { $('#rEtat', c).textContent = m; }, leconsPourIA(S.get().lecons)) : null;
       if (ia) {
         $('#rIng', c).value = ia.lignes.join('\n');
         lusIA = ia.ingredients || [];   // v157 : le nom lu par l'IA sert tel quel (plus de relecture maison)
@@ -187,7 +188,10 @@ function editeur(existante = null) {
     // ⑤ Enregistrer et choisir les ingrédients
     $('#rSuivant', c).onclick = () => {
       const texte = $('#rIng', c).value;
-      const ingredients = ingredientsDuTexte(texte, lusIA)
+      // v159 : une ligne déjà corrigée par toi reprend ton bon nom (pastille « appris »)
+      const appris = appliquerLecons(ingredientsDuTexte(texte, lusIA), S.get().lecons);
+      if (appris.utilisees.length) S.maj((x) => { for (const l of x.lecons || []) if (appris.utilisees.includes(l.id)) l.utilisee = (l.utilisee || 0) + 1; });
+      const ingredients = appris.ingredients
         .map((i) => ({ ...i, articleId: correspondance(i.nom)?.id || null }));
       if (!ingredients.length) { toast('Ajoute au moins un ingrédient (photo ou texte)'); return; }
       r.titre = $('#rTitre', c).value.trim() || 'Recette sans titre';
@@ -217,20 +221,58 @@ function editeur(existante = null) {
 function choisir(r) {
   const e = S.get();
   const dejaDansListe = (id) => id && e.liste.some((l) => l.articleId === id && !l.coche);
+  // v159 (maquette apprentissage-recettes-v1) : ✏️ corrige le nom ; la correction est retenue comme leçon pour l'IA
+  const etatLigne = (i) => {
+    const a = S.get().articles.find((x) => x.id === i.articleId);
+    const garde = GARDE_MANGER.includes(sansAccents(i.nom));
+    const deja = dejaDansListe(i.articleId);
+    // Coché d'office seulement si c'est clairement un ingrédient (quantité lue ou produit connu)
+    const sur = (i.quantite != null || a) && ligneIngredient(i.brut);
+    return { a, garde, deja, sur };
+  };
+  const PASTILLE = 'display:inline-block;border-radius:9px;padding:0 7px;font-size:11px;font-weight:600';
+  const texteLigne = (i, k, edition = false) => {
+    const { a, garde, deja, sur } = etatLigne(i);
+    const nom = edition
+      ? `<input data-in="${k}" value="${esc(i.nom)}" style="flex:1;min-width:0;font:600 14px system-ui,sans-serif;padding:3px 6px;border-radius:6px;border:1px solid var(--accent,#1f7a4d)"><button type="button" class="btn" data-ok="${k}" style="padding:2px 10px">✓</button>`
+      : `${esc(a ? a.nom : i.nom)} <button type="button" data-edit="${k}" title="Corriger le nom" aria-label="Corriger le nom" style="border:0;background:none;cursor:pointer;font-size:13px;padding:0 2px">✏️</button>`;
+    return `<div class="nom" style="display:flex;align-items:center;gap:6px">${nom}</div>
+        <div class="info">${esc(i.brut)}${a ? ' · au catalogue' : ' · nouvel article'}${i.format ? ` · format ${esc(i.format)}` : ''}${i.facultatif ? ' · facultatif' : ''}${deja ? ' · <b>déjà dans la liste</b>' : ''}${!sur && !garde && !deja ? ' · <span style="color:var(--ambre)">à vérifier</span>' : ''}${
+          i.appris ? ` <span style="${PASTILLE};background:#173a5c;color:#64b5f6">appris</span>` : ''}${i.corrige ? ` <span style="${PASTILLE};background:#3d3012;color:#f2b84b">corrigé · retenu</span>` : ''}</div>`;
+  };
   ouvrirModale(r.titre, `
-    <p class="doux">Coche ce qu'il faut acheter. Le garde-manger (sel, huile…) et ce qui est déjà dans ta liste sont décochés.</p>
+    <p class="doux">Coche ce qu'il faut acheter. Touche ✏️ si le nom n'est pas le bon produit.</p>
     <div id="ings">${r.ingredients.map((i, k) => {
-      const a = e.articles.find((x) => x.id === i.articleId);
-      const garde = GARDE_MANGER.includes(sansAccents(i.nom));
-      const deja = dejaDansListe(i.articleId);
-      // Coché d'office seulement si c'est clairement un ingrédient (quantité lue ou produit connu)
-      const sur = (i.quantite != null || a) && ligneIngredient(i.brut);
+      const { garde, deja, sur } = etatLigne(i);
       return `<label class="item" style="cursor:pointer">
         <input type="checkbox" data-k="${k}" ${garde || deja || !sur || i.facultatif ? '' : 'checked'}>
-        <div class="grandir"><div class="nom">${esc(a ? a.nom : i.nom)}</div>
-        <div class="info">${esc(i.brut)}${a ? ' · au catalogue' : ' · nouvel article'}${i.facultatif ? ' · facultatif' : ''}${deja ? ' · <b>déjà dans la liste</b>' : ''}${!sur && !garde && !deja ? ' · <span style="color:var(--ambre)">à vérifier</span>' : ''}</div></div></label>`;
+        <div class="grandir" data-l="${k}">${texteLigne(i, k)}</div></label>`;
     }).join('')}</div>
     <button class="btn" id="ajSel" style="width:100%;margin-top:8px">Ajouter la sélection</button>`, (c) => {
+    const redessiner = (k, edition) => { $(`[data-l="${k}"]`, c).innerHTML = texteLigne(r.ingredients[k], k, edition); };
+    const valider = (k) => {
+      const i = r.ingredients[k];
+      const v = $(`[data-in="${k}"]`, c)?.value.trim();
+      if (v && v !== i.nom) {
+        i.nom = v; i.articleId = correspondance(v)?.id || null; i.corrige = true; i.appris = false;
+        S.maj((x) => {
+          x.lecons = ajouterLecon(x.lecons, i.brut, v, S.uid('le'));
+          const rr = x.recettes.find((y) => y.id === r.id);
+          if (rr && rr !== r) rr.ingredients[k] = { ...i };
+        });
+      }
+      redessiner(k, false);
+    };
+    $('#ings', c).addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-edit],[data-ok]');
+      if (ev.target.closest('[data-in]')) { ev.preventDefault(); return; }   // taper dans le champ ne coche rien
+      if (!b) return;
+      ev.preventDefault();
+      if (b.dataset.edit) { redessiner(b.dataset.edit, true); $(`[data-in="${b.dataset.edit}"]`, c).focus(); } else valider(b.dataset.ok);
+    });
+    $('#ings', c).addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && ev.target.dataset.in != null) { ev.preventDefault(); valider(ev.target.dataset.in); }
+    });
     $('#ajSel', c).onclick = () => {
       let n = 0, f = 0;
       for (const cb of $$('[data-k]', c)) {
