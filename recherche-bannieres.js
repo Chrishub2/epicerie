@@ -23,6 +23,22 @@ export function aRetirer(recherches, maintenant = Date.now()) {
   return (recherches || []).filter((r) => !(maintenant - Date.parse(r.le) < GARDER_JOURS * 86400000)).map((r) => r.id);
 }
 
+/**
+ * v161 — Demandes déjà appliquées (vérification, générique) ou choisies (nom inconnu) : les produits trouvés ne
+ * servent plus et prenaient ≈ 1,3 million de caractères sur le téléphone (« Mémoire du téléphone pleine »).
+ * Ils sont retirés du téléphone seulement : marquée `allege`, la demande n'est plus renvoyée (sync.js),
+ * la base en ligne garde la version complète. → nombre de demandes allégées
+ */
+export function alleger(recherches) {
+  let n = 0;
+  for (const r of recherches || []) {
+    if (!r || r.allege || !(r.choixLe || (r.but !== 'nom' && r.appliqueLe))) continue;
+    for (const b of Object.values(r.bannieres || {})) if (b && typeof b === 'object') delete b.produits;
+    r.allege = true; n++;
+  }
+  return n;
+}
+
 /** { fait, total, etats: { iga: 'fait'|'rien'|'bloque'|'erreur'|'attente' } } */
 export function avancement(r) {
   const etats = Object.fromEntries(ORDRE.map((b) => [b, r?.bannieres?.[b]?.etat || 'attente']));

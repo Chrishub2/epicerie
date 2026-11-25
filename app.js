@@ -1119,7 +1119,11 @@ const PREF_MODE = 'liste.mode';   // « prep » ou une bannière (ce téléphone
 // Le choix est aussi gardé ici : si la mémoire du téléphone est pleine (localStorage refuse d'écrire),
 // la puce touchée reste quand même choisie jusqu'à la fermeture de l'app.
 let modeChoisi = null;
-window.addEventListener('epicerie:memoire-pleine', () => toast('Mémoire du téléphone pleine : il n\'enregistre plus tes changements sur place. Ils partent en ligne si tu es connecté.'));
+// v161 : le message dit la cause exacte (mémoire pleine ou connexion à la base du téléphone perdue)
+window.addEventListener('epicerie:memoire-pleine', (ev) => {
+  const d = ev.detail || {};
+  toast(`${d.plein ? 'Mémoire du téléphone pleine' : 'Sauvegarde sur le téléphone impossible'} : il n'enregistre plus tes changements sur place. Ils partent en ligne si tu es connecté.${d.cause ? ` (Cause : ${d.cause})` : ''}`);
+});
 function modeListe(cols) {
   let m = modeChoisi || 'prep';
   if (!modeChoisi) try { m = localStorage.getItem(PREF_MODE) || 'prep'; } catch { /* navigation privée */ }

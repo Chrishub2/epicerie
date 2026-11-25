@@ -6,6 +6,7 @@
 // =====================================================================
 import { etatDemo, MAGASINS_REELS, CODES_POSTAUX_REELS } from './demo-data.js';
 import { normaliserProduits, migrerV3 } from './produits.js';
+import { alleger } from './recherche-bannieres.js';
 
 /** Met à niveau des données enregistrées par une version précédente, sans rien perdre. */
 function migrer(e) {
@@ -104,12 +105,45 @@ let minuterieEcriture = null;
 function ecrireMaintenant() {
   clearTimeout(minuterieEcriture); minuterieEcriture = null;
   if (!dbDonnees || !etat) return;
-  ecrireKV(dbDonnees, 'etat', JSON.stringify(etat)).then(() => { memoirePleine = false; }).catch((e) => signalerPlein(e));
+  ecrireEtat(texteEtat()).then(() => { memoirePleine = false; }).catch((e) => signalerPlein(e, 'IndexedDB'));
 }
-function signalerPlein(e) {
-  console.warn('Sauvegarde impossible', e);
-  // Signalé une fois par ouverture de l'app (app.js affiche l'avertissement)
-  if (!memoirePleine) { memoirePleine = true; try { window.dispatchEvent(new CustomEvent('epicerie:memoire-pleine')); } catch { /* hors navigateur */ } }
+/** v161 — Texte enregistré : les demandes de recherche déjà appliquées sont d'abord allégées (≈ 1,3 M caractères en moins). */
+function texteEtat() {
+  try { alleger(etat.recherches); } catch { /* sans effet sur la sauvegarde */ }
+  return JSON.stringify(etat);
+}
+/**
+ * v161 — iPhone : Safari ferme parfois la connexion à IndexedDB quand l'app passe en arrière-plan
+ * (« Connection to Indexed Database server lost »). Avant, ça affichait « Mémoire du téléphone pleine » pour de bon.
+ * Maintenant : on rouvre la base et on réessaie une fois avant d'alerter.
+ */
+async function ecrireEtat(texte) {
+  try { await ecrireKV(dbDonnees, 'etat', texte); }
+  catch (e1) {
+    console.warn('Sauvegarde : 1er essai raté, la base est rouverte', e1);
+    dbDonnees = await ouvrirDonnees();
+    await ecrireKV(dbDonnees, 'etat', texte);
+  }
+}
+/** v161 — Sans IndexedDB au démarrage, localStorage (≈ 5 Mo) a refusé : on essaie IndexedDB avant d'alerter. */
+async function basculerVersIndexedDB(e0) {
+  try {
+    const db = await ouvrirDonnees();
+    await ecrireKV(db, 'etat', texteEtat());
+    dbDonnees = db; memoirePleine = false;
+    try { localStorage.removeItem(CLE); } catch { /* rien */ }
+  } catch (e) { signalerPlein(e || e0, 'localStorage'); }
+}
+/** Cause lisible d'un échec (« QuotaExceededError », « UnknownError : Connection … lost »). */
+export const causeEchec = (e) => [e?.name, e?.message].filter(Boolean).join(' : ').slice(0, 160) || 'inconnue';
+function signalerPlein(e, ou) {
+  console.warn('Sauvegarde impossible', ou, e);
+  // Signalé une fois par ouverture de l'app (app.js affiche l'avertissement, avec la cause exacte)
+  if (!memoirePleine) {
+    memoirePleine = true;
+    const detail = { ou, cause: causeEchec(e), plein: /quota/i.test(`${e?.name} ${e?.message}`) };
+    try { window.dispatchEvent(new CustomEvent('epicerie:memoire-pleine', { detail })); } catch { /* hors navigateur */ }
+  }
 }
 try {
   addEventListener('pagehide', () => { if (minuterieEcriture) ecrireMaintenant(); });
@@ -158,7 +192,7 @@ export function sauver() {
     clearTimeout(minuterieEcriture);
     minuterieEcriture = setTimeout(ecrireMaintenant, 250);
   } else {
-    try { localStorage.setItem(CLE, JSON.stringify(etat)); memoirePleine = false; } catch (e) { signalerPlein(e); }
+    try { localStorage.setItem(CLE, texteEtat()); memoirePleine = false; } catch (e) { basculerVersIndexedDB(e); }
   }
   abonnes.forEach((f) => f(etat));
 }

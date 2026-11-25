@@ -244,6 +244,8 @@ export async function pousser() {
     const lignes = [];
     for (const o of locaux) {
       const k = `${o.type}:${o.id}`; vus.add(k);
+      // v161 : demande allégée sur ce téléphone (produits trouvés retirés) → jamais renvoyée ; la base garde la complète
+      if (o.type === 'recherche' && o.data?.allege) continue;
       const emp = empreinte(JSON.stringify(o.data));
       if (meta.empreintes[k] !== emp) lignes.push({ foyer_id: foyer.id, type: o.type, id: o.id, data: o.data, supprime: false, _k: k, _emp: emp });
     }
