@@ -192,11 +192,11 @@ const CLE_ESSAI = 'essai.verifierChaqueAjout';
 function modeEssai() { try { return localStorage.getItem(CLE_ESSAI) === '1'; } catch { return false; } }
 
 /** Dépose une demande par fiche pas encore vérifiée depuis jeudi (et sans demande en cours). Rien hors connexion au foyer. */
-function lancerVerifications(articleId) {
-  if (!Sync.estPret()) return;
+function lancerVerifications(articleId, { forcer = false } = {}) {
+  if (!Sync.estPret()) return 0;
   const e = S.get();
   const jour = jourQuebec();
-  const essai = modeEssai();
+  const essai = forcer || modeEssai();   // v163 : « 🔎 Chercher chez les bannières » de la fiche force la recherche
   const a = e.articles.find((x) => x.id === articleId);
   const aFaire = (x) => (essai || !RB.verifieCetteSemaine(x, jour)) && !RB.verificationOuverte(e.recherches, x.id);
   const nouvelles = fichesAVerifier(a).filter(aFaire)
@@ -208,11 +208,28 @@ function lancerVerifications(articleId) {
     const q = restaurerAccents(a.nom, vocabAccents());
     if (q.length >= 2) nouvelles.push({ ...RB.nouvelleRecherche(q, S.uid('rch')), articleId: a.id, but: 'generique' });
   }
-  if (!nouvelles.length) return;
+  if (!nouvelles.length) return 0;
   S.maj((x) => {
     const vieilles = new Set(RB.aRetirer(x.recherches));
     x.recherches = [...(x.recherches || []).filter((r) => !vieilles.has(r.id)), ...nouvelles];
   });
+  return nouvelles.length;
+}
+
+/**
+ * v163 (Chris, 2026-11-25 : « je suis incapable de forcer une nouvelle recherche ») — bouton de la fiche.
+ * Produit sans code ni prix → recherche par son nom (choix comme à l'ajout) ; sinon → vérification de ses prix,
+ * même s'ils ont déjà été vérifiés depuis jeudi. Une recherche déjà en cours n'est pas doublée.
+ */
+function chercherMaintenant(articleId) {
+  const e = S.get();
+  const a = e.articles.find((x) => x.id === articleId);
+  if (!a) return;
+  if (!Sync.estPret()) { toast('Recherche impossible : le téléphone n\'est pas relié à ton foyer.'); return; }
+  if (RB.verificationOuverte(e.recherches, a.id)) { toast(`Recherche déjà en cours pour « ${a.nom} »`); return; }
+  const parNom = !a.estGenerique && !P.codesDe(a).length && !e.prix.some((p) => p.articleId === a.id);
+  const n = parNom ? (rechercherNouvelle(a) ? 1 : 0) : lancerVerifications(a.id, { forcer: true });
+  toast(n ? `Je cherche « ${a.nom} » chez les bannières` : `Rien à chercher pour « ${a.nom} »`);
 }
 
 /** Les bannières ont répondu : relevés datés ajoutés à la fiche (même produit seulement), fiche marquée vérifiée. */
@@ -361,7 +378,8 @@ function ouvrirRenommer(articleId, rechId = null) {
     <button class="btn" id="renGo" style="width:100%;margin-top:10px">Chercher avec ce nom</button>
     ${rien ? `<button class="btn sec" id="renGarder" style="width:100%;margin-top:10px">Garder « ${esc(fiche.nom)} » sans prix</button>` : ''}`, (c) => {
     const inp = $('#renNom', c), go = $('#renGo', c);
-    const maj = () => { const v = inp.value.trim(); go.disabled = v.length < 2 || v === fiche.nom; };
+    // v163 : nom inchangé (déjà corrigé ailleurs) → le bouton cherche de nouveau au lieu d'être bloqué
+    const maj = () => { const v = inp.value.trim(); go.disabled = v.length < 2; go.textContent = v === fiche.nom ? 'Chercher de nouveau' : 'Chercher avec ce nom'; };
     inp.oninput = maj; maj();
     $$('[data-prop]', c).forEach((b) => b.onclick = () => { inp.value = b.dataset.prop; maj(); });
     inp.onkeydown = (ev) => { if (ev.key === 'Enter' && !go.disabled) go.click(); };
@@ -2337,6 +2355,7 @@ export function ficheArticle(articleId, ligneId) {
     <div id="fChoix">${htmlMeilleursChoix(a)}</div>
     <h3>Prix par bannière ${a.format ? `<span class="doux">· ton format : ${esc(formatLisible(a.format))}</span>` : ''}</h3>
     ${tableauOffres(a)}
+    <button class="btn sec" id="fChercher" style="width:100%;margin-top:8px">🔎 Chercher chez les bannières</button>
     <div class="carte" style="margin-top:8px;background:var(--gris-fond)">
       <div class="rang"><b class="grandir">Vrais prix (épiceries.ca)</b>${a.liens?.length ? '<button class="btn sec" id="ecMaj" style="padding:5px 10px">↻</button>' : ''}</div>
       ${a.liens?.length ? `<ul class="liste-arret">${a.liens.map((li) => `<li><span>${esc(li.nom)}${li.size ? ` <span class="doux">${esc(formatLisible(li.size))}</span>` : ''}</span><a href="#" data-delien="${esc(li.id)}" aria-label="Retirer">✕</a></li>`).join('')}</ul>
@@ -2496,6 +2515,7 @@ export function ficheArticle(articleId, ligneId) {
       } else setTimeout(() => ficheArticle(articleId, ligneId), 300);
     }, { cibleId: a.id });
     $('#fScan2', c).onclick = () => $('#fScan', c).click();
+    $('#fChercher', c).onclick = () => { fermerModale(); chercherMaintenant(a.id); };
     $('#fRetirer', c)?.addEventListener('click', () => { S.maj((x) => { x.liste = x.liste.filter((i) => i.id !== ligneId); }); fermerModale(); });
     $('#fAjouter', c)?.addEventListener('click', () => { ajouterALaListe(a.id); fermerModale(); toast(`${a.nom} ajouté`); });
     $('#fSupCat', c).onclick = () => {
