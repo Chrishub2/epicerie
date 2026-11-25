@@ -166,7 +166,18 @@ export function brancherSelecteurProduit(bouton, panneau, surChoix, opts = {}) {
     const inp = panneau.querySelector('.selFiltre'), res = panneau.querySelector('.selRes');
     remplir(res, '');
     inp.oninput = () => remplir(res, inp.value);
-    panneau.onclick = (e2) => { const o = e2.target.closest('[data-pick]'); if (o) { e2.preventDefault(); fermer(panneau); surChoix(o.dataset.pick); } };
+    // iPhone (v167) : avec le clavier ouvert, toucher un produit ferme d'abord le clavier, la fenêtre bouge sous le doigt
+    // et le « click » se perd (Chris ne pouvait pas choisir « Jambon fumé »). On retient l'option touchée au départ et on la
+    // choisit quand le doigt se lève sans avoir glissé ; le « click » reste en secours (souris, clavier).
+    let choisi = false, depart = null;
+    const choisir = (o) => { if (choisi || !o) return; choisi = true; fermer(panneau); surChoix(o.dataset.pick); };
+    panneau.onpointerdown = (e2) => { const o = e2.target.closest('[data-pick]'); depart = o ? { o, x: e2.clientX, y: e2.clientY, t: Date.now() } : null; };
+    panneau.onpointercancel = () => { depart = null; };   // le navigateur a décidé que c'était un défilement
+    panneau.onpointerup = (e2) => {
+      const d = depart; depart = null;
+      if (d && e2.pointerType !== 'mouse' && Math.hypot(e2.clientX - d.x, e2.clientY - d.y) < 12 && Date.now() - d.t < 900) { e2.preventDefault(); choisir(d.o); }
+    };
+    panneau.onclick = (e2) => { const o = e2.target.closest('[data-pick]'); if (o) { e2.preventDefault(); choisir(o); } };
     panneau.scrollIntoView({ block: 'nearest' });
   };
 }
