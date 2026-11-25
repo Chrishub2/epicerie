@@ -264,7 +264,7 @@ function deciderNomsInconnus() {
     const d = RB.decisionNom(r, fiche.nom);
     if (d.choix === 'aucun') {
       S.maj((x) => { const y = x.recherches.find((z) => z.id === r.id); y.choix = 'aucun'; y.choixLe = new Date().toISOString(); });
-      toast(`Rien trouvé chez les bannières pour « ${fiche.nom} » : il reste dans Prépa, sans prix proposé.`);
+      toast(`Rien trouvé chez les bannières pour « ${fiche.nom} ». Touche le produit pour changer son nom.`);
     } else if (d.choix === 'auto') {
       choisirProduitNom(r.id, d.groupe, true);
     } else if (d.choix === 'generique') {
@@ -330,15 +330,69 @@ function ouvrirChoixNom(rechId) {
       <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(g.nom)}</span>
       <span class="doux une-ligne" style="display:block;font-size:12px">${esc([g.format ? formatLisible(g.format) : '', g.offres.map((o) => nomBanniere(o.banniere)).join(', ')].filter(Boolean).join(' · '))}</span></span>
       <span class="sugg-px">${esc(argent(g.meilleur.prix))}<small>${esc(nomBanniere(g.meilleur.banniere))}</small></span></button>`).join('')}
+    <button class="btn-lien" id="choixRenommer" style="display:block;width:100%;text-align:left;border:0;background:none;color:var(--doux);font-weight:600;padding:10px 0 0;cursor:pointer">✏️ Changer le nom et chercher de nouveau</button>
     <button class="btn sec" id="choixGarder" style="width:100%;margin-top:10px">Garder « ${esc(fiche.nom)} » sans référence</button>
     <p class="doux" style="font-size:12px;margin-top:6px">Sans référence : ton produit reste dans Prépa, sans prix proposé. C'est la limite du système.</p>`, (c) => {
     $$('[data-choix]', c).forEach((b) => b.onclick = () => { fermerModale(); choisirProduitNom(rechId, groupes[Number(b.dataset.choix)]); });
+    $('#choixRenommer', c).onclick = () => { fermerModale(); ouvrirRenommer(fiche.id, rechId); };
     $('#choixGarder', c).onclick = () => {
       S.maj((x) => { const y = x.recherches.find((z) => z.id === rechId); y.choix = 'garde'; y.choixLe = new Date().toISOString(); });
       fermerModale(); toast(`« ${fiche.nom} » gardé tel quel, sans prix proposé`);
     };
   });
   // Fermer sans choisir : le point ambre reste sur la photo, la fenêtre revient au toucher
+}
+
+/**
+ * v162 (maquette renommer-sans-equivalent-v1, accord de Chris 2026-11-25) — Changer le nom d'une fiche pour chercher de nouveau.
+ * rechId : la demande « nom » dont la fenêtre de choix ne convenait pas (null quand rien n'a été trouvé).
+ */
+function ouvrirRenommer(articleId, rechId = null) {
+  const fiche = S.get().articles.find((a) => a.id === articleId);
+  if (!fiche) return;
+  const rien = !rechId;
+  const propositions = RB.nomsProposes(fiche.nom);
+  ouvrirModale(rien ? 'Rien trouvé chez les bannières' : 'Changer le nom', `<p class="doux">${rien
+    ? 'Aucune bannière ne vend un produit à ce nom. Change le nom pour chercher de nouveau.'
+    : 'Les produits proposés ne conviennent pas : change le nom pour chercher de nouveau.'}</p>
+    <label class="doux" for="renNom" style="display:block;margin:10px 0 4px">Nom du produit</label>
+    <input id="renNom" type="text" value="${esc(fiche.nom)}" autocomplete="off" style="width:100%">
+    ${propositions.length ? `<div class="noms-proposes">${propositions.map((p) => `<button type="button" data-prop="${esc(p)}">${esc(p)}</button>`).join('')}</div>` : ''}
+    <button class="btn" id="renGo" style="width:100%;margin-top:10px">Chercher avec ce nom</button>
+    ${rien ? `<button class="btn sec" id="renGarder" style="width:100%;margin-top:10px">Garder « ${esc(fiche.nom)} » sans prix</button>` : ''}`, (c) => {
+    const inp = $('#renNom', c), go = $('#renGo', c);
+    const maj = () => { const v = inp.value.trim(); go.disabled = v.length < 2 || v === fiche.nom; };
+    inp.oninput = maj; maj();
+    $$('[data-prop]', c).forEach((b) => b.onclick = () => { inp.value = b.dataset.prop; maj(); });
+    inp.onkeydown = (ev) => { if (ev.key === 'Enter' && !go.disabled) go.click(); };
+    go.onclick = () => {
+      const nouveau = inp.value.trim().replace(/^./, (x) => x.toUpperCase());
+      S.maj((x) => {
+        const a = x.articles.find((z) => z.id === articleId); if (a) a.nom = nouveau;
+        const y = rechId && x.recherches.find((z) => z.id === rechId);
+        if (y) { y.choix = 'renomme'; y.choixLe = new Date().toISOString(); }
+      });
+      fermerModale();
+      const r = rechercherNouvelle(S.get().articles.find((z) => z.id === articleId));
+      toast(r ? `Renommé « ${nouveau} » (avant : « ${fiche.nom} ») · je cherche chez les bannières` : `Renommé « ${nouveau} » · la recherche partira quand le téléphone sera relié à ton foyer`);
+    };
+    const garder = $('#renGarder', c);
+    if (garder) garder.onclick = () => {
+      // Noté sur la fiche (la demande, allégée sur le téléphone, n'est plus renvoyée en ligne)
+      const r = RB.rienTrouve(S.get().recherches, articleId);
+      S.maj((x) => { const a = r && x.articles.find((z) => z.id === articleId); if (a) a.rienTrouveGarde = r.id; });
+      fermerModale(); toast(`« ${fiche.nom} » gardé tel quel, sans prix proposé`);
+    };
+  });
+}
+
+/** v162 — Rien trouvé pour ton nom et toujours aucun prix : point gris, toucher le produit ouvre « Changer le nom ». */
+function rienTrouveDe(articleId) {
+  const e = S.get();
+  const r = RB.rienTrouve(e.recherches, articleId);
+  if (!r) return false;
+  const a = e.articles.find((z) => z.id === articleId);
+  return !!a && a.rienTrouveGarde !== r.id && !e.prix.some((p) => p.articleId === articleId);
 }
 
 /** Choix encore à faire pour cette fiche (point ambre sur la photo ; toucher le produit ouvre la fenêtre). */
@@ -349,6 +403,7 @@ function panierQuiTourne(a) {
   const e = S.get();
   if (!(e.recherches || []).length) return '';
   if (choixNomDe(a.id)) return '<span class="point-choix" title="Les bannières ont répondu : touche pour choisir"></span>';
+  if (rienTrouveDe(a.id)) return '<span class="point-choix gris" title="Rien trouvé chez les bannières : touche pour changer le nom"></span>';
   const ids = new Set(a.estGenerique ? [a.id, ...fichesAVerifier(a).map((x) => x.id)] : [a.id]);   // v140 : la fiche famille cherche aussi son nom
   const ouvertes = (e.recherches || []).filter((r) => ids.has(r.articleId) && !r.appliqueLe && r.etat !== 'fait'
     && RB.verificationOuverte(e.recherches, r.articleId));
@@ -2258,6 +2313,7 @@ function brancherAConfirmer(c, articleId, rouvrir) {
 export function ficheArticle(articleId, ligneId) {
   const choix = choixNomDe(articleId);   // v120 : les bannières ont répondu pour ton nom → d'abord le choix
   if (choix) { ouvrirChoixNom(choix.id); return; }
+  if (rienTrouveDe(articleId)) { ouvrirRenommer(articleId); return; }   // v162 : rien trouvé → changer le nom
   const e = S.get();
   const a = e.articles.find((x) => x.id === articleId);
   if (!a) return;

@@ -421,6 +421,29 @@ export function aAppliquer(recherches, maintenant = Date.now()) {
 export const generiquesPrets = (recherches, maintenant = Date.now()) => (recherches || []).filter((r) => r.but === 'generique' && r.articleId
   && !r.appliqueLe && (r.etat === 'fait' || maintenant - Date.parse(r.le) >= 24 * 3600000));
 
+/** v162 — La dernière demande « nom » de cette fiche n'a rien trouvé (choix 'aucun') → cette demande, sinon null. */
+export function rienTrouve(recherches, articleId) {
+  const l = (recherches || []).filter((r) => r.but === 'nom' && r.articleId === articleId).sort((a, b) => (a.le < b.le ? 1 : -1));
+  return l[0]?.choix === 'aucun' ? l[0] : null;
+}
+
+// Mots qui décrivent le produit sans le nommer : souvent absents des noms des sites (« Tortiglionis secs », « Cheddar jaune râpé »)
+const DESCRIPTIFS = new Set(['sec', 'secs', 'seche', 'seches', 'frais', 'fraiche', 'fraiches', 'jaune', 'jaunes', 'blanc', 'blancs', 'blanche', 'blanches',
+  'rape', 'rapee', 'rapes', 'rapees', 'hache', 'hachee', 'haches', 'hachees', 'tranche', 'tranchee', 'tranches', 'tranchees', 'mi-maigre', 'maigre',
+  'moyen', 'moyenne', 'moyens', 'gros', 'grosse', 'grosses', 'petit', 'petite', 'petits', 'petites', 'fort', 'doux', 'douce', 'nature', 'entier', 'entiere',
+  'cuit', 'cuite', 'cuits', 'cuites', 'cru', 'crue', 'crus', 'crues', 'surgele', 'surgeles', 'surgelee', 'surgelees']);
+/** v162 — Noms à proposer quand rien n'est trouvé : sans les mots qui décrivent, au singulier, 2 au plus. */
+export function nomsProposes(nom) {
+  const motsNom = String(nom || '').trim().split(/\s+/).filter(Boolean);
+  const simple = (m) => sansAcc(m).replace(/[^a-z-]/g, '');
+  const sing = (m) => (m.length > 4 && /[sx]$/i.test(m) && !/ss$/i.test(m) ? m.slice(0, -1) : m);
+  const sansDesc = motsNom.filter((m, i) => i === 0 || !DESCRIPTIFS.has(simple(m)));
+  const cap = (t) => t.replace(/^./, (c) => c.toUpperCase());
+  const cands = [sansDesc.map(sing).join(' '), sansDesc.join(' ')].map(cap);   // pas le 1er mot seul : « Lait de coco » ≠ « Lait »
+  const vus = new Set([sansAcc(nom).trim()]);
+  return cands.filter((c) => c.length >= 2 && !vus.has(sansAcc(c)) && vus.add(sansAcc(c))).slice(0, 3);
+}
+
 /** Demandes « nom » terminées dont le choix n'est pas encore fait. */
 export const choixEnAttente = (recherches) => (recherches || []).filter((r) => r.but === 'nom' && r.articleId && r.etat === 'fait' && !r.choixLe);
 

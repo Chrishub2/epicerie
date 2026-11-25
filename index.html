@@ -554,6 +554,10 @@ button.btn.rv-second { width: 100%; }
 /* v120 : point ambre = les bannières ont répondu pour ton nom, choix à faire */
 .point-choix { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--ambre, #f0b43c);
   border: 2px solid var(--carte, #1b211e); pointer-events: none; }
+/* v162 : point gris = les bannières n'ont rien trouvé pour ton nom ; toucher → changer le nom */
+.point-choix.gris { background: #8a9590; }
+.noms-proposes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.noms-proposes button { border: 1px solid var(--ligne); background: var(--gris-fond, transparent); color: inherit; border-radius: 14px; padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; }
 .rb-note { padding: 0 10px 8px; font-size: 12px; color: var(--doux); }
 .rb-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
 .rb-chip { font-size: 10.5px; padding: 1px 5px; border-radius: 6px; background: var(--gris-fond); white-space: nowrap; }
