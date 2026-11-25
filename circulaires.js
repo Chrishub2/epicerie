@@ -562,7 +562,9 @@ export function monterCirculaires(conteneur, opts) {
       const s = b.dataset.autre, max = Math.max(1, ...etat.pages.filter((p) => p.source === s).map((p) => p.circulaire), etat[`plus_${s}`] || 1);
       etat[`plus_${s}`] = max + 1; rendre();
     });
-    racine.querySelector('[data-envoyer]')?.addEventListener('click', avantEnvoi);
+    // v156 (Chris, 2026-11-24) : l'envoi part directement ; le double se juge APRÈS la lecture, quand les dates imprimées
+    // sont connues (rapport de « lis mes circulaires »). avantEnvoi / blocAvertir restent pour la console si on les y veut.
+    racine.querySelector('[data-envoyer]')?.addEventListener('click', envoyer);
     racine.querySelector('[data-avertir-non]')?.addEventListener('click', () => { etat.avertir = null; rendre(); });
     racine.querySelector('[data-avertir-oui]')?.addEventListener('click', () => { etat.avertir = null; envoyer(); });
     racine.querySelector('[data-valider-sel]')?.addEventListener('click', validerSelection);
