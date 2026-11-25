@@ -1571,11 +1571,13 @@ export function rechercherNouvelle(a) { return a ? deposerRecherche(a.nom, a.id)
  * « Tortiglionis secs 500 ml »), sans code ni aucun prix, jamais cherchées par leur nom → nom relu, puis recherche « nom ».
  */
 let reparationFaite = false;
-function reparerFichesRecette() {
-  if (reparationFaite || !Sync.estPret()) return;
-  const e = S.get();
-  if (!e.articles.length) return;
+async function reparerFichesRecette() {
+  if (reparationFaite || !Sync.estPret() || !S.get().articles.length) return;
   reparationFaite = true;
+  // v157 (leçon du 2026-11-25) : la mise à jour recharge la page ; sans tirer d'abord la base, la 2e page ne voyait
+  // pas les recherches déposées par la 1re (pas encore enregistrées) et les déposait une 2e fois.
+  try { await Sync.tirer(); } catch { reparationFaite = false; return; }
+  const e = S.get();
   const avecPrix = new Set(e.prix.map((p) => p.articleId));
   const parNom = new Set((e.recherches || []).filter((r) => r.but === 'nom').map((r) => r.articleId));
   const ids = new Set(e.liste.filter((l) => !l.coche && (l.recettes || []).length).map((l) => l.articleId));
