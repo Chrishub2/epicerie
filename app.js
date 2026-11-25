@@ -1711,7 +1711,7 @@ function suivreRecherche(id, quantite) {
 
 function htmlRechercheBannieres(r, groupes, gen = []) {
   const av = RB.avancement(r);
-  const trouve = RB.ORDRE.filter((b) => av.etats[b] === 'fait').length;
+  const trouve = av.sites.filter((b) => av.etats[b] === 'fait').length;
   // Roue qui tourne : la recherche de cette bannière est en cours (ou attend l'ordinateur)
   const ROUE = '<i class="rb-roue" aria-hidden="true"></i>';
   const icones = { attente: ROUE, fait: '✓', rien: '—', bloque: '⚠', erreur: '⚠' };
@@ -1719,7 +1719,7 @@ function htmlRechercheBannieres(r, groupes, gen = []) {
   const silence = !av.fait && Date.now() - Date.parse(r.le) > 80000;
   const chip = (o) => `<span class="rb-chip${o.regulier ? ' r' : ''}">${esc(nomBanniere(o.banniere))} ${esc(argent(o.prix))}${o.regulier ? ' · rabais' : ''}</span>`;
   return `<div class="rb-titre"><span>Chez tes bannières · ton Chrome</span><span>${av.fait < av.total ? `${ROUE} recherche… ${av.fait} sur ${av.total}` : `${trouve} sur ${av.total}`}</span></div>
-    <div class="rb-etats">${RB.ORDRE.map((b) => `<span class="rb-e ${av.etats[b]}" title="${esc(titres[av.etats[b]])}">${icones[av.etats[b]]} ${esc(nomBanniere(b))}</span>`).join('')}</div>
+    <div class="rb-etats">${av.sites.map((b) => `<span class="rb-e ${av.etats[b]}" title="${esc(titres[av.etats[b]])}${r.bannieres?.[b]?.requete ? ` · cherché « ${esc(r.bannieres[b].requete)} »` : ''}">${icones[av.etats[b]]} ${esc(RB.nomSite(b) || nomBanniere(b))}</span>`).join('')}</div>
     ${silence ? '<div class="rb-note">Ton ordinateur n\'a pas encore répondu : la recherche se fera dès que Chrome y sera ouvert.</div>' : ''}
     ${gen.length ? `<button class="sugg" data-rbgen="1"><span class="vignette petite" style="display:grid;place-items:center;font-size:20px">🛒</span>
         <span class="grandir" style="min-width:0"><span class="une-ligne" style="display:block">${esc(r.q.replace(/^./, (c) => c.toUpperCase()))} · toutes sortes</span>

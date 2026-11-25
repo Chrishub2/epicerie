@@ -10,6 +10,12 @@ import { analyserFormat, formatLisible } from './normalise.js';
 import { MARQUES } from './marques.js';
 
 export const ORDRE = ['iga', 'metro', 'super_c', 'maxi', 'provigo', 'walmart', 'costco', 'tigre_geant', 'jean_coutu'];
+// Extension 1.16 (2026-11-25) : sites cherchés en plus, dont les produits comptent pour une bannière (Voilà = l'épicerie en ligne d'IGA)
+export const SITE_BANNIERE = { voila: 'iga' };
+export const SITES = ['iga', 'voila', ...ORDRE.slice(1)];
+const NOMS_SITES = { voila: 'Voilà' };
+/** Nom affiché d'un site de recherche (null : nom de la bannière). */
+export const nomSite = (s) => NOMS_SITES[s] || null;
 export const ETATS_FINAUX = ['fait', 'rien', 'bloque', 'erreur'];
 export const SOURCE = 'site_banniere';
 export const GARDER_JOURS = 7;   // les demandes plus vieilles sont retirées du téléphone
@@ -39,10 +45,12 @@ export function alleger(recherches) {
   return n;
 }
 
-/** { fait, total, etats: { iga: 'fait'|'rien'|'bloque'|'erreur'|'attente' } } */
+/** { fait, total, sites, etats: { iga: 'fait'|'rien'|'bloque'|'erreur'|'attente' } }
+ *  Un site ajouté (Voilà) qui n'a pas répondu à une demande finie est omis : extension pas encore rechargée, ou demande d'avant. */
 export function avancement(r) {
-  const etats = Object.fromEntries(ORDRE.map((b) => [b, r?.bannieres?.[b]?.etat || 'attente']));
-  return { fait: ORDRE.filter((b) => ETATS_FINAUX.includes(etats[b])).length, total: ORDRE.length, etats };
+  const sites = SITES.filter((s) => ORDRE.includes(s) || r?.bannieres?.[s] || r?.etat !== 'fait');
+  const etats = Object.fromEntries(sites.map((b) => [b, r?.bannieres?.[b]?.etat || 'attente']));
+  return { fait: sites.filter((b) => ETATS_FINAUX.includes(etats[b])).length, total: sites.length, sites, etats };
 }
 
 const sansAcc = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’']/g, ' ');
@@ -134,12 +142,21 @@ export function corrigerFormat(p) {
   return { ...p, format: `${q} ${u === '100ml' || u === 'l' ? 'ml' : 'g'}` };
 }
 const corriges = new WeakMap();
-/** Produits trouvés chez une bannière, formats corrigés (mémorisé par liste). */
-export function produitsDe(r, b) {
-  const liste = r?.bannieres?.[b]?.produits;
-  if (!liste) return [];
+const corrigee = (liste) => {
   if (!corriges.has(liste)) corriges.set(liste, liste.map(corrigerFormat));
   return corriges.get(liste);
+};
+/** Produits trouvés chez une bannière, formats corrigés (mémorisé par liste).
+ *  1.16 : IGA reçoit aussi ceux de Voilà (marqués `site: 'voila'`), sauf ceux déjà trouvés sur iga.ca (même nom). */
+export function produitsDe(r, b) {
+  const liste = r?.bannieres?.[b]?.produits;
+  const base = liste ? corrigee(liste) : [];
+  const ajouts = Object.entries(SITE_BANNIERE).filter(([, x]) => x === b)
+    .flatMap(([s]) => (r?.bannieres?.[s]?.produits ? corrigee(r.bannieres[s].produits).map((p) => ({ ...p, site: s })) : []));
+  if (!ajouts.length) return base;
+  const cle = (p) => `${sansAcc(p.nom).replace(/[^a-z0-9]/g, '')}|${cleFormat(p.format) || ''}`;
+  const vus = new Set(base.map(cle));
+  return [...base, ...ajouts.filter((p) => !vus.has(cle(p)) && vus.add(cle(p)))];
 }
 
 /** Deux mots presque pareils : un préfixe, ou une lettre d'écart (« Ficelo » ≈ « Ficello », « gauffre » ≈ « gaufre »). */
@@ -239,7 +256,7 @@ export function regrouper(r, seuil = 0.75) {
       const ms = mots(p.nom);
       const g = groupes.find((x) => !x.offres.some((o) => o.banniere === b)
         && ((p.code && x.codes.has(p.code)) || (cf && x.cleFormat === cf && jaccard(ms, x.mots) >= seuil)));
-      const offre = { banniere: b, prix: p.prix, regulier: p.regulier || null, url: p.url || null, local: !!p.local, code: p.code || null, nom: p.nom };
+      const offre = { banniere: b, prix: p.prix, regulier: p.regulier || null, url: p.url || null, local: !!p.local, code: p.code || null, nom: p.nom, ...(p.site ? { site: p.site } : {}) };
       if (g) { g.offres.push(offre); if (p.code) g.codes.add(p.code); if (!g.image && p.image) g.image = p.image; }
       else groupes.push({ nom: p.nom, format: p.format || '', cleFormat: cf, mots: ms, codes: new Set(p.code ? [p.code] : []), image: p.image || null, offres: [offre] });
     }
@@ -260,7 +277,7 @@ export function prixDuGroupe(g, articleId, jour = new Date().toISOString().slice
     prixRegulier: o.regulier && o.regulier > o.prix ? o.regulier : null,
     format: g.format ? formatLisible(g.format) : null,
     type: o.regulier && o.regulier > o.prix ? 'circulaire' : 'regulier', fin: null,
-    source: SOURCE, observeLe: jour, nomProduit: o.nom, url: o.url, image: g.image || null,
+    source: SOURCE, observeLe: jour, nomProduit: o.nom, url: o.url, image: g.image || null, ...(o.site ? { site: o.site } : {}),
   }));
 }
 
@@ -379,7 +396,8 @@ export function prixVerification(r, fiche, prixExistants = [], codes = []) {
   const prix = [], changements = [];
   for (const b of ORDRE) {
     const res = r?.bannieres?.[b];
-    if (res?.etat !== 'fait') continue;
+    const sitesDe = [b, ...Object.keys(SITE_BANNIERE).filter((s) => SITE_BANNIERE[s] === b)];
+    if (!sitesDe.some((s) => r?.bannieres?.[s]?.etat === 'fait')) continue;   // 1.16 : iga.ca ou Voilà
     const p = memeProduit(fiche, produitsDe(r, b), codes);
     if (!p) continue;
     const rabais = p.regulier && p.regulier > p.prix;
@@ -391,7 +409,8 @@ export function prixVerification(r, fiche, prixExistants = [], codes = []) {
       id: `px-${r.id}-${b}`, articleId: fiche.id, banniere: b, offre: prixTexte(p.prix), prixNum: p.prix,
       prixRegulier: rabais ? p.regulier : null, format: p.format ? formatLisible(p.format) : (fiche.format || null),
       type: rabais ? 'circulaire' : 'regulier', fin: null, source: SOURCE,
-      observeLe: String(res.le || r.finiLe || r.le).slice(0, 10), nomProduit: p.nom, url: p.url || null, image: p.image || null,
+      observeLe: String((p.site && r.bannieres[p.site]?.le) || res?.le || r.finiLe || r.le).slice(0, 10), nomProduit: p.nom, url: p.url || null, image: p.image || null,
+      ...(p.site ? { site: p.site } : {}),
       ...(change ? { regulierAvant: avant } : {}),
     });
   }
@@ -478,6 +497,7 @@ export function prixGenerique(offres, articleId, jour = new Date().toISOString()
     format: o.produit?.format ? formatLisible(o.produit.format) : null,
     type: o.regulier && o.regulier > o.prix ? 'circulaire' : 'regulier', fin: null,
     source: SOURCE, observeLe: jour, nomProduit: o.produit?.nom || '', url: o.produit?.url || null, image: o.produit?.image || null,
+    ...(o.produit?.site ? { site: o.produit.site } : {}),
   }));
 }
 
