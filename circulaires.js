@@ -123,10 +123,17 @@ export function dejaDansBase(pages, offres, sources, aujourdhui) {
 }
 
 /** « IGA : courante 20 au 26 nov. (312 rabais) » — une ligne par bannière de dejaDansBase. */
+// v154 (Chris, 2026-11-24) : une circulaire papier arrive souvent AVANT sa semaine ; avoir la courante ne veut pas dire que
+// la photo est un double. Le texte dit donc ce que ta base a ET ce qui lui manque, pour comparer avec la date imprimée.
 export function texteDejaDansBase(lignes) {
-  const morceau = (type, c) => `${type} ${periode(c.debut, c.fin)} (${c.rabais} rabais)`;
-  return (lignes || []).map((l) => `${l.nom} : ${[l.courante && morceau('courante', l.courante), l.suivante && morceau('suivante', l.suivante)]
-    .filter(Boolean).join(' · ')}`);
+  const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+  const lendemain = (iso) => { const [a, m, j] = iso.split('-').map(Number); const d = new Date(Date.UTC(a, m - 1, j + 1)); return `${d.getUTCDate()} ${MOIS[d.getUTCMonth()]}`; };
+  const per = (c) => `${periode(c.debut, c.fin)}, ${c.rabais} rabais`;
+  return (lignes || []).map((l) => {
+    if (l.courante && l.suivante) return `${l.nom} : ta base a déjà la courante (${per(l.courante)}) et la suivante (${per(l.suivante)})`;
+    if (l.courante) return `${l.nom} : ta base a la courante (${per(l.courante)}), pas encore la suivante (dès le ${lendemain(l.courante.fin)})`;
+    return `${l.nom} : ta base a déjà la suivante (${per(l.suivante)})`;
+  });
 }
 
 /** Offres de circulaires encore utiles (fin ≥ hier, heure du Québec) : lignes { source, debut, fin }, par pages de 1 000. */
@@ -630,11 +637,11 @@ export function monterCirculaires(conteneur, opts) {
 
   function blocAvertir() {
     if (!etat.avertir) return '';
-    return `<div class="c-confirmer" role="alertdialog" aria-label="Déjà dans ta base">
-      <span>🛑 <b>Déjà dans ta base</b> — vérifie que ce n'est pas la même circulaire :</span>
+    return `<div class="c-confirmer" role="alertdialog" aria-label="Vérifier la semaine de la circulaire">
+      <span>🛑 <b>Compare avec la date imprimée sur ta circulaire</b> :</span>
       <ul style="margin:0;padding-left:18px">${texteDejaDansBase(etat.avertir).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
-      <span class="c-doux">Les prix déjà enregistrés ne seront pas écrits deux fois, mais la circulaire sera relue au complet.</span>
-      <div class="c-rang"><button class="c-btn p" data-avertir-non>Non</button><button class="c-btn" data-avertir-oui>Envoyer quand même</button></div></div>`;
+      <span class="c-doux">Une autre semaine : envoie-la. La même : inutile, ses prix sont déjà enregistrés (rien ne serait écrit deux fois, mais elle serait relue au complet).</span>
+      <div class="c-rang"><button class="c-btn p" data-avertir-non>Non, c'est la même</button><button class="c-btn" data-avertir-oui>Envoyer, c'est une autre semaine</button></div></div>`;
   }
 
   async function envoyer() {
