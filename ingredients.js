@@ -48,6 +48,18 @@ function nettoyerNom(n) {
   return String(n || '').split(',')[0].replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * v160 — Tous les mots de la fiche (3 lettres et plus) sont des MOTS ENTIERS de l'ingrédient (pluriel accepté).
+ * Avant : simple « contient », et « Bœuf haché » tombait sur la fiche « Œufs » (« bœuf » contient « œuf »).
+ */
+export function motsContenus(nomFiche, nomIngredient) {
+  const mots = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/œ/g, 'oe')
+    .split(/[^a-z0-9]+/).filter(Boolean).map((w) => w.replace(/(?<=..)[sx]$/, ''));
+  const ing = new Set(mots(nomIngredient));
+  const fiche = mots(nomFiche).filter((w) => w.length > 2);
+  return fiche.length > 0 && fiche.every((w) => ing.has(w));
+}
+
 /** Unité qui est un contenant du magasin (boîte, paquet…) : utile pour la quantité à acheter. */
 export const estContenant = (u) => CONTENANT.test(String(u || '').trim());
 

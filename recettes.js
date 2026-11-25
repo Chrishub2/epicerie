@@ -8,7 +8,7 @@ import { $, $$, esc, argent, ouvrirModale, fermerModale, meilleureOffre, toast }
 import { prendrePhoto, lireTexte, lireRecetteIA, lireTitreLivre } from './ocr.js';
 import { retoucher } from './retouche.js';
 import { trouverArticle, assurerArticle, ajouterALaListe, sansAccents, rechercherNouvelle } from './app.js';
-import { analyserIngredient, ligneIngredient, lisible, ingredientsDuTexte } from './ingredients.js';
+import { analyserIngredient, ligneIngredient, lisible, ingredientsDuTexte, motsContenus } from './ingredients.js';
 import { ajouterLecon, appliquerLecons, leconsPourIA } from './lecons.js';
 import { afficherPhoto } from './plus.js';
 
@@ -19,11 +19,7 @@ export { analyserIngredient, ligneIngredient };
 function correspondance(nom) {
   const direct = trouverArticle(nom);
   if (direct) return direct;
-  const n = sansAccents(nom);
-  return S.get().articles.find((a) => {
-    const an = sansAccents(a.nom);
-    return n.includes(an) || an.split(' ').every((w) => w.length > 2 && n.includes(w.replace(/s$/, '')));
-  }) || null;
+  return S.get().articles.find((a) => motsContenus(a.nom, nom)) || null;
 }
 
 function coutRecette(r) {
