@@ -7,31 +7,13 @@ import * as S from './store.js';
 import { $, $$, esc, argent, ouvrirModale, fermerModale, meilleureOffre, toast } from './ui.js';
 import { prendrePhoto, lireTexte, lireRecetteIA, lireTitreLivre } from './ocr.js';
 import { retoucher } from './retouche.js';
-import { trouverArticle, assurerArticle, ajouterALaListe, sansAccents } from './app.js';
+import { trouverArticle, assurerArticle, ajouterALaListe, sansAccents, rechercherNouvelle } from './app.js';
+import { analyserIngredient, ligneIngredient, lisible, ingredientsDuTexte } from './ingredients.js';
 import { afficherPhoto } from './plus.js';
 
 const GARDE_MANGER = ['sel', 'poivre', 'eau', 'huile', "huile d'olive", 'sucre', 'farine', 'bicarbonate', 'poudre a pate', 'epices'];
-const UNITES = '(?:tasses?|t\\.|c\\.\\s?à\\s?(?:soupe|s\\.|thé|t\\.)|c\\.à\\.s\\.?|c\\.à\\.t\\.?|cuill(?:è|e)res?\\s+à\\s+(?:soupe|thé|café)|ml|l|cl|g|kg|lb|oz|gousses?|boîtes?|conserves?|pincées?|tranches?|paquets?|bottes?|feuilles?)';
-const FRACTIONS = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3 };
-
-/** « 2 c. à soupe d'huile d'olive » → { quantite: 2, unite: 'c. à soupe', nom: "huile d'olive" } */
-export function analyserIngredient(ligne) {
-  let s = ligne.replace(/^\s*\d+[.)]\s+/, '') // numérotation « 1. » ou « 1) »
-    .replace(/^[\s•\-*–·]+/, '').trim();
-  if (!s) return null;
-  for (const [f, v] of Object.entries(FRACTIONS)) s = s.replace(f, ` ${v}`);
-  s = s.trim();
-  // L'unité doit être un mot complet (« g » ne doit pas avaler « gousses »).
-  const re = new RegExp(`^(\\d+(?:[.,]\\d+)?(?:\\s+\\d/\\d)?|\\d/\\d)?\\s*${'(' + UNITES + '(?![a-zà-ÿ]))?'}\\s*(?:de\\s+|d['’]\\s*)?(.+)$`, 'i');
-  const m = s.match(re);
-  let q = null;
-  if (m?.[1]) {
-    const parts = m[1].trim().split(/\s+/);
-    q = parts.reduce((t, p) => t + (p.includes('/') ? Number(p.split('/')[0]) / Number(p.split('/')[1]) : Number(p.replace(',', '.'))), 0);
-  }
-  const nom = (m?.[3] || s).replace(/\(.*?\)/g, '').split(',')[0].trim();
-  return { quantite: q, unite: m?.[2]?.trim() || '', nom, brut: ligne.trim() };
-}
+// v157 : lecture des lignes déplacée dans ingredients.js (sans DOM, testée) ; la quantité peut venir après le nom.
+export { analyserIngredient, ligneIngredient };
 
 function correspondance(nom) {
   const direct = trouverArticle(nom);
@@ -41,24 +23,6 @@ function correspondance(nom) {
     const an = sansAccents(a.nom);
     return n.includes(an) || an.split(' ').every((w) => w.length > 2 && n.includes(w.replace(/s$/, '')));
   }) || null;
-}
-
-/** Assez de lettres pour être du vrai texte (et pas « — ä ÿ »). */
-function lisible(l) {
-  const lettres = (l.match(/[a-zà-ÿ]/gi) || []).length;
-  return lettres >= 3 && lettres / l.replace(/\s/g, '').length >= 0.6;
-}
-
-const MOTS_PREPARATION = /minute|portion|pr[ée]paration|cuisson|cuire|chauff|m[ée]lang|ajouter|incorpor|servir|r[ée]server|[ée]tape|four\b|po[êe]le|feu (doux|moyen|vif)|jusqu|pendant|remuer|verser|égoutter|egoutter|fondu/i;
-const UNITE_RECETTE = /\b(\d|½|¼|¾)|\b(tasses?|c\.|cuill|ml|g|kg|lb|oz|gousses?|bo[îi]tes?|pinc[ée]es?|tranches?|paquets?|bottes?|feuilles?)\b/i;
-
-/** Ligne qui ressemble à un ingrédient (pas une instruction, pas du charabia). */
-export function ligneIngredient(l) {
-  const t = l.replace(/^[\s•\-*–·]+/, '').trim();
-  if (t.length < 3 || t.length > 60 || !lisible(t)) return false;
-  if (/^ingr[ée]dients?|^pr[ée]paration/i.test(t)) return false;
-  if (MOTS_PREPARATION.test(t)) return false;
-  return UNITE_RECETTE.test(t) || t.split(/\s+/).length <= 4;
 }
 
 function coutRecette(r) {
@@ -134,6 +98,7 @@ function editeur(existante = null) {
   const e = S.get();
   const livres = e.livres || [];
   const r = existante ? { ...existante } : { id: S.uid('rc'), titre: '', ingredients: [], creeLe: new Date().toISOString() };
+  let lusIA = r.lusIA || [];   // v157 : lecture de l'IA ligne par ligne (gardée avec la recette)
   ouvrirModale(existante ? 'Modifier la recette' : 'Nouvelle recette', `
     <div class="etape"><b>1. Ingrédients</b>
       <button class="btn" id="rPhotoIngr" style="width:100%;margin:6px 0">📷 Photographier la liste d'ingrédients</button>
@@ -179,6 +144,7 @@ function editeur(existante = null) {
       const ia = navigator.onLine ? await lireRecetteIA(blob, (m) => { $('#rEtat', c).textContent = m; }) : null;
       if (ia) {
         $('#rIng', c).value = ia.lignes.join('\n');
+        lusIA = ia.ingredients || [];   // v157 : le nom lu par l'IA sert tel quel (plus de relecture maison)
         if (ia.titre && !$('#rTitre', c).value) $('#rTitre', c).value = ia.titre;
         $('#rEtat', c).textContent = `✓ ${ia.lignes.length} ingrédient(s) lu(s) par l'IA${ia.portions ? ` · ${ia.portions} portions` : ''}. Vérifie au besoin.`;
         return;
@@ -221,11 +187,11 @@ function editeur(existante = null) {
     // ⑤ Enregistrer et choisir les ingrédients
     $('#rSuivant', c).onclick = () => {
       const texte = $('#rIng', c).value;
-      const ingredients = texte.split('\n').map(analyserIngredient).filter(Boolean)
+      const ingredients = ingredientsDuTexte(texte, lusIA)
         .map((i) => ({ ...i, articleId: correspondance(i.nom)?.id || null }));
       if (!ingredients.length) { toast('Ajoute au moins un ingrédient (photo ou texte)'); return; }
       r.titre = $('#rTitre', c).value.trim() || 'Recette sans titre';
-      r.ingredients = ingredients; r.texteIngredients = texte;
+      r.ingredients = ingredients; r.texteIngredients = texte; r.lusIA = lusIA;
       let livreId = $('#rLivre', c).value;
       S.maj((x) => {
         x.livres ||= [];
@@ -260,9 +226,9 @@ function choisir(r) {
       // Coché d'office seulement si c'est clairement un ingrédient (quantité lue ou produit connu)
       const sur = (i.quantite != null || a) && ligneIngredient(i.brut);
       return `<label class="item" style="cursor:pointer">
-        <input type="checkbox" data-k="${k}" ${garde || deja || !sur ? '' : 'checked'}>
+        <input type="checkbox" data-k="${k}" ${garde || deja || !sur || i.facultatif ? '' : 'checked'}>
         <div class="grandir"><div class="nom">${esc(a ? a.nom : i.nom)}</div>
-        <div class="info">${esc(i.brut)}${a ? ' · au catalogue' : ' · nouvel article'}${deja ? ' · <b>déjà dans la liste</b>' : ''}${!sur && !garde && !deja ? ' · <span style="color:var(--ambre)">à vérifier</span>' : ''}</div></div></label>`;
+        <div class="info">${esc(i.brut)}${a ? ' · au catalogue' : ' · nouvel article'}${i.facultatif ? ' · facultatif' : ''}${deja ? ' · <b>déjà dans la liste</b>' : ''}${!sur && !garde && !deja ? ' · <span style="color:var(--ambre)">à vérifier</span>' : ''}</div></div></label>`;
     }).join('')}</div>
     <button class="btn" id="ajSel" style="width:100%;margin-top:8px">Ajouter la sélection</button>`, (c) => {
     $('#ajSel', c).onclick = () => {
@@ -270,7 +236,11 @@ function choisir(r) {
       for (const cb of $$('[data-k]', c)) {
         if (!cb.checked) continue;
         const i = r.ingredients[Number(cb.dataset.k)];
-        const a = i.articleId ? S.get().articles.find((x) => x.id === i.articleId) : assurerArticle(i.nom);
+        const connu = i.articleId ? S.get().articles.find((x) => x.id === i.articleId) : trouverArticle(i.nom);
+        const a = connu || assurerArticle(i.nom);
+        // v157 : article neuf (sans code ni prix) → recherche « nom » chez les bannières, comme le champ « Ajouter »
+        // (la vérification « même produit » seule ne trouvait jamais rien : Prépa restait sans prix)
+        if (!connu) rechercherNouvelle(a);
         const note = `${i.quantite ? i.quantite.toLocaleString('fr-CA', { maximumFractionDigits: 2 }) + ' ' : ''}${i.unite} pour ${r.titre}`.trim();
         const existe = S.get().liste.find((l) => l.articleId === a.id && !l.coche);
         if (existe) {

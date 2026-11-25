@@ -10,6 +10,7 @@ import { BANNIERES, BANNIERES_MAGASIN } from './demo-data.js';
 import { analyserOffre, analyserFormat, formatLisible, gtinVariantes, normaliser, prixComparable } from './normalise.js';
 import { ouvrirScan, photoProduit } from './scan.js';
 import { vueRecettes } from './recettes.js';
+import { analyserIngredient } from './ingredients.js';
 import { memeNom, pertinenceNoms } from './noms.js';
 import { calendrierHtml } from './calendrier.js';
 import { REMPLACEMENTS, REMPLACEMENT_DEFAUT, remplacementDe, definirRemplacement, meilleursChoix, DICO_ATTRIBUTS, attributDe, caracteristiques, definirCaracteristique, retirerCaracteristique } from './choix.js';
@@ -239,7 +240,7 @@ function appliquerVerifications() {
   if (changements.length) toast(`Prix régulier changé : ${changements.slice(0, 3).map((c) => `${c.nom} chez ${nomBanniere(c.banniere)} ${argent(c.avant)} → ${argent(c.apres)}`).join(' · ')} (noté dans l'historique)`);
   else if (nPrix) toast(`Prix vérifiés chez les bannières · ${nPrix} relevé${nPrix > 1 ? 's' : ''} ajouté${nPrix > 1 ? 's' : ''}`);
 }
-S.abonner(() => { if (!applicationPrevue) { applicationPrevue = true; setTimeout(() => { applicationPrevue = false; appliquerVerifications(); deciderNomsInconnus(); appliquerGeneriques(); }, 0); } });
+S.abonner(() => { if (!applicationPrevue) { applicationPrevue = true; setTimeout(() => { applicationPrevue = false; appliquerVerifications(); deciderNomsInconnus(); appliquerGeneriques(); reparerFichesRecette(); }, 0); } });
 
 /** v140 — Fiche famille : les bannières ont répondu pour son nom → le moins cher de chacune devient un prix de la fiche. */
 function appliquerGeneriques() {
@@ -1561,6 +1562,33 @@ function vocabAccents() {
 // --- Recherche chez tes bannières (maquette recherche-bannieres-v1) ---
 let rechercheVue = null;   // { id, desabonner } : la demande affichée sous le champ, redessinée quand l'ordinateur répond
 function arreterRechercheVue() { rechercheVue?.desabonner(); rechercheVue = null; }
+
+/** v157 — Fiche neuve venue d'une recette : même recherche « nom » que le champ « Ajouter » (choix proposé ou « toutes sortes »). */
+export function rechercherNouvelle(a) { return a ? deposerRecherche(a.nom, a.id) : null; }
+
+/**
+ * v157 — Réparation, une fois par session : fiches de recette sur la liste créées avant v157 (nom avec la quantité,
+ * « Tortiglionis secs 500 ml »), sans code ni aucun prix, jamais cherchées par leur nom → nom relu, puis recherche « nom ».
+ */
+let reparationFaite = false;
+function reparerFichesRecette() {
+  if (reparationFaite || !Sync.estPret()) return;
+  const e = S.get();
+  if (!e.articles.length) return;
+  reparationFaite = true;
+  const avecPrix = new Set(e.prix.map((p) => p.articleId));
+  const parNom = new Set((e.recherches || []).filter((r) => r.but === 'nom').map((r) => r.articleId));
+  const ids = new Set(e.liste.filter((l) => !l.coche && (l.recettes || []).length).map((l) => l.articleId));
+  const aReparer = e.articles.filter((a) => ids.has(a.id) && !a.estGenerique && !P.codesDe(a).length && !avecPrix.has(a.id) && !parNom.has(a.id));
+  for (const a of aReparer) {
+    const nom = analyserIngredient(a.nom)?.nom;
+    if (nom && nom.length >= 2 && nom !== a.nom) {
+      const propre = nom.replace(/^./, (c) => c.toUpperCase());
+      S.maj((x) => { const y = x.articles.find((z) => z.id === a.id); if (y) y.nom = propre; });
+    }
+    rechercherNouvelle(S.get().articles.find((z) => z.id === a.id));
+  }
+}
 
 /** Dépose la demande (synchronisée vers l'ordinateur) ; null si le téléphone n'est pas relié à ton foyer. */
 function deposerRecherche(q, articleId = null) {

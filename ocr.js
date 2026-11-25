@@ -92,7 +92,8 @@ export async function lireListeIA(blob, etat) {
 /** Recette → { titre, portions, lignes:[texte] } ou null si l'IA n'est pas disponible. */
 export async function lireRecetteIA(blob, etat) {
   const r = await essayerIA('recette', [blob], etat);
-  return r ? { titre: r.titre, portions: r.portions, lignes: r.ingredients.map((i) => i.texte) } : null;
+  // v157 : on garde aussi ce que l'IA a compris (nom à acheter, quantité, unité, facultatif, format du magasin)
+  return r ? { titre: r.titre, portions: r.portions, lignes: r.ingredients.map((i) => i.texte), ingredients: r.ingredients } : null;
 }
 
 /** Photo d'un emballage → { nom, marque, format, code_barres } ou null (IA indisponible). */
