@@ -668,17 +668,16 @@ th.tri-case { text-align: left; }
 .choix3-rang.aucun { grid-template-columns: minmax(150px, .9fr) minmax(0, 1fr); color: var(--texte-3); }
 @media (max-width: 700px) { .choix3-rang { grid-template-columns: 1fr auto; } .choix3-rang .lib { grid-column: 1 / -1; } }
 .liens-raison { display: block; flex-basis: 100%; font-size: 12.5px; color: var(--texte-3); padding-left: 2px; }
-/* v102 — Photo du produit (niveau 5) : lien de la page, image collée, traitement à la sauvegarde */
-.photo-prod { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--trait); display: grid; gap: 10px; }
-.photo-prod h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--texte-2); font-weight: 600; }
-.photo-prod select, .photo-prod input { width: 100%; background: var(--creux, var(--surface-2)); border: 1px solid var(--trait); border-radius: 6px; padding: 7px 10px; color: inherit; font: inherit; }
-.photo-prod .lien-rang { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.photo-prod label { font-size: 12.5px; color: var(--texte-2); display: block; margin-bottom: 4px; }
-.coller { min-height: 120px; border: 1.5px dashed var(--trait-fort); border-radius: 10px; display: grid; place-items: center; text-align: center; padding: 12px; color: var(--texte-3); font-size: 13.5px; cursor: pointer; outline: none; }
-.coller:focus-visible, .coller.actif { border-color: var(--etiquette); color: var(--texte-2); }
-.coller img { max-height: 160px; max-width: 100%; border-radius: 6px; background: #fff; }
-.photo-prod .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.photo-prod .etat-photo { font-size: 12.5px; color: var(--texte-3); }
+/* v119 — Petit bouton photo au bas à droite de la grande photo : charge la photo de ce qui est sélectionné
+   (niveau 3 générique, ou la marque choisie). Ctrl+V et glisser-déposer sur la photo font la même chose. */
+.cadre-photo { position: relative; }
+.btn-photo { position: absolute; right: -7px; bottom: -7px; z-index: 2; width: 30px; height: 30px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer; color: var(--texte); background: var(--surface-2);
+  border: 1px solid var(--trait-fort); box-shadow: 0 2px 6px var(--assise); }
+.btn-photo svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.btn-photo:hover { color: var(--etiquette); border-color: var(--etiquette); }
+.btn-photo:focus-visible { outline: 2px solid var(--etiquette); outline-offset: 2px; }
+.cadre-photo.actif .vignette.grande { box-shadow: 0 0 0 2px var(--etiquette); }
 .echelle .puce.prep { background: var(--alerte-doux); color: var(--alerte); border-color: transparent; }
 .champ.refus .pour-toi { font-size: 11.5px; color: var(--texte-3); margin-left: 6px; font-weight: 400; }
 .refus-rang { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
@@ -904,20 +903,11 @@ html[data-etat-fiche] #etatFiche { display: grid; place-items: center; position:
     <article class="carte photos" id="tuilePhotos">
       <header><h2>Photos</h2><span class="aide">du plus général au plus précis</span></header>
       <ul class="echelle" id="echelle"></ul>
-      <div class="photo-prod">
-        <h3>Photo du produit</h3>
-        <div><label for="ppVar">Produit (marque et format)</label><select id="ppVar"></select></div>
-        <div><label for="ppLien">Lien de la photo</label>
-          <div class="lien-rang"><input id="ppLien" type="url" placeholder="Page du produit (fabricant ou épicier)"><a class="btn" id="ppOuvrir" href="#" target="_blank" rel="noopener" title="Ouvrir la page dans un nouvel onglet">Ouvrir ↗</a></div></div>
-        <div class="coller" id="ppColler" tabindex="0" role="button" aria-label="Coller une image (Ctrl+V) ou choisir un fichier">Colle l’image ici (Ctrl+V)<br>ou clique pour choisir un fichier</div>
-        <input type="file" id="ppFichier" accept="image/*" hidden>
-        <div class="actions"><button class="btn" type="button" id="ppSauver" disabled>Sauvegarder</button><span class="etat-photo" id="ppEtat"></span></div>
-      </div>
     </article>
     <article class="carte">
       <header><h2>Fiche · produit</h2></header>
       <div class="titre-fiche">
-        <div class="cadre-photo"><div class="vignette grande"><img class="img-niv" id="imgTitre" alt="Photo du produit"></div></div>
+        <div class="cadre-photo" id="cadrePhoto"><div class="vignette grande"><img class="img-niv" id="imgTitre" alt="Photo du produit"></div><button type="button" class="btn-photo" id="btnPhoto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.6-2.2h6.8L17 8h3v11H4z"/><circle cx="12" cy="13.2" r="3.4"/></svg></button><input type="file" id="ppFichier" accept="image/*" hidden></div>
         <div>
           <h1 id="titre"><span class="num-niv" id="numGen" aria-hidden="true">3</span>Pomme</h1>
           <div class="sous" id="sousTitre"></div>
@@ -1237,29 +1227,31 @@ function rendVariantes() {
 function celluleImage(v) {
   const p = PRO[v.id];
   if (p && p.statut === 'approuvee') return `<div class="photo vide-img" title="Photo pro approuvée · ${p.ou}"><span>?</span></div>`; // maquette : pas de vraie photo ici
-  const img = SORTE_IMG[v.sorte];
+  const img = imgMarque(v.sorte);
   if (img) return `<div class="photo" title="Image de la sorte ${v.sorte}"><img class="img-niv" src="${img}" alt=""></div>`;
-  return `<div class="photo herite" title="Hérite de l'image du générique ${P.gen}"><img class="img-niv" src="${IMG.gen}" alt=""></div>`;
+  return `<div class="photo herite" title="Hérite de l'image du générique ${P.gen}"><img class="img-niv" src="${imgGen()}" alt=""></div>`;
 }
 const signales = () => Object.entries(PRO).filter(([, p]) => p.statut !== 'approuvee');
 
 function rendPhotos() {
-  const s = etat.choix, imgSorte = s && SORTE_IMG[s];
-  document.getElementById('imgTitre').src = imgSorte || IMG.gen;
-  const utilise = s ? 'sorte' : 'gen'; // une sorte choisie : c'est le niveau 4 qui est affiché, même sans sa propre image
+  // v119 — La grande photo et l'arborescence suivent la sélection : niveau 3 (générique) ou la marque choisie
+  const s = etat.choix, imgSel = s ? imgMarque(s) : '';
+  document.getElementById('imgTitre').src = imgSel || imgGen();
+  const utilise = s ? (P.reel ? 'marque' : 'sorte') : 'gen';
+  const prep = (cle) => (PHOTO_PROD[cle] ? '<span class="puce prep" title="L’ordinateur retire le fond, met au carré 512 sur blanc pur, puis l’enregistre">en préparation</span>' : '');
   const l = (cle, niv, nom, img, det) => `<li class="${utilise === cle ? 'utilisee' : ''}${cle === 'gen' ? ' cliquable' : ''}" ${cle === 'gen' ? `data-sorte="" role="button" tabindex="0" title="${s ? `Revenir à ${P.gen} (toutes)` : `${P.gen} (toutes)`}"` : ''}><span class="mini ${img ? '' : 'vide'}">${img ? `<img class="img-niv" src="${img}" alt="">` : '<span style="position:relative;z-index:1">?</span>'}</span>
-    <span class="niv-txt"><span class="etage"><span class="num-niv">${({ cat: 1, sc: 2, gen: 3, sorte: 4 })[cle]}</span>${niv}</span><span class="t">${nom}</span><span class="d">${det}</span></span>${utilise === cle ? '<span class="puce on">affichée</span>' : '<span></span>'}</li>`;
-  const pros = Object.values(PRO), nb = (st) => pros.filter((p) => p.statut === st).length;
+    <span class="niv-txt"><span class="etage"><span class="num-niv">${({ cat: 1, sc: 2, gen: 3, sorte: 4, marque: fusion() ? 4 : 5 })[cle]}</span>${niv}</span><span class="t">${nom}</span><span class="d">${det}</span></span>${utilise === cle ? '<span class="puce on">affichée</span>' : '<span></span>'}</li>`;
+  const formats = (m) => [...new Set(VAR.filter((x) => x.sorte === m).map((x) => x.fmt.replace(/ \(.*\)/, '')))].join(' · ');
   document.getElementById('echelle').innerHTML =
     l('cat', 'Catégorie', P.cat, IMG.cat, '') +
     l('sc', 'Sous-catégorie', P.sc, IMG.sc, '') +
-    l('gen', 'Générique', nomNiv3() + (fusion() && !sorteConnue() ? ' (sorte à préciser)' : ''), (fusion() && IMG.sorte) || IMG.gen, '') +
+    l('gen', 'Générique', nomNiv3() + (fusion() && !sorteConnue() ? ' (sorte à préciser)' : ''), imgGen(), prep('gen')) +
     (P.reel ? (sorteSeparee() ? l('sorte', P.sorteAttr, sorteTexte() || 'à préciser', IMG.sorte || '', '') : '')
-      : l('sorte', P.sorteNom, s || P.exSortes, s ? (imgSorte || '') : (IMG.gala || IMG.sorte || ''), s ? '' : '')) +
-    (() => { const p = PHOTO_PROD[document.getElementById('ppVar')?.value]; const v = VAR.find((x) => x.id === document.getElementById('ppVar')?.value);
-      return `<li><span class="mini ${p ? '' : 'vide'}">${p ? `<img class="img-niv" src="${p.img}" alt="">` : '<span style="position:relative;z-index:1">?</span>'}</span>
-      <span class="niv-txt"><span class="etage"><span class="num-niv">${fusion() ? 4 : 5}</span>Marque</span><span class="t">${v ? `${v.sorte}${v.marque !== '—' ? ' · ' + v.marque : ''}` : 'Emballage de la marque'}</span><span class="d">${v ? v.fmt : ''}</span></span>${p ? '<span class="puce prep" title="L’ordinateur retire le fond, met au carré 512 sur blanc pur, puis l’enregistre">en préparation</span>' : '<span></span>'}</li>`; })();
+      : l('sorte', P.sorteNom, s || P.exSortes, s ? imgSel : (IMG.gala || IMG.sorte || ''), s ? prep('m:' + s) : '')) +
+    (P.reel ? l('marque', 'Marque', s ? esc(s) : `${SORTES.length} marque${SORTES.length > 1 ? 's' : ''}`, imgSel, s ? (prep('m:' + s) || formats(s)) : '')
+      : '<li><span class="mini vide"><span style="position:relative;z-index:1">?</span></span><span class="niv-txt"><span class="etage"><span class="num-niv">5</span>Marque</span><span class="t">Emballage de la marque</span><span class="d"></span></span><span></span></li>');
   [...document.querySelectorAll('#echelle li')].forEach((li, i) => li.style.setProperty('--niv', i));
+  rendPhotoProd();
 }
 
 // v56 — Pastilles de bannière reprises du téléphone (app/ui.js) : style inspiré, pas le logo officiel
@@ -1507,49 +1499,34 @@ document.getElementById('carac').addEventListener('click', (e) => {
 });
 rendCarac();
 
-// v102 — Photo du produit (niveau 5). Le lien ouvre la page du fabricant ou de l'épicier (leurs images ne se téléchargent pas
-// automatiquement) ; tu colles l'image ; « Sauvegarder » l'envoie « à traiter » : l'ordinateur retire le fond, met au carré
-// 512 px sur blanc pur avec une retouche douce, puis l'enregistre à la bonne place. En attendant : « en préparation ».
-const PHOTO_PROD = {}; // id de variante → { img, lien }
-let ppImage = null;
-const ppVar = document.getElementById('ppVar');
-ppVar.innerHTML = VAR.map((v) => `<option value="${v.id}">${v.sorte}${v.marque !== '—' ? ' · ' + v.marque : ''} · ${v.fmt} · ${BAN[v.ban].nom}</option>`).join('');
+// v119 — Photo selon la sélection. Le petit bouton au bas de la grande photo (ou Ctrl+V, ou glisser l'image sur la photo)
+// charge la photo de ce qui est sélectionné : le niveau 3 (générique) ou la marque choisie dans « Classement · produit ».
+// Elle part « à traiter » : l'ordinateur retire le fond et la met au carré 512 sur blanc pur. En attendant : « en préparation ».
+const PHOTO_PROD = {}; // 'gen' ou 'm:<marque>' → { img }
+const cleSel = () => (etat.choix ? 'm:' + etat.choix : 'gen');
+function imgGen() { return PHOTO_PROD.gen?.img || (fusion() && IMG.sorte) || IMG.gen; }
+function imgMarque(m) { return PHOTO_PROD['m:' + m]?.img || SORTE_IMG[m] || ''; }
 function rendPhotoProd() {
-  const p = PHOTO_PROD[ppVar.value];
-  document.getElementById('ppLien').value = p?.lien || '';
-  ppImage = null;
-  document.getElementById('ppColler').innerHTML = p ? `<img src="${p.img}" alt="Photo collée">` : 'Colle l’image ici (Ctrl+V)<br>ou clique pour choisir un fichier';
-  document.getElementById('ppEtat').textContent = p ? 'En préparation : l’ordinateur retire le fond et la met à nos standards.' : '';
-  majSauver(); rendPhotos();
+  const t = `Charger la photo ${etat.choix ? `de la marque « ${etat.choix} »` : `du niveau 3 « ${nomNiv3()} »`} — ou Ctrl+V, ou glisse l’image sur la photo`;
+  const b = document.getElementById('btnPhoto'); b.title = t; b.setAttribute('aria-label', t);
 }
-function majSauver() { document.getElementById('ppSauver').disabled = !ppImage; }
 function prendreImage(fichier) {
   if (!fichier || !fichier.type.startsWith('image/')) return;
-  const r = new FileReader();
-  r.onload = () => { ppImage = r.result; document.getElementById('ppColler').innerHTML = `<img src="${ppImage}" alt="Image collée">`; document.getElementById('ppEtat').textContent = 'Image prête : clique Sauvegarder.'; majSauver(); };
+  const cle = cleSel(), r = new FileReader();
+  r.onload = () => { PHOTO_PROD[cle] = { img: r.result }; tout(); };
   r.readAsDataURL(fichier);
 }
-ppVar.addEventListener('change', rendPhotoProd);
-document.getElementById('ppLien').addEventListener('input', (e) => { document.getElementById('ppOuvrir').href = e.target.value || '#'; });
-document.getElementById('ppOuvrir').addEventListener('click', (e) => { if (!document.getElementById('ppLien').value) e.preventDefault(); });
-const zone = document.getElementById('ppColler');
-zone.addEventListener('click', () => document.getElementById('ppFichier').click());
-zone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); document.getElementById('ppFichier').click(); } });
-document.getElementById('ppFichier').addEventListener('change', (e) => prendreImage(e.target.files[0]));
+const cadre = document.getElementById('cadrePhoto'), fichierPhoto = document.getElementById('ppFichier');
+document.getElementById('btnPhoto').addEventListener('click', () => { fichierPhoto.value = ''; fichierPhoto.click(); });
+fichierPhoto.addEventListener('change', (e) => prendreImage(e.target.files[0]));
 document.addEventListener('paste', (e) => {
-  if (e.target.closest?.('input:not(#ppFichier), textarea')) return;
+  if (e.target.closest?.('input, textarea')) return;
   const f = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'))?.getAsFile();
-  if (f) { e.preventDefault(); zone.classList.add('actif'); setTimeout(() => zone.classList.remove('actif'), 600); prendreImage(f); }
+  if (f) { e.preventDefault(); cadre.classList.add('actif'); setTimeout(() => cadre.classList.remove('actif'), 600); prendreImage(f); }
 });
-zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('actif'); });
-zone.addEventListener('dragleave', () => zone.classList.remove('actif'));
-zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('actif'); prendreImage(e.dataTransfer.files[0]); });
-document.getElementById('ppSauver').addEventListener('click', () => {
-  if (!ppImage) return;
-  PHOTO_PROD[ppVar.value] = { img: ppImage, lien: document.getElementById('ppLien').value.trim() };
-  rendPhotoProd();
-});
-rendPhotoProd();
+cadre.addEventListener('dragover', (e) => { e.preventDefault(); cadre.classList.add('actif'); });
+cadre.addEventListener('dragleave', () => cadre.classList.remove('actif'));
+cadre.addEventListener('drop', (e) => { e.preventDefault(); cadre.classList.remove('actif'); prendreImage(e.dataTransfer.files[0]); });
 
 function choisir(sorte) { etat.choix = sorte || null; tout(); }
 
@@ -1894,7 +1871,6 @@ function chargerProduit(cle) {
   Object.assign(etat, { choix: null, forces: {}, refusees: new Set(), ouvertes: new Set(), sortesOuvertes: new Set() });
   SORTES.splice(0, SORTES.length, ...new Set(VAR.map((v) => v.sorte)));
   carac.clear();
-  ppVar.innerHTML = VAR.map((v) => `<option value="${v.id}">${v.sorte} · ${v.fmt} · ${BAN[v.ban].nom}</option>`).join('');
   vider(PHOTO_PROD);
   document.getElementById('choixProduit').value = cle;
   rendRayon(); rendAlias(); rendRefus(); rendLiens(); rendCarac(); rendPhotoProd(); fermerHistorique(); tout();
@@ -1933,5 +1909,5 @@ window.addEventListener('resize', ajusterEchelle);
   }, true);
 })(); // style retenu par Chris (v11)
 </script>
-<script type="module" src="fiche-charger.js?v=epicerie-v105"></script>
-<!-- Construit depuis journal/maquettes/fiche-produit-v118.html par console/construire_fiche.py -->
+<script type="module" src="fiche-charger.js?v=epicerie-v168"></script>
+<!-- Construit depuis journal/maquettes/fiche-produit-v119.html par console/construire_fiche.py -->
